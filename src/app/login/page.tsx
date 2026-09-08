@@ -103,6 +103,12 @@ export default function LoginPage() {
             >
               {loading ? "確認中…" : "ログイン"}
             </button>
+            <a
+              href="/enroll"
+              className="block text-center text-xs text-muted underline mt-4"
+            >
+              はじめての方・新しく入会される方はこちら
+            </a>
           </form>
         ) : (
           <form onSubmit={handleHonbuLogin} className="space-y-4">

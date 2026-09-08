@@ -59,6 +59,35 @@ service cloud.firestore {
       allow update: if isSelf(memberId)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['email', 'phone', 'address', 'rsvp']);
+
+      // 公開の入会フォーム（/enroll、未ログイン）からの新規作成のみ許可。
+      // 許可される値をかなり狭く固定することで、なりすまし作成や項目の不正混入を防ぐ。
+      // 注：Cloud Functionsが使えるようになったら、スパム防止のためこちらの経路を
+      //     コールアブル関数（Callable Functions）に置き換えることを推奨。
+      allow create: if request.resource.data.status == '在籍'
+        && request.resource.data.groupCategory == '本部稽古'
+        && request.resource.data.license == '入門'
+        && request.resource.data.paymentStatus == '未納'
+        && request.resource.data.rsvp == '未回答'
+        && request.resource.data.group in ['名月会', 'Gマダムの茶の湯講座']
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.email is string && request.resource.data.email.size() > 0
+        && request.resource.data.keys().hasOnly([
+             'id', 'name', 'nameKana', 'birthDate', 'guardian', 'guardianKana', 'grade',
+             'occupation', 'otherLessons', 'healthNotes', 'emergencyContact', 'expectations',
+             'group', 'groupCategory', 'license', 'joinDate', 'status', 'paymentMethod',
+             'paymentStatus', 'rsvp', 'email', 'phone', 'address', 'createdAt'
+           ]);
+    }
+
+    // ---- counters（会員番号の自動採番。/enroll から更新される） ----
+    match /counters/{counterId} {
+      allow read: if true;
+      // 初回作成：合意済みの開始値からのみ許可
+      allow create: if counterId == 'members' && request.resource.data.next == 30000071;
+      // 更新：必ず1つずつ進める（飛び番・巻き戻しを禁止）
+      allow update: if counterId == 'members'
+        && request.resource.data.next == resource.data.next + 1;
     }
 
     // ---- staff（スタッフ） ----

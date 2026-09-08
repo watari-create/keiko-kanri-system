@@ -10,8 +10,17 @@ export type GroupCategory = "宗徧流稽古" | "本部稽古" | "UCI";
 export interface Member {
   id: string; // Firestore document ID = 会員番号
   name: string;
+  nameKana?: string; // 氏名（フリガナ）
   sotomei?: string; // 宗名
+  birthDate?: string; // YYYY-MM-DD
   guardian?: string; // 保護者名（未成年会員のみ）
+  guardianKana?: string;
+  grade?: string; // 学年（未成年会員のみ）
+  occupation?: string; // ご職業
+  otherLessons?: string; // 他のお稽古事
+  healthNotes?: string; // アレルギーなど健康上の留意点
+  emergencyContact?: string;
+  expectations?: string; // お稽古に期待すること（入会時アンケート）
   group: string; // 所属する会（例：名月会、雪月花）
   groupCategory: GroupCategory;
   license?: string; // 許状段階
