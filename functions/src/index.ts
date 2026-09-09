@@ -242,6 +242,48 @@ export const onLeaveRequestCreated = onDocumentCreated(
 );
 
 /**
+ * members に新規ドキュメントが作成されたら（/enroll ページからの入会申し込み）、
+ * Slackに通知する（入門セット準備の合図）。承認フローは無く、通知のみ。
+ */
+export const onMemberCreated = onDocumentCreated(
+  { document: "members/{memberId}", secrets: [slackBotToken] },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+
+    const token = slackBotToken.value();
+    if (!token) {
+      console.warn("SLACK_BOT_TOKEN が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+    const channel = slackHqChannel.value();
+    if (!channel) {
+      console.warn("SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const text =
+      `新しい入会申込がありました\n` +
+      `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
+      `会員No：${event.params.memberId}\n` +
+      `入門セットをご用意ください。`;
+
+    try {
+      await postSlackMessage(token, channel, text);
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
+    }
+
+    await db.collection("notifications").add({
+      kind: "new_enrollment",
+      message: `${data.name ?? ""}様が入会しました。`,
+      createdAt: new Date().toISOString(),
+      read: false,
+    });
+  }
+);
+
+/**
  * Slack Events API受信エンドポイント。
  * 「請求書発行依頼」のSlackメッセージに✔️（heavy_check_mark）のリアクションがつくと、
  * 対応するlicenseRequestsのステータスを自動的に「請求書発行済」に進める。
