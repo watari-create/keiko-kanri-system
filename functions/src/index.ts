@@ -97,7 +97,7 @@ export const onLeaveRequestApproved = onDocumentUpdated(
  * members 側の許状段階を更新し、通知ログに記録する。
  */
 export const onLicenseIssued = onDocumentUpdated(
-  "licenseRequests/{requestId}",
+  { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
   async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
@@ -110,6 +110,32 @@ export const onLicenseIssued = onDocumentUpdated(
         createdAt: new Date().toISOString(),
         read: false,
       });
+
+      // 講師が生徒に許状をお渡しできたら✔️のリアクションで「お渡し済」に進められるよう、
+      // 本部稽古boチャンネルに通知する（下のslackEventsで突き合わせに使う）。
+      const token = slackBotToken.value();
+      const channel = slackHqChannel.value();
+      if (token && channel) {
+        const text =
+          `許状が発行されました\n` +
+          `会員：${after.memberName}様\n` +
+          `許状：${after.licenseName}\n` +
+          `生徒様にお渡しできたら、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
+        try {
+          const posted = await postSlackMessage(token, channel, text);
+          if (posted && event.data) {
+            await event.data.after.ref.update({
+              slackTs: posted.ts,
+              slackChannel: posted.channel,
+            });
+            console.log(`Slack通知を送信しました ts=${posted.ts}`);
+          }
+        } catch (err) {
+          console.error("Slack通知の送信に失敗しました", err);
+        }
+      } else {
+        console.warn("SLACK_BOT_TOKEN または SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      }
     }
   }
 );
@@ -353,6 +379,12 @@ export const slackEvents = onRequest(
               updatedAt: new Date().toISOString(),
             });
             console.log(`✔️リアクションによりステータスを更新しました requestId=${requestDoc.id}`);
+          } else if (requestDoc.data().status === "発行済") {
+            await requestDoc.ref.update({
+              status: "お渡し済",
+              updatedAt: new Date().toISOString(),
+            });
+            console.log(`✔️リアクションにより許状のお渡しステータスを更新しました requestId=${requestDoc.id}`);
           }
         }
 
