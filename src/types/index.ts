@@ -60,6 +60,18 @@ export type LicenseStatus =
   | "完了"
   | "取消";
 
+// 管理画面・講師画面で許状申請のステータスバッジに表示する絵文字。
+export const LICENSE_STATUS_EMOJI: Record<LicenseStatus, string> = {
+  "受付": "📨",
+  "請求書発行依頼": "📄",
+  "請求書発行済": "💰",
+  "発行手続き中": "✍️",
+  "発行済": "📜",
+  "お渡し済": "🤝",
+  "完了": "✅",
+  "取消": "❌",
+};
+
 export interface LicenseRequest {
   id: string;
   memberId: string;

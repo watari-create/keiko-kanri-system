@@ -26,6 +26,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { LICENSE_STATUS_EMOJI } from "@/types";
 import type {
   Member,
   LicenseRequest,
@@ -403,7 +404,7 @@ export default function AdminPage() {
                       {r.memberName}（{r.group}）
                     </div>
                     <div className="text-xs text-muted">
-                      {r.licenseName} 申請 ・ {r.status}
+                      {r.licenseName} 申請 ・ {LICENSE_STATUS_EMOJI[r.status]} {r.status}
                     </div>
                   </button>
                 ))}
@@ -601,7 +602,7 @@ export default function AdminPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
-                        {r.status}
+                        {LICENSE_STATUS_EMOJI[r.status]} {r.status}
                       </span>
                       {LICENSE_STAGES.indexOf(r.status) > 0 && (
                         <button

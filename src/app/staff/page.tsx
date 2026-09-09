@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES } from "@/lib/licenseFees";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { LICENSE_STATUS_EMOJI } from "@/types";
 import type { StaffAccount, Member, LicenseRequest } from "@/types";
 
 export default function StaffPage() {
@@ -234,7 +235,7 @@ export default function StaffPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
-                      {r.status}
+                      {LICENSE_STATUS_EMOJI[r.status]} {r.status}
                     </span>
                     {r.status === "発行済" && (
                       <button
