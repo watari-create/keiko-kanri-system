@@ -494,6 +494,82 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
   return { dates };
 });
 
+// G1（Gマダムの茶の湯講座）で毎回発送する道具のデフォルト一覧。
+const G1_SHIPPING_ITEMS = ["お軸", "花入", "主茶盌", "菓子器"];
+
+// 荷物発送リマインダーでメンションするSlackユーザーID。
+const G1_SHIPPING_MENTION_USER_ID = "UAK415FF0";
+
+// JST（Asia/Tokyo）での「今日」を "YYYY-MM-DD" で返す。
+// Cloud FunctionsのランタイムはOSのタイムゾーンがUTCのことが多く、
+// new Date().getDate() 等をそのまま使うと日付がずれるため、Intlで明示的にJSTへ変換する。
+function todayKeyJST(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${d}`;
+}
+
+// "YYYY-MM-DD" の日付キーに days 日を加算した日付キーを返す（暦日だけの単純な加算）。
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * 毎朝、G1（Gマダムの茶の湯講座）の「次回のお稽古」日（meta/nextLessonDatesを参照）が
+ * ちょうど1週間後になったら、荷物発送のリマインダーを本部稽古boチャンネルに送る。
+ * 同じお稽古日について二重送信しないよう、meta/g1ShippingReminder に送信済みの
+ * お稽古日を記録しておく。
+ */
+export const checkG1ShippingReminder = onSchedule(
+  { schedule: "every day 09:00", timeZone: "Asia/Tokyo", secrets: [slackBotToken] },
+  async () => {
+    const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
+    const info = nextLessonSnap.data()?.dates?.["Gマダムの茶の湯講座"] as
+      | { date: string; title: string }
+      | undefined;
+    if (!info?.date) return;
+
+    const lessonDateKey = info.date.slice(0, 10);
+    const targetDateKey = addDaysToDateKey(todayKeyJST(), 7);
+    if (lessonDateKey !== targetDateKey) return;
+
+    const reminderRef = db.doc("meta/g1ShippingReminder");
+    const reminderSnap = await reminderRef.get();
+    if (reminderSnap.data()?.notifiedForDate === lessonDateKey) return; // 送信済み
+
+    const token = slackBotToken.value();
+    const channel = slackHqChannel.value();
+    if (!token || !channel) {
+      console.warn("SLACK_BOT_TOKEN または SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const text =
+      `<@${G1_SHIPPING_MENTION_USER_ID}>\n` +
+      `【G1 荷物発送リマインダー】\n` +
+      `次回のお稽古（${lessonDateKey}）まで1週間です。荷物の発送をお願いします。\n` +
+      `送るもの：${G1_SHIPPING_ITEMS.join("・")}`;
+
+    try {
+      await postSlackMessage(token, channel, text);
+      await reminderRef.set({ notifiedForDate: lessonDateKey, notifiedAt: new Date().toISOString() });
+      console.log(`G1荷物発送リマインダーを送信しました lessonDate=${lessonDateKey}`);
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
+    }
+  }
+);
+
 /**
  * Square Webhook受信エンドポイント（雛形）。
  * 実際の導入時は、Square側のWebhook署名検証を必ず行うこと。
