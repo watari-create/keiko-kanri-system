@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
-import type { Member, LeaveRequestType, Rsvp } from "@/types";
+import { currentMonthKey } from "@/lib/fiscalMonths";
+import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
   const { role, memberId, loading } = useAuth();
@@ -44,9 +45,18 @@ export default function MyPage() {
     setSavedMsg("連絡先情報を更新しました。");
   }
 
-  async function updateRsvp(value: Rsvp) {
+  async function updateRsvp(value: "出席" | "欠席") {
     if (!memberId) return;
-    await updateDoc(doc(db, "members", memberId), { rsvp: value });
+    const monthKey = currentMonthKey();
+    await updateDoc(doc(db, "members", memberId), {
+      rsvp: value,
+      [`attendance.${monthKey}`]: value,
+    });
+    setMember((prev) =>
+      prev
+        ? { ...prev, rsvp: value, attendance: { ...prev.attendance, [monthKey]: value } }
+        : prev
+    );
     setSavedMsg(`次回のお稽古を「${value}」で登録しました。`);
   }
 

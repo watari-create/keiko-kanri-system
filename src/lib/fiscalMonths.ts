@@ -18,3 +18,10 @@ export function monthLabel(monthKey: string): string {
   const m = parseInt(parts[1] ?? "0", 10);
   return `${m}月`;
 }
+
+// 出席簿のキー形式（"YYYY-MM"）で、今月のキーを返す。
+// マイページの出欠登録（②）が、講師・世話人・管理画面が見る出席簿（①③）と
+// 同じフィールドに書き込むために使う。
+export function currentMonthKey(base: Date = new Date()): string {
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
+}

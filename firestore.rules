@@ -55,10 +55,11 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['status', 'attendance', 'paymentStatus', 'paymentMethod']);
 
-      // 本人は連絡先とRSVPのみ編集可（許状段階やステータスは変更不可）
+      // 本人は連絡先とRSVP・出欠のみ編集可（許状段階やステータスは変更不可）
+      // 出欠は、マイページの「出欠登録」ボタンが今月分の出席簿セルを直接更新するために必要。
       allow update: if isSelf(memberId)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['email', 'phone', 'address', 'rsvp']);
+             .hasOnly(['email', 'phone', 'address', 'rsvp', 'attendance']);
 
       // 講師は自分の担当する会の会員の出席のみ編集可
       allow update: if isTeacherFor(resource.data.group)
