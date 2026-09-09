@@ -2,12 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
-// 本部用の管理画面（骨組み）。
-// モックアップの「管理画面」にあった全機能のうち、まずは
-// ①名簿の閲覧・ステータス変更 ②許状申請の一覧・ステータス進行 の2つをFirestore連携で実装している。
+// 本部用の管理画面。
+// ①名簿の閲覧・編集 ②許状申請の進行 ③退会・休会・復会申請の承認 ④新着通知（申請中の案件一覧）
+// をFirestore連携で実装している。
 // 出席簿・入金確認・スタッフ管理などは、同じパターン（Firestoreのコレクションを読み書きするだけ）で追加できる。
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -19,7 +19,14 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
-import type { Member, LicenseRequest, LicenseStatus } from "@/types";
+import type {
+  Member,
+  LicenseRequest,
+  LicenseStatus,
+  LeaveRequest,
+  PaymentMethod,
+  Rsvp,
+} from "@/types";
 
 const GROUPS = ["名月会", "茶道教室", "Gマダムの茶の湯講座"];
 const LICENSE_STAGES: LicenseStatus[] = [
@@ -30,6 +37,19 @@ const LICENSE_STAGES: LicenseStatus[] = [
   "お渡し済",
   "完了",
 ];
+const LEAVE_STATUS_LABEL: Record<LeaveRequest["status"], string> = {
+  pending: "申請中",
+  approved: "承認済",
+  rejected: "却下",
+};
+
+// 会員詳細モーダルで編集する項目。group / groupCategory / id は表示のみ（変更不可）。
+type MemberDraft = Omit<Member, "id" | "group" | "groupCategory">;
+
+function toDraft(m: Member): MemberDraft {
+  const { id, group, groupCategory, ...rest } = m;
+  return rest;
+}
 
 export default function AdminPage() {
   const { role, loading } = useAuth();
@@ -37,13 +57,24 @@ export default function AdminPage() {
   const [group, setGroup] = useState(GROUPS[0]);
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+
+  // 通知バッジ用：グループを問わず、対応が必要な申請をすべて購読する
+  const [allLicenseRequests, setAllLicenseRequests] = useState<LicenseRequest[]>([]);
+  const [allLeaveRequests, setAllLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  // 会員詳細・編集モーダル
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [draft, setDraft] = useState<MemberDraft | null>(null);
+  const [savingDetail, setSavingDetail] = useState(false);
 
   // 権限チェック：本部以外はログインページへ
   useEffect(() => {
     if (!loading && role !== "honbu") router.replace("/login");
   }, [loading, role, router]);
 
-  // 会員一覧をリアルタイム購読
+  // 会員一覧をリアルタイム購読（選択中の会）
   useEffect(() => {
     const q = query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
@@ -51,7 +82,7 @@ export default function AdminPage() {
     });
   }, [group]);
 
-  // 許状申請をリアルタイム購読（完了以外）
+  // 許状申請をリアルタイム購読（選択中の会）
   useEffect(() => {
     const q = query(
       collection(db, "licenseRequests"),
@@ -62,8 +93,47 @@ export default function AdminPage() {
     });
   }, [group]);
 
-  async function updateMemberStatus(memberId: string, status: Member["status"]) {
-    await updateDoc(doc(db, "members", memberId), { status });
+  // 退会・休会・復会申請をリアルタイム購読（選択中の会）
+  useEffect(() => {
+    const q = query(
+      collection(db, "leaveRequests"),
+      where("group", "==", group)
+    );
+    return onSnapshot(q, (snap) => {
+      setLeaveRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeaveRequest)));
+    });
+  }, [group]);
+
+  // 通知バッジ：全ての会をまたいで、対応中の許状申請・退会等申請を購読
+  useEffect(() => {
+    const unsubLicense = onSnapshot(collection(db, "licenseRequests"), (snap) => {
+      setAllLicenseRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
+    });
+    const unsubLeave = onSnapshot(collection(db, "leaveRequests"), (snap) => {
+      setAllLeaveRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeaveRequest)));
+    });
+    return () => {
+      unsubLicense();
+      unsubLeave();
+    };
+  }, []);
+
+  const pendingLicense = useMemo(
+    () => allLicenseRequests.filter((r) => r.status !== "完了"),
+    [allLicenseRequests]
+  );
+  const pendingLeave = useMemo(
+    () => allLeaveRequests.filter((r) => r.status === "pending"),
+    [allLeaveRequests]
+  );
+  const notificationCount = pendingLicense.length + pendingLeave.length;
+
+  async function updateMemberField<K extends keyof Member>(
+    memberId: string,
+    field: K,
+    value: Member[K]
+  ) {
+    await updateDoc(doc(db, "members", memberId), { [field]: value });
   }
 
   async function advanceLicense(req: LicenseRequest) {
@@ -77,13 +147,100 @@ export default function AdminPage() {
     // 許状段階の反映・通知はCloud Functions（onLicenseIssued）が自動で行う
   }
 
+  async function decideLeave(req: LeaveRequest, decision: "approved" | "rejected") {
+    await updateDoc(doc(db, "leaveRequests", req.id), {
+      status: decision,
+      approvedAt: new Date().toISOString(),
+    });
+    // 承認時の会員ステータス反映はCloud Functions（onLeaveRequestApproved）が自動で行う
+  }
+
+  function openMemberDetail(m: Member) {
+    setSelectedMember(m);
+    setDraft(toDraft(m));
+  }
+
+  function closeMemberDetail() {
+    setSelectedMember(null);
+    setDraft(null);
+  }
+
+  async function saveMemberDetail() {
+    if (!selectedMember || !draft) return;
+    setSavingDetail(true);
+    try {
+      await updateDoc(doc(db, "members", selectedMember.id), { ...draft });
+      closeMemberDetail();
+    } finally {
+      setSavingDetail(false);
+    }
+  }
+
+  function jumpToNotification(g: string) {
+    setGroup(g);
+    setShowNotifications(false);
+  }
+
   if (loading || role !== "honbu") return <div className="p-8 text-muted">確認中…</div>;
 
-  const activeRequests = requests.filter((r) => r.status !== "完了");
-
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <h1 className="text-xl font-bold text-matcha-deep mb-4">管理画面</h1>
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-bold text-matcha-deep">管理画面</h1>
+
+        {/* 新着通知 */}
+        <div className="relative">
+          <button
+            className="flex items-center gap-1.5 text-xs bg-paper border border-line rounded-full px-3 py-1.5"
+            onClick={() => setShowNotifications((v) => !v)}
+          >
+            <span>🔔 新着</span>
+            {notificationCount > 0 && (
+              <span className="bg-hanko text-white rounded-full px-1.5 py-0.5 text-[10px] leading-none">
+                {notificationCount}
+              </span>
+            )}
+          </button>
+
+          {showNotifications && (
+            <div className="absolute right-0 mt-2 w-80 bg-paper border border-line rounded-md shadow-lg z-20 max-h-96 overflow-y-auto">
+              {notificationCount === 0 && (
+                <p className="text-xs text-muted text-center py-6">新着の申請はありません</p>
+              )}
+              {pendingLicense.map((r) => (
+                <button
+                  key={r.id}
+                  className="w-full text-left px-4 py-3 border-b border-line hover:bg-matcha-pale/40"
+                  onClick={() => jumpToNotification(r.group)}
+                >
+                  <div className="text-xs text-muted">許状申請</div>
+                  <div className="text-sm font-semibold">
+                    {r.memberName}（{r.group}）
+                  </div>
+                  <div className="text-xs text-muted">
+                    {r.licenseName} 申請 ・ {r.status}
+                  </div>
+                </button>
+              ))}
+              {pendingLeave.map((r) => (
+                <button
+                  key={r.id}
+                  className="w-full text-left px-4 py-3 border-b border-line hover:bg-matcha-pale/40"
+                  onClick={() => jumpToNotification(r.group)}
+                >
+                  <div className="text-xs text-muted">退会・休会・復会申請</div>
+                  <div className="text-sm font-semibold">
+                    {r.memberName}（{r.group}）
+                  </div>
+                  <div className="text-xs text-muted">
+                    {r.type}申請 ・ {r.reason || "理由の記載なし"}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <select
         className="border border-line rounded px-3 py-2 mb-6 text-sm"
@@ -95,27 +252,60 @@ export default function AdminPage() {
         ))}
       </select>
 
-      <section className="bg-paper border border-line rounded-md p-5 mb-6">
-        <h2 className="font-bold mb-3">会員名簿</h2>
-        <table className="w-full text-sm">
+      <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
+        <h2 className="font-bold mb-1">会員名簿</h2>
+        <p className="text-xs text-muted mb-3">氏名をクリックすると詳細の閲覧・編集ができます</p>
+        <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="text-left text-muted border-b border-line">
-              <th className="py-2">氏名</th>
-              <th>許状段階</th>
+              <th className="py-2 pr-3">会員番号</th>
+              <th className="pr-3">氏名</th>
+              <th className="pr-3">保護者名</th>
+              <th className="pr-3">許状段階</th>
+              <th className="pr-3">入会日</th>
+              <th className="pr-3">入金状況</th>
+              <th className="pr-3">次回請求日</th>
+              <th className="pr-3">支払い方法</th>
+              <th className="pr-3">次回出欠</th>
               <th>ステータス</th>
             </tr>
           </thead>
           <tbody>
             {members.map((m) => (
               <tr key={m.id} className="border-b border-line">
-                <td className="py-2">{m.name}</td>
-                <td>{m.license ?? "—"}</td>
+                <td className="py-2 pr-3 text-muted">{m.id}</td>
+                <td className="pr-3">
+                  <button
+                    className="font-semibold text-matcha-deep underline decoration-dotted underline-offset-2"
+                    onClick={() => openMemberDetail(m)}
+                  >
+                    {m.name}
+                  </button>
+                </td>
+                <td className="pr-3">{m.guardian ?? "—"}</td>
+                <td className="pr-3">{m.license ?? "—"}</td>
+                <td className="pr-3">{m.joinDate}</td>
+                <td className="pr-3">{m.paymentStatus ?? "—"}</td>
+                <td className="pr-3">{m.nextBillingDate ?? "—"}</td>
+                <td className="pr-3">
+                  <select
+                    className="border border-line rounded px-2 py-1 text-xs"
+                    value={m.paymentMethod ?? "月謝"}
+                    onChange={(e) =>
+                      updateMemberField(m.id, "paymentMethod", e.target.value as PaymentMethod)
+                    }
+                  >
+                    <option>月謝</option>
+                    <option>都度払い</option>
+                  </select>
+                </td>
+                <td className="pr-3">{m.rsvp ?? "未回答"}</td>
                 <td>
                   <select
                     className="border border-line rounded px-2 py-1 text-xs"
                     value={m.status}
                     onChange={(e) =>
-                      updateMemberStatus(m.id, e.target.value as Member["status"])
+                      updateMemberField(m.id, "status", e.target.value as Member["status"])
                     }
                   >
                     <option>在籍</option>
@@ -127,7 +317,7 @@ export default function AdminPage() {
             ))}
             {members.length === 0 && (
               <tr>
-                <td colSpan={3} className="py-4 text-center text-muted">
+                <td colSpan={10} className="py-4 text-center text-muted">
                   この会の会員はまだ登録されていません
                 </td>
               </tr>
@@ -136,41 +326,335 @@ export default function AdminPage() {
         </table>
       </section>
 
-      <section className="bg-paper border border-line rounded-md p-5">
-        <h2 className="font-bold mb-1">許状申請（{activeRequests.length}件 対応中）</h2>
+      <section className="bg-paper border border-line rounded-md p-5 mb-6">
+        <h2 className="font-bold mb-1">
+          許状申請（{requests.filter((r) => r.status !== "完了").length}件 対応中）
+        </h2>
         <p className="text-xs text-muted mb-3">
           受付 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
         </p>
         <div className="space-y-3">
-          {activeRequests.map((r) => (
-            <div
-              key={r.id}
-              className="flex items-center justify-between border-b border-line pb-3"
-            >
-              <div>
-                <div className="font-semibold text-sm">{r.memberName}</div>
-                <div className="text-xs text-muted">
-                  {r.licenseName}　合計：¥{r.fee.toLocaleString()}
+          {requests
+            .filter((r) => r.status !== "完了")
+            .map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between border-b border-line pb-3"
+              >
+                <div>
+                  <div className="font-semibold text-sm">{r.memberName}</div>
+                  <div className="text-xs text-muted">
+                    {r.licenseName}　合計：¥{r.fee.toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
+                    {r.status}
+                  </span>
+                  <button
+                    className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
+                    onClick={() => advanceLicense(r)}
+                  >
+                    次に進める
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
-                  {r.status}
-                </span>
-                <button
-                  className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
-                  onClick={() => advanceLicense(r)}
-                >
-                  次に進める
-                </button>
-              </div>
-            </div>
-          ))}
-          {activeRequests.length === 0 && (
+            ))}
+          {requests.filter((r) => r.status !== "完了").length === 0 && (
             <p className="text-sm text-muted text-center py-4">対応中の申請はありません</p>
           )}
         </div>
       </section>
+
+      <section className="bg-paper border border-line rounded-md p-5">
+        <h2 className="font-bold mb-1">
+          退会・休会・復会申請（
+          {leaveRequests.filter((r) => r.status === "pending").length}件 対応中）
+        </h2>
+        <div className="space-y-3">
+          {leaveRequests
+            .filter((r) => r.status === "pending")
+            .map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between border-b border-line pb-3"
+              >
+                <div>
+                  <div className="font-semibold text-sm">
+                    {r.memberName}
+                    <span className="text-xs font-normal text-muted">{r.type}申請</span>
+                  </div>
+                  <div className="text-xs text-muted">{r.reason || "理由の記載なし"}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
+                    {LEAVE_STATUS_LABEL[r.status]}
+                  </span>
+                  <button
+                    className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
+                    onClick={() => decideLeave(r, "approved")}
+                  >
+                    承認
+                  </button>
+                  <button
+                    className="text-xs border border-line text-muted rounded px-3 py-1.5"
+                    onClick={() => decideLeave(r, "rejected")}
+                  >
+                    却下
+                  </button>
+                </div>
+              </div>
+            ))}
+          {leaveRequests.filter((r) => r.status === "pending").length === 0 && (
+            <p className="text-sm text-muted text-center py-4">対応中の申請はありません</p>
+          )}
+        </div>
+      </section>
+
+      {/* 会員詳細・編集モーダル */}
+      {selectedMember && draft && (
+        <div
+          className="fixed inset-0 bg-ink/40 flex items-center justify-center z-30 p-4"
+          onClick={closeMemberDetail}
+        >
+          <div
+            className="bg-paper rounded-md max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-matcha-deep">{selectedMember.name}</h3>
+                <p className="text-xs text-muted">
+                  会員番号：{selectedMember.id}　所属：{selectedMember.group}
+                </p>
+              </div>
+              <button className="text-muted text-sm" onClick={closeMemberDetail}>
+                閉じる ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <Field label="氏名">
+                <input
+                  className="input"
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </Field>
+              <Field label="氏名（フリガナ）">
+                <input
+                  className="input"
+                  value={draft.nameKana ?? ""}
+                  onChange={(e) => setDraft({ ...draft, nameKana: e.target.value })}
+                />
+              </Field>
+              <Field label="宗名">
+                <input
+                  className="input"
+                  value={draft.sotomei ?? ""}
+                  onChange={(e) => setDraft({ ...draft, sotomei: e.target.value })}
+                />
+              </Field>
+              <Field label="生年月日">
+                <input
+                  type="date"
+                  className="input"
+                  value={draft.birthDate ?? ""}
+                  onChange={(e) => setDraft({ ...draft, birthDate: e.target.value })}
+                />
+              </Field>
+              <Field label="保護者名">
+                <input
+                  className="input"
+                  value={draft.guardian ?? ""}
+                  onChange={(e) => setDraft({ ...draft, guardian: e.target.value })}
+                />
+              </Field>
+              <Field label="学年">
+                <input
+                  className="input"
+                  value={draft.grade ?? ""}
+                  onChange={(e) => setDraft({ ...draft, grade: e.target.value })}
+                />
+              </Field>
+              <Field label="許状段階">
+                <input
+                  className="input"
+                  value={draft.license ?? ""}
+                  onChange={(e) => setDraft({ ...draft, license: e.target.value })}
+                />
+              </Field>
+              <Field label="入会日">
+                <input
+                  type="date"
+                  className="input"
+                  value={draft.joinDate}
+                  onChange={(e) => setDraft({ ...draft, joinDate: e.target.value })}
+                />
+              </Field>
+              <Field label="ステータス">
+                <select
+                  className="input"
+                  value={draft.status}
+                  onChange={(e) =>
+                    setDraft({ ...draft, status: e.target.value as Member["status"] })
+                  }
+                >
+                  <option>在籍</option>
+                  <option>休会</option>
+                  <option>退会</option>
+                </select>
+              </Field>
+              <Field label="支払い方法">
+                <select
+                  className="input"
+                  value={draft.paymentMethod ?? "月謝"}
+                  onChange={(e) =>
+                    setDraft({ ...draft, paymentMethod: e.target.value as PaymentMethod })
+                  }
+                >
+                  <option>月謝</option>
+                  <option>都度払い</option>
+                </select>
+              </Field>
+              <Field label="入金状況">
+                <select
+                  className="input"
+                  value={draft.paymentStatus ?? "未納"}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      paymentStatus: e.target.value as "済" | "未納",
+                    })
+                  }
+                >
+                  <option>済</option>
+                  <option>未納</option>
+                </select>
+              </Field>
+              <Field label="次回請求日">
+                <input
+                  type="date"
+                  className="input"
+                  value={draft.nextBillingDate ?? ""}
+                  onChange={(e) => setDraft({ ...draft, nextBillingDate: e.target.value })}
+                />
+              </Field>
+              <Field label="次回出欠">
+                <select
+                  className="input"
+                  value={draft.rsvp ?? "未回答"}
+                  onChange={(e) => setDraft({ ...draft, rsvp: e.target.value as Rsvp })}
+                >
+                  <option>出席</option>
+                  <option>欠席</option>
+                  <option>未回答</option>
+                </select>
+              </Field>
+              <Field label="メールアドレス">
+                <input
+                  className="input"
+                  value={draft.email}
+                  onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+                />
+              </Field>
+              <Field label="電話番号">
+                <input
+                  className="input"
+                  value={draft.phone ?? ""}
+                  onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+                />
+              </Field>
+              <Field label="ご住所" full>
+                <input
+                  className="input"
+                  value={draft.address ?? ""}
+                  onChange={(e) => setDraft({ ...draft, address: e.target.value })}
+                />
+              </Field>
+              <Field label="ご職業">
+                <input
+                  className="input"
+                  value={draft.occupation ?? ""}
+                  onChange={(e) => setDraft({ ...draft, occupation: e.target.value })}
+                />
+              </Field>
+              <Field label="他のお稽古事">
+                <input
+                  className="input"
+                  value={draft.otherLessons ?? ""}
+                  onChange={(e) => setDraft({ ...draft, otherLessons: e.target.value })}
+                />
+              </Field>
+              <Field label="緊急連絡先">
+                <input
+                  className="input"
+                  value={draft.emergencyContact ?? ""}
+                  onChange={(e) => setDraft({ ...draft, emergencyContact: e.target.value })}
+                />
+              </Field>
+              <Field label="アレルギー等健康上の留意点" full>
+                <input
+                  className="input"
+                  value={draft.healthNotes ?? ""}
+                  onChange={(e) => setDraft({ ...draft, healthNotes: e.target.value })}
+                />
+              </Field>
+              <Field label="お稽古に期待すること" full>
+                <textarea
+                  className="input"
+                  rows={2}
+                  value={draft.expectations ?? ""}
+                  onChange={(e) => setDraft({ ...draft, expectations: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                className="text-sm border border-line text-muted rounded px-4 py-2"
+                onClick={closeMemberDetail}
+              >
+                キャンセル
+              </button>
+              <button
+                className="text-sm bg-matcha-deep text-white rounded px-4 py-2 disabled:opacity-50"
+                onClick={saveMemberDetail}
+                disabled={savingDetail}
+              >
+                {savingDetail ? "保存中…" : "この内容で保存する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx global>{`
+        .input {
+          width: 100%;
+          border: 1px solid #e3decc;
+          border-radius: 4px;
+          padding: 6px 10px;
+          font-size: 13px;
+        }
+      `}</style>
     </div>
+  );
+}
+
+function Field({
+  label,
+  full,
+  children,
+}: {
+  label: string;
+  full?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={`block ${full ? "col-span-2" : ""}`}>
+      <span className="block text-xs text-muted mb-1">{label}</span>
+      {children}
+    </label>
   );
 }
