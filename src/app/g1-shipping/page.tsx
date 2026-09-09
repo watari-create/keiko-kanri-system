@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // 発送チェックリスト（page3-checklist）だけは、実際の発送のたびに記入して
 // g1ShippingLogs に記録として保存できる（記入・印刷・アーカイブ閲覧）。
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   doc,
@@ -455,7 +455,11 @@ export default function G1ShippingPage() {
 
   const view = editing && draft ? draft : sections;
 
-  const printedView = printingId ? view.filter((s) => s.id === printingId) : view;
+  // トップページでは発送チェックリストの表自体は表示しない（下の「発送記録（アーカイブ）」に一本化）。
+  // テンプレートの編集中（editing）だけは、項目の元データとして編集できるように表示する。
+  const displaySections = editing ? view : view.filter((s) => s.id !== CHECKLIST_SECTION_ID);
+
+  const printedView = printingId ? displaySections.filter((s) => s.id === printingId) : displaySections;
 
   return (
     <div className="max-w-5xl mx-auto p-6 print:p-0 print:max-w-none">
@@ -465,7 +469,7 @@ export default function G1ShippingPage() {
             <div>
               <h1 className="text-lg font-bold text-matcha-deep">G1 発送物リスト</h1>
               <p className="text-xs text-muted mt-1">
-                Gマダムの茶の湯講座（G1）の道具・消耗品と、毎回の発送チェックリストです。
+                Gマダムの茶の湯講座（G1）の道具・消耗品と、毎回の発送記録です。
               </p>
             </div>
             {canEdit && !editing && (
@@ -510,9 +514,47 @@ export default function G1ShippingPage() {
         </>
       )}
 
+      {canEdit && !editing && !printingId && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6 print:hidden">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="font-bold">発送記録（アーカイブ）</h2>
+            <button
+              className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 shrink-0"
+              onClick={startNewLog}
+            >
+              ＋ 新しい記録を作成
+            </button>
+          </div>
+          <p className="text-xs text-muted mb-3">
+            発送のたびに記入して保存すると、ここに記録として残ります。クリックすると内容を確認・編集・印刷できます。
+          </p>
+          {logs === null && <p className="text-sm text-muted">読み込み中…</p>}
+          {logs !== null && logs.length === 0 && (
+            <p className="text-sm text-muted">まだ記録がありません。</p>
+          )}
+          {logs !== null && logs.length > 0 && (
+            <ul className="divide-y divide-line">
+              {logs.map((log) => (
+                <li key={log.id}>
+                  <button
+                    className="w-full text-left py-2.5 text-sm hover:bg-matcha-pale/40 flex justify-between items-center"
+                    onClick={() => openLog(log)}
+                  >
+                    <span>{log.date || "（日付未設定）"}</span>
+                    <span className="text-xs text-muted">{log.preparedBy || "—"}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {printedView.map((section, si) => (
-        <Fragment key={section.id}>
-          <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto print:border-0 print:shadow-none print:overflow-visible print:break-inside-avoid">
+        <section
+          key={section.id}
+          className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto print:border-0 print:shadow-none print:overflow-visible print:break-inside-avoid"
+        >
             <div className="flex items-center justify-between gap-3 mb-3">
               {editing ? (
                 <input
@@ -597,43 +639,6 @@ export default function G1ShippingPage() {
               </button>
             )}
           </section>
-
-          {section.id === CHECKLIST_SECTION_ID && canEdit && !editing && !printingId && (
-            <section className="bg-paper border border-line rounded-md p-5 mb-6 print:hidden">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <h2 className="font-bold">発送記録（アーカイブ）</h2>
-                <button
-                  className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 shrink-0"
-                  onClick={startNewLog}
-                >
-                  ＋ 新しい記録を作成
-                </button>
-              </div>
-              <p className="text-xs text-muted mb-3">
-                発送のたびに記入して保存すると、ここに記録として残ります。クリックすると内容を確認・編集・印刷できます。
-              </p>
-              {logs === null && <p className="text-sm text-muted">読み込み中…</p>}
-              {logs !== null && logs.length === 0 && (
-                <p className="text-sm text-muted">まだ記録がありません。</p>
-              )}
-              {logs !== null && logs.length > 0 && (
-                <ul className="divide-y divide-line">
-                  {logs.map((log) => (
-                    <li key={log.id}>
-                      <button
-                        className="w-full text-left py-2.5 text-sm hover:bg-matcha-pale/40 flex justify-between items-center"
-                        onClick={() => openLog(log)}
-                      >
-                        <span>{log.date || "（日付未設定）"}</span>
-                        <span className="text-xs text-muted">{log.preparedBy || "—"}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </Fragment>
       ))}
     </div>
   );
