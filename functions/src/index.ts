@@ -2,9 +2,14 @@ import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
 
 admin.initializeApp();
 const db = admin.firestore();
+
+// Slack Incoming Webhook のURL。
+// 設定方法： firebase functions:secrets:set SLACK_WEBHOOK_URL
+const slackWebhookUrl = defineSecret("SLACK_WEBHOOK_URL");
 
 /**
  * マイページ・スタッフポータルのログイン確認。
@@ -86,6 +91,42 @@ export const onLicenseIssued = onDocumentUpdated(
         createdAt: new Date().toISOString(),
         read: false,
       });
+    }
+  }
+);
+
+/**
+ * 許状申請のステータスが進んだら（本部管理画面で「次に進める」を押したら）、
+ * Slackに通知する。許状段階の反映は上のonLicenseIssuedが別途行う。
+ */
+export const onLicenseRequestStatusChanged = onDocumentUpdated(
+  { document: "licenseRequests/{requestId}", secrets: [slackWebhookUrl] },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === after.status) return;
+
+    const webhookUrl = slackWebhookUrl.value();
+    if (!webhookUrl) {
+      console.warn("SLACK_WEBHOOK_URL が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const text =
+      `許状申請が進みました\n` +
+      `会員：${after.memberName}様\n` +
+      `許状：${after.licenseName}\n` +
+      `ステータス：${before.status} → ${after.status}`;
+
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
     }
   }
 );
