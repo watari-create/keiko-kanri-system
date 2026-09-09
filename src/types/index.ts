@@ -123,11 +123,17 @@ export interface PaymentEvent {
 // meta/g1ShippingDoc に保存する、編集可能な表形式のドキュメント。
 // 道具・消耗品・発送チェックリストなど、性質の異なる複数の表を
 // 汎用的な「見出し行＋データ行」の構造で表現している。
+// Firestoreは配列の中に配列を直接ネストできない（invalid nested entity）ため、
+// 各行を { cells: [...] } という形でオブジェクトに包んでいる。
+export interface G1ShippingRow {
+  cells: string[];
+}
+
 export interface G1ShippingSection {
   id: string;
   title: string;
   headers: string[];
-  rows: string[][];
+  rows: G1ShippingRow[];
 }
 
 export interface G1ShippingDoc {

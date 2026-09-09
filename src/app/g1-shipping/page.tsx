@@ -11,12 +11,16 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
-import type { StaffAccount, G1ShippingDoc, G1ShippingSection } from "@/types";
+import type { StaffAccount, G1ShippingDoc, G1ShippingSection, G1ShippingRow } from "@/types";
 
 const G1_GROUP = "Gマダムの茶の湯講座";
 
 function cloneSections(sections: G1ShippingSection[]): G1ShippingSection[] {
-  return sections.map((s) => ({ ...s, headers: [...s.headers], rows: s.rows.map((r) => [...r]) }));
+  return sections.map((s) => ({
+    ...s,
+    headers: [...s.headers],
+    rows: s.rows.map((r) => ({ cells: [...r.cells] })),
+  }));
 }
 
 export default function G1ShippingPage() {
@@ -92,7 +96,7 @@ export default function G1ShippingPage() {
     setDraft((prev) => {
       if (!prev) return prev;
       const next = cloneSections(prev);
-      next[si].rows[ri][ci] = value;
+      next[si].rows[ri].cells[ci] = value;
       return next;
     });
   }
@@ -101,7 +105,8 @@ export default function G1ShippingPage() {
     setDraft((prev) => {
       if (!prev) return prev;
       const next = cloneSections(prev);
-      next[si].rows.push(next[si].headers.map(() => ""));
+      const row: G1ShippingRow = { cells: next[si].headers.map(() => "") };
+      next[si].rows.push(row);
       return next;
     });
   }
@@ -221,7 +226,7 @@ export default function G1ShippingPage() {
             <tbody>
               {section.rows.map((row, ri) => (
                 <tr key={ri} className="border-b border-line align-top">
-                  {row.map((cell, ci) => (
+                  {row.cells.map((cell, ci) => (
                     <td key={ci} className="py-1.5 pr-3">
                       {editing ? (
                         <input
