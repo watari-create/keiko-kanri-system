@@ -119,18 +119,28 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
       return;
     }
 
+    const headline =
+      after.status === "取消" ? "許状申請が取り消されました" : "許状申請が進みました";
     const text =
-      `許状申請が進みました\n` +
+      `${headline}\n` +
       `会員：${after.memberName}様\n` +
       `許状：${after.licenseName}\n` +
       `ステータス：${before.status} → ${after.status}`;
 
     try {
-      await fetch(webhookUrl, {
+      const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
+      const bodyText = await res.text();
+      if (!res.ok) {
+        console.error(
+          `Slack通知がエラーレスポンスを返しました status=${res.status} body=${bodyText}`
+        );
+      } else {
+        console.log(`Slack通知を送信しました status=${res.status} body=${bodyText}`);
+      }
     } catch (err) {
       console.error("Slack通知の送信に失敗しました", err);
     }

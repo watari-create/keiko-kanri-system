@@ -209,7 +209,7 @@ export default function AdminPage() {
   }, []);
 
   const pendingLicense = useMemo(
-    () => allLicenseRequests.filter((r) => r.status !== "完了"),
+    () => allLicenseRequests.filter((r) => r.status !== "完了" && r.status !== "取消"),
     [allLicenseRequests]
   );
   const pendingLeave = useMemo(
@@ -241,14 +241,34 @@ export default function AdminPage() {
   }
 
   async function advanceLicense(req: LicenseRequest) {
+    if (req.status === "取消") return;
     const idx = LICENSE_STAGES.indexOf(req.status);
-    if (idx >= LICENSE_STAGES.length - 1) return;
+    if (idx === -1 || idx >= LICENSE_STAGES.length - 1) return;
     const nextStatus = LICENSE_STAGES[idx + 1];
     await updateDoc(doc(db, "licenseRequests", req.id), {
       status: nextStatus,
       updatedAt: new Date().toISOString(),
     });
     // 許状段階の反映・通知はCloud Functions（onLicenseIssued）が自動で行う
+  }
+
+  async function revertLicense(req: LicenseRequest) {
+    if (req.status === "取消") return;
+    const idx = LICENSE_STAGES.indexOf(req.status);
+    if (idx <= 0) return;
+    const prevStatus = LICENSE_STAGES[idx - 1];
+    await updateDoc(doc(db, "licenseRequests", req.id), {
+      status: prevStatus,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function cancelLicenseRequest(req: LicenseRequest) {
+    if (!confirm(`${req.memberName}さんの許状申請（${req.licenseName}）を取り消しますか？`)) return;
+    await updateDoc(doc(db, "licenseRequests", req.id), {
+      status: "取消",
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async function decideLeave(req: LeaveRequest, decision: "approved" | "rejected") {
@@ -558,14 +578,15 @@ export default function AdminPage() {
         <>
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">
-              許状申請（{requests.filter((r) => r.status !== "完了").length}件 対応中）
+              許状申請（
+              {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length}件 対応中）
             </h2>
             <p className="text-xs text-muted mb-3">
               受付 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
             </p>
             <div className="space-y-3">
               {requests
-                .filter((r) => r.status !== "完了")
+                .filter((r) => r.status !== "完了" && r.status !== "取消")
                 .map((r) => (
                   <div
                     key={r.id}
@@ -581,16 +602,30 @@ export default function AdminPage() {
                       <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
                         {r.status}
                       </span>
+                      {LICENSE_STAGES.indexOf(r.status) > 0 && (
+                        <button
+                          className="text-xs bg-paper border border-line text-ink rounded px-3 py-1.5"
+                          onClick={() => revertLicense(r)}
+                        >
+                          一つ戻す
+                        </button>
+                      )}
                       <button
                         className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
                         onClick={() => advanceLicense(r)}
                       >
                         次に進める
                       </button>
+                      <button
+                        className="text-xs bg-paper border border-line text-red-700 rounded px-3 py-1.5"
+                        onClick={() => cancelLicenseRequest(r)}
+                      >
+                        取消
+                      </button>
                     </div>
                   </div>
                 ))}
-              {requests.filter((r) => r.status !== "完了").length === 0 && (
+              {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length === 0 && (
                 <p className="text-sm text-muted text-center py-4">対応中の申請はありません</p>
               )}
             </div>

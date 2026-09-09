@@ -56,7 +56,8 @@ export type LicenseStatus =
   | "発行手続き中"
   | "発行済"
   | "お渡し済"
-  | "完了";
+  | "完了"
+  | "取消";
 
 export interface LicenseRequest {
   id: string;

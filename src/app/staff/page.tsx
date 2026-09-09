@@ -225,7 +225,7 @@ export default function StaffPage() {
           </p>
           <div className="space-y-3">
             {requests
-              .filter((r) => r.status !== "完了")
+              .filter((r) => r.status !== "完了" && r.status !== "取消")
               .map((r) => (
                 <div key={r.id} className="flex justify-between items-center border-b border-line pb-3">
                   <div>
