@@ -104,7 +104,7 @@ export default function StaffPage() {
       memberName: member.name,
       group: member.group,
       licenseName: licenseFee.name,
-      fee: licenseFee.fee,
+      fee: licenseFee.fee + licenseFee.rei, // 申請料＋御礼の合計
       status: "受付",
       appliedDate: new Date().toISOString(),
     });
@@ -202,7 +202,7 @@ export default function StaffPage() {
           >
             {LICENSE_FEES.map((l) => (
               <option key={l.name} value={l.name}>
-                {l.name}（¥{l.fee.toLocaleString()}）
+                {l.name}（¥{(l.fee + l.rei).toLocaleString()}）
               </option>
             ))}
           </select>
