@@ -2,7 +2,9 @@ import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { defineSecret, defineString } from "firebase-functions/params";
+import { GoogleAuth } from "google-auth-library";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -10,6 +12,10 @@ const db = admin.firestore();
 // Slack Incoming Webhook のURL。
 // 設定方法： firebase functions:secrets:set SLACK_WEBHOOK_URL
 const slackWebhookUrl = defineSecret("SLACK_WEBHOOK_URL");
+
+// 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
+// デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
+const hqCalendarId = defineString("HQ_CALENDAR_ID");
 
 /**
  * マイページ・スタッフポータルのログイン確認。
@@ -130,6 +136,89 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     }
   }
 );
+
+// 「次回のお稽古」表示の対象となる会。イベントのタイトルにこの文字列が
+// 含まれているかどうかで、どの会のお稽古かを判定する（例："名月会お稽古"）。
+const LESSON_GROUPS = ["名月会", "Gマダムの茶の湯講座", "茶道教室"];
+
+interface NextLessonInfo {
+  date: string; // イベントのstart（終日なら日付のみ、時刻指定ならISO日時）
+  title: string;
+}
+
+/**
+ * 本部の共有Googleカレンダーから、直近120日以内の予定を読み取り、
+ * LESSON_GROUPS それぞれについて一番近い予定を拾う。
+ *
+ * 事前準備：
+ * 1. Google Cloud ConsoleでCalendar APIを有効化する
+ *    （gcloud services enable calendar-json.googleapis.com）
+ * 2. 対象のGoogleカレンダーを、Cloud Functionsのランタイムサービスアカウント
+ *    （例：69899565701-compute@developer.gserviceaccount.com）と
+ *    「予定の詳細を表示する」権限で共有する
+ */
+async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
+  const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/calendar.readonly"] });
+  const client = await auth.getClient();
+  const accessToken = await client.getAccessToken();
+  if (!accessToken.token) {
+    throw new Error("Googleカレンダーへのアクセストークンを取得できませんでした。カレンダーがサービスアカウントと共有されているか確認してください。");
+  }
+
+  const now = new Date();
+  const timeMin = now.toISOString();
+  const timeMax = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 120).toISOString();
+
+  const url =
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(hqCalendarId.value())}/events` +
+    `?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}` +
+    `&singleEvents=true&orderBy=startTime&maxResults=100`;
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken.token}` } });
+  if (!res.ok) {
+    throw new Error(`Googleカレンダーの取得に失敗しました：${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    items?: { summary?: string; start?: { date?: string; dateTime?: string } }[];
+  };
+  const items = data.items ?? [];
+
+  const result: Record<string, NextLessonInfo> = {};
+  for (const group of LESSON_GROUPS) {
+    const match = items.find((ev) => (ev.summary ?? "").includes(group));
+    const date = match?.start?.dateTime ?? match?.start?.date;
+    if (match && date) {
+      result[group] = { date, title: match.summary ?? "" };
+    }
+  }
+  return result;
+}
+
+/**
+ * 30分ごとに本部の共有Googleカレンダーを確認し、各会の「次回のお稽古」日を
+ * meta/nextLessonDates に保存する。管理画面・スタッフ画面・マイページはこの
+ * ドキュメントをそのまま表示する（onSnapshotで購読するだけでよい）。
+ */
+export const syncNextLessonDates = onSchedule(
+  { schedule: "every 30 minutes", timeZone: "Asia/Tokyo" },
+  async () => {
+    const dates = await fetchNextLessonDates();
+    await db.doc("meta/nextLessonDates").set({ dates, updatedAt: new Date().toISOString() });
+  }
+);
+
+/**
+ * 上と同じ処理を、待たずに手動で今すぐ実行するための呼び出し可能関数（本部のみ）。
+ * カレンダー共有設定後の動作確認などに使う。
+ */
+export const syncNextLessonDatesNow = onCall(async (request) => {
+  if (request.auth?.token?.role !== "honbu") {
+    throw new HttpsError("permission-denied", "本部のみ実行できます。");
+  }
+  const dates = await fetchNextLessonDates();
+  await db.doc("meta/nextLessonDates").set({ dates, updatedAt: new Date().toISOString() });
+  return { dates };
+});
 
 /**
  * Square Webhook受信エンドポイント（雛形）。

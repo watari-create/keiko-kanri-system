@@ -4,11 +4,12 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
+import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
@@ -21,10 +22,19 @@ export default function MyPage() {
   const [leaveType, setLeaveType] = useState<LeaveRequestType>("休会");
   const [reason, setReason] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "member") router.replace("/mypage/login");
   }, [loading, role, router]);
+
+  useEffect(() => {
+    if (!member?.group) return;
+    return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
+      const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
+      setNextLesson(dates?.[member.group] ?? null);
+    });
+  }, [member?.group]);
 
   useEffect(() => {
     if (!memberId) return;
@@ -119,6 +129,11 @@ export default function MyPage() {
       {member.groupCategory === "本部稽古" && (
         <div className="bg-paper border border-line rounded-md p-6 mb-4">
           <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
+          {nextLesson && (
+            <p className="text-xs text-matcha-deep mb-1">
+              次回：{formatLessonDate(nextLesson.date)}
+            </p>
+          )}
           <p className="text-xs text-muted mb-3">現在の回答：{member.rsvp ?? "未回答"}</p>
           <div className="flex gap-2">
             <button

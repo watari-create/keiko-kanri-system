@@ -25,6 +25,7 @@ import {
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import type {
   Member,
   LicenseRequest,
@@ -121,10 +122,24 @@ export default function AdminPage() {
   const [staffDraft, setStaffDraft] = useState<StaffDraft | null>(null);
   const [savingStaff, setSavingStaff] = useState(false);
 
+  // 次回のお稽古（Googleカレンダー同期）
+  const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
+
   // 権限チェック：本部以外はログインページへ
   useEffect(() => {
     if (!loading && role !== "honbu") router.replace("/login");
   }, [loading, role, router]);
+
+  useEffect(() => {
+    if (area !== "本部稽古") {
+      setNextLesson(null);
+      return;
+    }
+    return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
+      const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
+      setNextLesson(dates?.[group] ?? null);
+    });
+  }, [area, group]);
 
   function switchArea(a: Area) {
     setArea(a);
@@ -424,15 +439,22 @@ export default function AdminPage() {
       <p className="text-sm text-muted mb-6">{AREA_DESCRIPTION[area]}</p>
 
       {area !== "スタッフ管理" && AREA_GROUPS[area] && (
-        <select
-          className="border border-line rounded px-3 py-2 mb-6 text-sm"
-          value={group}
-          onChange={(e) => setGroup(e.target.value)}
-        >
-          {AREA_GROUPS[area].map((g) => (
-            <option key={g}>{g}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-3 mb-6">
+          <select
+            className="border border-line rounded px-3 py-2 text-sm"
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+          >
+            {AREA_GROUPS[area].map((g) => (
+              <option key={g}>{g}</option>
+            ))}
+          </select>
+          {nextLesson && (
+            <span className="text-sm text-matcha-deep">
+              次回のお稽古：{formatLessonDate(nextLesson.date)}
+            </span>
+          )}
+        </div>
       )}
 
       {area !== "スタッフ管理" && (

@@ -144,5 +144,11 @@ service cloud.firestore {
       allow read: if isHonbu();
       allow write: if false; // Cloud Functions（Square Webhook受信用）からのみ
     }
+
+    // ---- meta（Googleカレンダーから同期した「次回のお稽古」日など） ----
+    match /meta/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Cloud Functions（Googleカレンダー同期）からのみ
+    }
   }
 }

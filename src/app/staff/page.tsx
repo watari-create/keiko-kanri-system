@@ -23,6 +23,7 @@ import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES } from "@/lib/licenseFees";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import type { StaffAccount, Member, LicenseRequest } from "@/types";
 
 export default function StaffPage() {
@@ -35,10 +36,19 @@ export default function StaffPage() {
   const [applyMemberId, setApplyMemberId] = useState("");
   const [applyLicenseName, setApplyLicenseName] = useState(LICENSE_FEES[0].name);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
   }, [loading, role, router]);
+
+  useEffect(() => {
+    if (!group) return;
+    return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
+      const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
+      setNextLesson(dates?.[group] ?? null);
+    });
+  }, [group]);
 
   useEffect(() => {
     if (!staffId) return;
@@ -120,8 +130,11 @@ export default function StaffPage() {
         </button>
       </div>
 
-      <div className="text-sm text-muted mb-4">
+      <div className="text-sm text-muted mb-1">
         {account.name}さんとしてログイン中（担当：{account.groups.join("・")}）
+      </div>
+      <div className="text-sm text-matcha-deep mb-4">
+        {nextLesson ? `${group} 次回のお稽古：${formatLessonDate(nextLesson.date)}` : "\u00A0"}
       </div>
 
       {account.groups.length > 1 && (
