@@ -80,6 +80,14 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
   },
 };
 
+// マイページの出欠登録で、都度払いの会員が「出席する」を押したときに開く
+// Squareの決済リンクを、会員の group（Firestore上の値、= 上のtitle）から逆引きする。
+// 対応するSquareリンクが設定されていない会（茶道教室など）の場合は undefined を返す。
+export function getOnetimeLinkForGroup(groupTitle: string): string | undefined {
+  const config = Object.values(ENROLL_GROUPS).find((g) => g.title === groupTitle);
+  return config?.links.onetime;
+}
+
 // 会員番号の自動採番の開始値。firestore.rules 側の counters/members 検証と対にしてある。
 // 実際の現行の最大会員番号が変わった場合は、両方を合わせて更新すること。
 export const MEMBER_COUNTER_START = 30000070;

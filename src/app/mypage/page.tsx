@@ -8,6 +8,7 @@ import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
+import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
 import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
@@ -46,7 +47,7 @@ export default function MyPage() {
   }
 
   async function updateRsvp(value: "出席" | "欠席") {
-    if (!memberId) return;
+    if (!memberId || !member) return;
     const monthKey = currentMonthKey();
     await updateDoc(doc(db, "members", memberId), {
       rsvp: value,
@@ -57,6 +58,19 @@ export default function MyPage() {
         ? { ...prev, rsvp: value, attendance: { ...prev.attendance, [monthKey]: value } }
         : prev
     );
+
+    // 都度払いの会員が「出席する」を押したときは、その場でSquareの支払いページを開く
+    if (value === "出席" && member.paymentMethod === "都度払い") {
+      const link = getOnetimeLinkForGroup(member.group);
+      if (link) {
+        window.open(link, "_blank", "noopener,noreferrer");
+        setSavedMsg("出席で登録しました。お支払いページを別タブで開きましたので、そちらからお手続きください。");
+      } else {
+        setSavedMsg("出席で登録しました。お支払いリンクが未設定のため、本部より別途ご連絡します。");
+      }
+      return;
+    }
+
     setSavedMsg(`次回のお稽古を「${value}」で登録しました。`);
   }
 
