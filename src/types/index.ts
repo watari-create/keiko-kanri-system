@@ -118,3 +118,20 @@ export interface PaymentEvent {
   receivedAt: string;
   matched: boolean;
 }
+
+// ---- G1（Gマダムの茶の湯講座）発送物リスト ----
+// meta/g1ShippingDoc に保存する、編集可能な表形式のドキュメント。
+// 道具・消耗品・発送チェックリストなど、性質の異なる複数の表を
+// 汎用的な「見出し行＋データ行」の構造で表現している。
+export interface G1ShippingSection {
+  id: string;
+  title: string;
+  headers: string[];
+  rows: string[][];
+}
+
+export interface G1ShippingDoc {
+  sections: G1ShippingSection[];
+  updatedAt?: string;
+  updatedBy?: string;
+}

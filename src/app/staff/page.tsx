@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   doc,
   getDoc,
@@ -126,9 +127,19 @@ export default function StaffPage() {
         <h1 className="text-lg font-bold text-matcha-deep">
           {account.role === "sewanin" ? "宗徧流稽古（世話人）" : "本部稽古（講師）"}
         </h1>
-        <button className="text-xs text-muted underline" onClick={logout}>
-          ログアウト
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/g1-shipping"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink"
+          >
+            G1発送物
+          </Link>
+          <button className="text-xs text-muted underline" onClick={logout}>
+            ログアウト
+          </button>
+        </div>
       </div>
 
       <div className="text-sm text-muted mb-1">

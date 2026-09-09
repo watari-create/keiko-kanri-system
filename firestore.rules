@@ -150,5 +150,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if false; // Cloud Functions（Googleカレンダー同期）からのみ
     }
+
+    // ---- meta/g1ShippingDoc（G1＝Gマダムの茶の湯講座の発送物リスト。本部と担当講師が編集可） ----
+    match /meta/g1ShippingDoc {
+      allow write: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
+    }
   }
 }
