@@ -31,6 +31,8 @@ export interface Member {
   nextBillingDate?: string;
   rsvp?: Rsvp;
   lastAttended?: string;
+  // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
+  attendance?: Record<string, "出席" | "欠席">;
   email: string;
   phone?: string;
   address?: string;

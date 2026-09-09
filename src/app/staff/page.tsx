@@ -8,9 +8,21 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { doc, getDoc, collection, query, where, onSnapshot, updateDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  updateDoc,
+  addDoc,
+  deleteField,
+} from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
+import { LICENSE_FEES } from "@/lib/licenseFees";
+import AttendanceGrid from "@/components/AttendanceGrid";
 import type { StaffAccount, Member, LicenseRequest } from "@/types";
 
 export default function StaffPage() {
@@ -20,6 +32,9 @@ export default function StaffPage() {
   const [group, setGroup] = useState<string>("");
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
+  const [applyMemberId, setApplyMemberId] = useState("");
+  const [applyLicenseName, setApplyLicenseName] = useState(LICENSE_FEES[0].name);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
@@ -58,6 +73,33 @@ export default function StaffPage() {
       status: "お渡し済",
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  async function setAttendance(
+    memberId: string,
+    monthKey: string,
+    value: "出席" | "欠席" | undefined
+  ) {
+    await updateDoc(doc(db, "members", memberId), {
+      [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
+    });
+  }
+
+  async function submitLicenseRequest() {
+    const member = members.find((m) => m.id === applyMemberId);
+    const licenseFee = LICENSE_FEES.find((l) => l.name === applyLicenseName);
+    if (!member || !licenseFee) return;
+    await addDoc(collection(db, "licenseRequests"), {
+      memberId: member.id,
+      memberName: member.name,
+      group: member.group,
+      licenseName: licenseFee.name,
+      fee: licenseFee.fee,
+      status: "受付",
+      appliedDate: new Date().toISOString(),
+    });
+    setApplyMsg(`${member.name}様の「${licenseFee.name}」許状申請を提出しました。`);
+    setApplyMemberId("");
   }
 
   async function logout() {
@@ -115,6 +157,52 @@ export default function StaffPage() {
           </tbody>
         </table>
       </section>
+
+      <section className="bg-paper border border-line rounded-md p-5 mb-6">
+        <h2 className="font-bold mb-2">出席簿</h2>
+        <AttendanceGrid
+          members={members}
+          editable
+          onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
+        />
+      </section>
+
+      {account.role === "teacher" && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6">
+          <h2 className="font-bold mb-3">許状申請の提出</h2>
+          <select
+            className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
+            value={applyMemberId}
+            onChange={(e) => setApplyMemberId(e.target.value)}
+          >
+            <option value="">会員を選択してください</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
+            value={applyLicenseName}
+            onChange={(e) => setApplyLicenseName(e.target.value)}
+          >
+            {LICENSE_FEES.map((l) => (
+              <option key={l.name} value={l.name}>
+                {l.name}（¥{l.fee.toLocaleString()}）
+              </option>
+            ))}
+          </select>
+          <button
+            className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm disabled:opacity-50"
+            disabled={!applyMemberId}
+            onClick={submitLicenseRequest}
+          >
+            この内容で申請する
+          </button>
+          {applyMsg && <p className="text-xs text-matcha-deep mt-3">{applyMsg}</p>}
+        </section>
+      )}
 
       {account.role === "teacher" && (
         <section className="bg-paper border border-line rounded-md p-5">

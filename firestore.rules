@@ -60,6 +60,11 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['email', 'phone', 'address', 'rsvp']);
 
+      // 講師は自分の担当する会の会員の出席のみ編集可
+      allow update: if isTeacherFor(resource.data.group)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['attendance']);
+
       // 公開の入会フォーム（/enroll、未ログイン）からの新規作成のみ許可。
       // 許可される値をかなり狭く固定することで、なりすまし作成や項目の不正混入を防ぐ。
       // 注：Cloud Functionsが使えるようになったら、スパム防止のためこちらの経路を

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
-import type { Member, LeaveRequestType } from "@/types";
+import type { Member, LeaveRequestType, Rsvp } from "@/types";
 
 export default function MyPage() {
   const { role, memberId, loading } = useAuth();
@@ -42,6 +42,12 @@ export default function MyPage() {
     if (!memberId) return;
     await updateDoc(doc(db, "members", memberId), { email, phone, address });
     setSavedMsg("連絡先情報を更新しました。");
+  }
+
+  async function updateRsvp(value: Rsvp) {
+    if (!memberId) return;
+    await updateDoc(doc(db, "members", memberId), { rsvp: value });
+    setSavedMsg(`次回のお稽古を「${value}」で登録しました。`);
   }
 
   async function submitLeave() {
@@ -85,6 +91,27 @@ export default function MyPage() {
           </div>
         </div>
       </div>
+
+      {member.groupCategory === "本部稽古" && (
+        <div className="bg-paper border border-line rounded-md p-6 mb-4">
+          <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
+          <p className="text-xs text-muted mb-3">現在の回答：{member.rsvp ?? "未回答"}</p>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 bg-matcha-deep text-white rounded py-2 text-sm"
+              onClick={() => updateRsvp("出席")}
+            >
+              出席する
+            </button>
+            <button
+              className="flex-1 border border-line text-muted rounded py-2 text-sm"
+              onClick={() => updateRsvp("欠席")}
+            >
+              欠席する
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-paper border border-line rounded-md p-6 mb-4">
         <h2 className="text-sm text-muted mb-3">連絡先情報の変更</h2>

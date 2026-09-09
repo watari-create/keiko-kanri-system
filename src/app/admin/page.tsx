@@ -20,9 +20,11 @@ import {
   updateDoc,
   setDoc,
   deleteDoc,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
+import AttendanceGrid from "@/components/AttendanceGrid";
 import type {
   Member,
   LicenseRequest,
@@ -145,9 +147,9 @@ export default function AdminPage() {
     });
   }, [area, group]);
 
-  // 許状申請をリアルタイム購読（グループ選択があるエリアのみ）
+  // 許状申請をリアルタイム購読（本部稽古のみ。宗徧流稽古は許状申請の仕組みを使わない）
   useEffect(() => {
-    if (area === "UCI" || area === "スタッフ管理") {
+    if (area !== "本部稽古") {
       setRequests([]);
       return;
     }
@@ -157,9 +159,9 @@ export default function AdminPage() {
     });
   }, [area, group]);
 
-  // 退会・休会・復会申請をリアルタイム購読（グループ選択があるエリアのみ）
+  // 退会・休会・復会申請をリアルタイム購読（本部稽古のみ）
   useEffect(() => {
-    if (area === "UCI" || area === "スタッフ管理") {
+    if (area !== "本部稽古") {
       setLeaveRequests([]);
       return;
     }
@@ -211,6 +213,16 @@ export default function AdminPage() {
     value: Member[K]
   ) {
     await updateDoc(doc(db, "members", memberId), { [field]: value });
+  }
+
+  async function setAttendance(
+    memberId: string,
+    monthKey: string,
+    value: "出席" | "欠席" | undefined
+  ) {
+    await updateDoc(doc(db, "members", memberId), {
+      [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
+    });
   }
 
   async function advanceLicense(req: LicenseRequest) {
@@ -510,6 +522,17 @@ export default function AdminPage() {
       )}
 
       {(area === "宗徧流稽古" || area === "本部稽古") && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6">
+          <h2 className="font-bold mb-2">出席簿</h2>
+          <AttendanceGrid
+            members={members}
+            editable
+            onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
+          />
+        </section>
+      )}
+
+      {area === "本部稽古" && (
         <>
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">
