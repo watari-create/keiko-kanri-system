@@ -5,13 +5,22 @@ import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { GoogleAuth } from "google-auth-library";
+import * as crypto from "crypto";
 
 admin.initializeApp();
 const db = admin.firestore();
 
-// Slack Incoming Webhook のURL。
-// 設定方法： firebase functions:secrets:set SLACK_WEBHOOK_URL
-const slackWebhookUrl = defineSecret("SLACK_WEBHOOK_URL");
+// Slack Bot Token（xoxb-...）。chat.postMessageで請求書発行依頼メッセージを送るのに使う。
+// 設定方法： firebase functions:secrets:set SLACK_BOT_TOKEN
+const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
+
+// Slack Appの「Signing Secret」。Slackから届くイベント通知が本物かを検証するのに使う。
+// 設定方法： firebase functions:secrets:set SLACK_SIGNING_SECRET
+const slackSigningSecret = defineSecret("SLACK_SIGNING_SECRET");
+
+// 請求書発行依頼の通知を送るSlackチャンネルのID（例：C0123456789）。
+// Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
+const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
 
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
@@ -102,11 +111,45 @@ export const onLicenseIssued = onDocumentUpdated(
 );
 
 /**
+ * Slack Web API（chat.postMessage）でメッセージを送信する。
+ * Incoming Webhookと違い、送信したメッセージの ts（タイムスタンプ／ID）が返ってくるため、
+ * あとで届く reaction_added イベントと突き合わせることができる。
+ */
+async function postSlackMessage(
+  token: string,
+  channel: string,
+  text: string
+): Promise<{ ts: string; channel: string } | null> {
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ channel, text }),
+  });
+  const data = (await res.json()) as {
+    ok: boolean;
+    ts?: string;
+    channel?: string;
+    error?: string;
+  };
+  if (!data.ok || !data.ts || !data.channel) {
+    console.error(`Slack chat.postMessageがエラーを返しました: ${data.error ?? "unknown"}`);
+    return null;
+  }
+  return { ts: data.ts, channel: data.channel };
+}
+
+/**
  * 許状申請が「請求書発行依頼」になったら、Slackに通知する（請求書発行の担当者への合図）。
  * それ以外のステータス変更では通知しない。許状段階の反映は上のonLicenseIssuedが別途行う。
+ *
+ * 送信したメッセージの ts / channel を licenseRequests ドキュメントに保存しておき、
+ * 下の slackEvents（✔️リアクション受信）で突き合わせに使う。
  */
 export const onLicenseRequestStatusChanged = onDocumentUpdated(
-  { document: "licenseRequests/{requestId}", secrets: [slackWebhookUrl] },
+  { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
   async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
@@ -114,9 +157,14 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     if (before.status === after.status) return;
     if (after.status !== "請求書発行依頼") return;
 
-    const webhookUrl = slackWebhookUrl.value();
-    if (!webhookUrl) {
-      console.warn("SLACK_WEBHOOK_URL が未設定のため、Slack通知をスキップしました。");
+    const token = slackBotToken.value();
+    if (!token) {
+      console.warn("SLACK_BOT_TOKEN が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+    const channel = slackLicenseChannel.value();
+    if (!channel) {
+      console.warn("SLACK_LICENSE_CHANNEL が未設定のため、Slack通知をスキップしました。");
       return;
     }
 
@@ -124,25 +172,100 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
       `請求書発行のご依頼です\n` +
       `会員：${after.memberName}様\n` +
       `許状：${after.licenseName}\n` +
-      `合計：¥${after.fee?.toLocaleString?.() ?? after.fee}`;
+      `合計：¥${after.fee?.toLocaleString?.() ?? after.fee}\n` +
+      `発行できたら、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
 
     try {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const bodyText = await res.text();
-      if (!res.ok) {
-        console.error(
-          `Slack通知がエラーレスポンスを返しました status=${res.status} body=${bodyText}`
-        );
-      } else {
-        console.log(`Slack通知を送信しました status=${res.status} body=${bodyText}`);
+      const posted = await postSlackMessage(token, channel, text);
+      if (posted && event.data) {
+        await event.data.after.ref.update({
+          slackTs: posted.ts,
+          slackChannel: posted.channel,
+        });
+        console.log(`Slack通知を送信しました ts=${posted.ts}`);
       }
     } catch (err) {
       console.error("Slack通知の送信に失敗しました", err);
     }
+  }
+);
+
+/**
+ * Slack Events API受信エンドポイント。
+ * 「請求書発行依頼」のSlackメッセージに✔️（heavy_check_mark）のリアクションがつくと、
+ * 対応するlicenseRequestsのステータスを自動的に「請求書発行済」に進める。
+ *
+ * 事前準備（Slack App側）：
+ * 1. api.slack.com/apps でAppを作成
+ * 2. OAuth & Permissions → Bot Token Scopes に chat:write, reactions:read を追加してインストール
+ * 3. Event Subscriptions を有効化し、Request URLにこの関数のデプロイ後URLを設定
+ * 4. Subscribe to bot events で reaction_added を追加
+ * 5. BotをSlackチャンネルに /invite しておく
+ */
+export const slackEvents = onRequest(
+  { secrets: [slackSigningSecret] },
+  async (req, res) => {
+    const signature = req.headers["x-slack-signature"] as string | undefined;
+    const timestamp = req.headers["x-slack-request-timestamp"] as string | undefined;
+    const signingSecret = slackSigningSecret.value();
+
+    if (!signature || !timestamp || !signingSecret) {
+      res.status(400).send("bad request");
+      return;
+    }
+
+    // リプレイ攻撃対策：5分以上古いリクエストは拒否
+    if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 60 * 5) {
+      res.status(400).send("stale request");
+      return;
+    }
+
+    const rawBody = (req as unknown as { rawBody: Buffer }).rawBody;
+    const baseString = `v0:${timestamp}:${rawBody.toString("utf8")}`;
+    const expectedSignature =
+      "v0=" + crypto.createHmac("sha256", signingSecret).update(baseString).digest("hex");
+
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      res.status(401).send("invalid signature");
+      return;
+    }
+
+    const body = req.body;
+
+    // Slackアプリ作成時・Event Subscriptions設定時の初回URL検証
+    if (body.type === "url_verification") {
+      res.status(200).send(body.challenge);
+      return;
+    }
+
+    if (body.type === "event_callback") {
+      const slackEvent = body.event;
+      if (
+        slackEvent?.type === "reaction_added" &&
+        slackEvent.reaction === "heavy_check_mark" &&
+        slackEvent.item?.type === "message"
+      ) {
+        const snap = await db
+          .collection("licenseRequests")
+          .where("slackTs", "==", slackEvent.item.ts)
+          .limit(1)
+          .get();
+        if (!snap.empty) {
+          const requestDoc = snap.docs[0];
+          if (requestDoc.data().status === "請求書発行依頼") {
+            await requestDoc.ref.update({
+              status: "請求書発行済",
+              updatedAt: new Date().toISOString(),
+            });
+            console.log(`✔️リアクションによりステータスを更新しました requestId=${requestDoc.id}`);
+          }
+        }
+      }
+    }
+
+    res.status(200).send("ok");
   }
 );
 
