@@ -36,6 +36,7 @@ export default function G1ShippingPage() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<G1ShippingSection[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [printingId, setPrintingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "honbu" && role !== "staff") router.replace("/login");
@@ -60,6 +61,26 @@ export default function G1ShippingPage() {
       setUpdatedBy(data?.updatedBy ?? null);
     });
   }, []);
+
+  // 印刷ボタンが押されたら、その表だけを表示した状態で印刷ダイアログを開く。
+  // ダイアログが閉じたら（afterprint）通常表示に戻す。
+  useEffect(() => {
+    function handleAfterPrint() {
+      setPrintingId(null);
+    }
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
+
+  useEffect(() => {
+    if (!printingId) return;
+    const frame = requestAnimationFrame(() => window.print());
+    return () => cancelAnimationFrame(frame);
+  }, [printingId]);
+
+  function printSection(id: string) {
+    setPrintingId(id);
+  }
 
   const canEdit = role === "honbu" || (role === "staff" && !!account?.groups.includes(G1_GROUP));
 
@@ -143,66 +164,85 @@ export default function G1ShippingPage() {
 
   const view = editing && draft ? draft : sections;
 
+  const printedView = printingId ? view.filter((s) => s.id === printingId) : view;
+
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="flex justify-between items-start mb-1">
-        <div>
-          <h1 className="text-lg font-bold text-matcha-deep">G1 発送物リスト</h1>
-          <p className="text-xs text-muted mt-1">
-            Gマダムの茶の湯講座（G1）の道具・消耗品と、毎回の発送チェックリストです。
-          </p>
-        </div>
-        {canEdit && !editing && (
-          <button
-            className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 shrink-0"
-            onClick={startEdit}
-          >
-            編集する
-          </button>
-        )}
-        {editing && (
-          <div className="flex gap-2 shrink-0">
-            <button
-              className="text-xs border border-line rounded px-3 py-1.5"
-              onClick={cancelEdit}
-              disabled={saving}
-            >
-              キャンセル
-            </button>
-            <button
-              className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
-              onClick={save}
-              disabled={saving}
-            >
-              {saving ? "保存中…" : "保存する"}
-            </button>
+    <div className="max-w-5xl mx-auto p-6 print:p-0 print:max-w-none">
+      {!printingId && (
+        <>
+          <div className="flex justify-between items-start mb-1">
+            <div>
+              <h1 className="text-lg font-bold text-matcha-deep">G1 発送物リスト</h1>
+              <p className="text-xs text-muted mt-1">
+                Gマダムの茶の湯講座（G1）の道具・消耗品と、毎回の発送チェックリストです。
+              </p>
+            </div>
+            {canEdit && !editing && (
+              <button
+                className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 shrink-0"
+                onClick={startEdit}
+              >
+                編集する
+              </button>
+            )}
+            {editing && (
+              <div className="flex gap-2 shrink-0">
+                <button
+                  className="text-xs border border-line rounded px-3 py-1.5"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                >
+                  キャンセル
+                </button>
+                <button
+                  className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
+                  onClick={save}
+                  disabled={saving}
+                >
+                  {saving ? "保存中…" : "保存する"}
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {updatedAt && !editing && (
-        <p className="text-xs text-muted mb-4">
-          最終更新：{new Date(updatedAt).toLocaleString("ja-JP")}
-          {updatedBy ? "（" + updatedBy + "）" : ""}
-        </p>
-      )}
-      {!updatedAt && !editing && <div className="mb-4" />}
-
-      {view.length === 0 && (
-        <p className="text-sm text-muted">まだデータがありません。</p>
-      )}
-
-      {view.map((section, si) => (
-        <section key={section.id} className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
-          {editing ? (
-            <input
-              className="font-bold mb-3 border border-line rounded px-2 py-1 text-sm w-full max-w-md"
-              value={section.title}
-              onChange={(e) => updateTitle(si, e.target.value)}
-            />
-          ) : (
-            <h2 className="font-bold mb-3">{section.title}</h2>
+          {updatedAt && !editing && (
+            <p className="text-xs text-muted mb-4">
+              最終更新：{new Date(updatedAt).toLocaleString("ja-JP")}
+              {updatedBy ? "（" + updatedBy + "）" : ""}
+            </p>
           )}
+          {!updatedAt && !editing && <div className="mb-4" />}
+
+          {view.length === 0 && (
+            <p className="text-sm text-muted">まだデータがありません。</p>
+          )}
+        </>
+      )}
+
+      {printedView.map((section, si) => (
+        <section
+          key={section.id}
+          className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto print:border-0 print:shadow-none print:overflow-visible print:break-inside-avoid"
+        >
+          <div className="flex items-center justify-between gap-3 mb-3">
+            {editing ? (
+              <input
+                className="font-bold border border-line rounded px-2 py-1 text-sm w-full max-w-md"
+                value={section.title}
+                onChange={(e) => updateTitle(si, e.target.value)}
+              />
+            ) : (
+              <h2 className="font-bold">{section.title}</h2>
+            )}
+            {!editing && !printingId && (
+              <button
+                className="text-xs border border-line rounded px-3 py-1.5 shrink-0"
+                onClick={() => printSection(section.id)}
+              >
+                🖨 この表を印刷
+              </button>
+            )}
+          </div>
 
           <table className="w-full text-sm min-w-[640px]">
             <thead>
@@ -226,19 +266,24 @@ export default function G1ShippingPage() {
             <tbody>
               {section.rows.map((row, ri) => (
                 <tr key={ri} className="border-b border-line align-top">
-                  {row.cells.map((cell, ci) => (
-                    <td key={ci} className="py-1.5 pr-3">
-                      {editing ? (
-                        <input
-                          className="border border-line rounded px-1.5 py-1 text-xs w-full"
-                          value={cell}
-                          onChange={(e) => updateCell(si, ri, ci, e.target.value)}
-                        />
-                      ) : (
-                        cell || "—"
-                      )}
-                    </td>
-                  ))}
+                  {row.cells.map((cell, ci) => {
+                    const isCheckColumn = section.headers[ci]?.includes("確認");
+                    return (
+                      <td key={ci} className="py-1.5 pr-3">
+                        {editing ? (
+                          <input
+                            className="border border-line rounded px-1.5 py-1 text-xs w-full"
+                            value={cell}
+                            onChange={(e) => updateCell(si, ri, ci, e.target.value)}
+                          />
+                        ) : isCheckColumn ? (
+                          cell || "☐"
+                        ) : (
+                          cell || "—"
+                        )}
+                      </td>
+                    );
+                  })}
                   {editing && (
                     <td className="py-1.5">
                       <button
