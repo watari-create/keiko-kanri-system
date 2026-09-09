@@ -7,22 +7,23 @@
 //   2. Firebase Authenticationで、本部用のメールアドレス・パスワードのユーザーを先に作成しておく
 //   3. node scripts/setAdminClaim.js <そのユーザーのUID>
 
-const admin = require("firebase-admin");
+const { initializeApp, cert, applicationDefault } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
 const fs = require("fs");
 const path = require("path");
 
 const keyPath = path.join(__dirname, "..", "serviceAccountKey.json");
 if (fs.existsSync(keyPath)) {
   // サービスアカウントキーがある場合はそれを使う
-  admin.initializeApp({
-    credential: admin.credential.cert(require(keyPath)),
+  initializeApp({
+    credential: cert(require(keyPath)),
   });
 } else {
   // 組織ポリシーでサービスアカウントキーの発行が禁止されている場合は、
   // `gcloud auth application-default login --project sohenryu-okeiko-management`
   // を先に実行しておくと、ここで自動的にその認証情報が使われる。
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
+  initializeApp({
+    credential: applicationDefault(),
     projectId: "sohenryu-okeiko-management",
   });
 }
@@ -33,8 +34,7 @@ if (!uid) {
   process.exit(1);
 }
 
-admin
-  .auth()
+getAuth()
   .setCustomUserClaims(uid, { role: "honbu" })
   .then(() => {
     console.log(`UID ${uid} に role:'honbu' を設定しました。`);

@@ -22,7 +22,7 @@ export default function StaffPage() {
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
 
   useEffect(() => {
-    if (!loading && role !== "staff") router.replace("/login");
+    if (!loading && role !== "staff") router.replace("/staff/login");
   }, [loading, role, router]);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function StaffPage() {
 
   async function logout() {
     await auth.signOut();
-    router.push("/login");
+    router.push("/staff/login");
   }
 
   if (loading || !account) return <div className="p-8 text-muted">確認中…</div>;

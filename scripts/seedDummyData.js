@@ -12,14 +12,14 @@ const keyPath = path.join(__dirname, "..", "serviceAccountKey.json");
 if (fs.existsSync(keyPath)) {
   // サービスアカウントキーがある場合はそれを使う
   admin.initializeApp({
-    credential: admin.credential.cert(require(keyPath)),
+    credential: admin.cert(require(keyPath)),
   });
 } else {
   // 組織ポリシーでサービスアカウントキーの発行が禁止されている場合は、
   // `gcloud auth application-default login --project sohenryu-okeiko-management`
   // を先に実行しておくと、ここで自動的にその認証情報が使われる。
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
+    credential: admin.applicationDefault(),
     projectId: "sohenryu-okeiko-management",
   });
 }

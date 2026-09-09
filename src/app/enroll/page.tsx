@@ -219,7 +219,7 @@ export default function EnrollPage() {
       {step === "form" && (
         <p className="text-center text-xs text-muted mt-4">
           すでに会員番号をお持ちの方は{" "}
-          <a href="/login" className="underline">
+          <a href="/mypage/login" className="underline">
             こちらからログイン
           </a>
         </p>

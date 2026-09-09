@@ -21,7 +21,7 @@ export default function MyPage() {
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && role !== "member") router.replace("/login");
+    if (!loading && role !== "member") router.replace("/mypage/login");
   }, [loading, role, router]);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export default function MyPage() {
 
   async function logout() {
     await auth.signOut();
-    router.push("/login");
+    router.push("/mypage/login");
   }
 
   if (loading || !member) return <div className="p-8 text-muted">確認中…</div>;
