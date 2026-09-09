@@ -155,5 +155,12 @@ service cloud.firestore {
     match /meta/g1ShippingDoc {
       allow write: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
     }
+
+    // ---- g1ShippingLogs（G1の発送記録アーカイブ。発送のたびに1件作成） ----
+    match /g1ShippingLogs/{logId} {
+      allow read: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
+      allow create, update: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
+      allow delete: if isHonbu();
+    }
   }
 }

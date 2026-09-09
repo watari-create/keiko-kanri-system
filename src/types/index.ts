@@ -141,3 +141,23 @@ export interface G1ShippingDoc {
   updatedAt?: string;
   updatedBy?: string;
 }
+
+// 発送記録（アーカイブ）。発送チェックリストを実際の発送のたびに記入して保存したもの。
+// g1ShippingLogs コレクションの1件が1回の発送に対応する。
+// items はテンプレート（G1ShippingSection "page3-checklist"）の内容をその時点でコピーしたスナップショット。
+export interface G1ShippingLogItem {
+  name: string;
+  qty: string;
+  note: string;
+  sent: boolean;
+  returned: boolean;
+}
+
+export interface G1ShippingLog {
+  id: string;
+  date: string; // 発送日（YYYY-MM-DD想定、自由入力）
+  preparedBy: string;
+  items: G1ShippingLogItem[];
+  createdAt: string;
+  updatedAt?: string;
+}
