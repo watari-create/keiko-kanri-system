@@ -266,7 +266,7 @@ export const onMemberCreated = onDocumentCreated(
       `新しい入会申込がありました\n` +
       `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
       `会員No：${event.params.memberId}\n` +
-      `入門セットをご用意ください。`;
+      `入門セット（扇子、懐紙、服紗）をご用意ください。`;
 
     try {
       await postSlackMessage(token, channel, text);
