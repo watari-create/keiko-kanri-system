@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentUpdated, onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
@@ -21,6 +21,10 @@ const slackSigningSecret = defineSecret("SLACK_SIGNING_SECRET");
 // 請求書発行依頼の通知を送るSlackチャンネルのID（例：C0123456789）。
 // Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
 const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
+
+// 休会・退会・復会の申請通知を送るSlackチャンネルのID（本部稽古bo）。
+// Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
+const slackHqChannel = defineString("SLACK_HQ_CHANNEL");
 
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
@@ -191,6 +195,53 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
 );
 
 /**
+ * leaveRequests が新規作成されたら（申請直後、status: "pending"）、Slackに通知する。
+ * 本部担当者がこのメッセージに✔️のリアクションをつけると、下のslackEventsが検知して
+ * 自動的に「承認」処理を行う（onLeaveRequestApprovedが会員ステータスへ反映）。
+ *
+ * 送信したメッセージの ts / channel を leaveRequests ドキュメントに保存しておき、
+ * 下の slackEvents（✔️リアクション受信）で突き合わせに使う。
+ */
+export const onLeaveRequestCreated = onDocumentCreated(
+  { document: "leaveRequests/{requestId}", secrets: [slackBotToken] },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    if (data.status !== "pending") return;
+
+    const token = slackBotToken.value();
+    if (!token) {
+      console.warn("SLACK_BOT_TOKEN が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+    const channel = slackHqChannel.value();
+    if (!channel) {
+      console.warn("SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const text =
+      `${data.type}申請が届きました\n` +
+      `会員：${data.memberName}様（${data.group ?? ""}）\n` +
+      (data.reason ? `理由：${data.reason}\n` : "") +
+      `承認する場合は、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
+
+    try {
+      const posted = await postSlackMessage(token, channel, text);
+      if (posted && event.data) {
+        await event.data.ref.update({
+          slackTs: posted.ts,
+          slackChannel: posted.channel,
+        });
+        console.log(`Slack通知を送信しました ts=${posted.ts}`);
+      }
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
+    }
+  }
+);
+
+/**
  * Slack Events API受信エンドポイント。
  * 「請求書発行依頼」のSlackメッセージに✔️（heavy_check_mark）のリアクションがつくと、
  * 対応するlicenseRequestsのステータスを自動的に「請求書発行済」に進める。
@@ -260,6 +311,23 @@ export const slackEvents = onRequest(
               updatedAt: new Date().toISOString(),
             });
             console.log(`✔️リアクションによりステータスを更新しました requestId=${requestDoc.id}`);
+          }
+        }
+
+        const leaveSnap = await db
+          .collection("leaveRequests")
+          .where("slackTs", "==", slackEvent.item.ts)
+          .limit(1)
+          .get();
+        if (!leaveSnap.empty) {
+          const leaveDoc = leaveSnap.docs[0];
+          if (leaveDoc.data().status === "pending") {
+            await leaveDoc.ref.update({
+              status: "approved",
+              approvedAt: new Date().toISOString(),
+              approvedBy: "slack",
+            });
+            console.log(`✔️リアクションにより休会・退会・復会申請を承認しました requestId=${leaveDoc.id}`);
           }
         }
       }
