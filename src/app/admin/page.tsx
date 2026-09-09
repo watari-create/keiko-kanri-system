@@ -57,6 +57,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
 
 const LICENSE_STAGES: LicenseStatus[] = [
   "受付",
+  "請求書発行依頼",
   "請求書発行済",
   "発行手続き中",
   "発行済",
@@ -582,7 +583,7 @@ export default function AdminPage() {
               {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length}件 対応中）
             </h2>
             <p className="text-xs text-muted mb-3">
-              受付 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
+              受付 → 請求書発行依頼 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
             </p>
             <div className="space-y-3">
               {requests

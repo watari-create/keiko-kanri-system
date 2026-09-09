@@ -52,6 +52,7 @@ export interface StaffAccount {
 
 export type LicenseStatus =
   | "受付"
+  | "請求書発行依頼"
   | "請求書発行済"
   | "発行手続き中"
   | "発行済"

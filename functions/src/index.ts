@@ -102,8 +102,8 @@ export const onLicenseIssued = onDocumentUpdated(
 );
 
 /**
- * 許状申請のステータスが進んだら（本部管理画面で「次に進める」を押したら）、
- * Slackに通知する。許状段階の反映は上のonLicenseIssuedが別途行う。
+ * 許状申請が「請求書発行依頼」になったら、Slackに通知する（請求書発行の担当者への合図）。
+ * それ以外のステータス変更では通知しない。許状段階の反映は上のonLicenseIssuedが別途行う。
  */
 export const onLicenseRequestStatusChanged = onDocumentUpdated(
   { document: "licenseRequests/{requestId}", secrets: [slackWebhookUrl] },
@@ -112,6 +112,7 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     const after = event.data?.after.data();
     if (!before || !after) return;
     if (before.status === after.status) return;
+    if (after.status !== "請求書発行依頼") return;
 
     const webhookUrl = slackWebhookUrl.value();
     if (!webhookUrl) {
@@ -119,13 +120,11 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
       return;
     }
 
-    const headline =
-      after.status === "取消" ? "許状申請が取り消されました" : "許状申請が進みました";
     const text =
-      `${headline}\n` +
+      `請求書発行のご依頼です\n` +
       `会員：${after.memberName}様\n` +
       `許状：${after.licenseName}\n` +
-      `ステータス：${before.status} → ${after.status}`;
+      `合計：¥${after.fee?.toLocaleString?.() ?? after.fee}`;
 
     try {
       const res = await fetch(webhookUrl, {
