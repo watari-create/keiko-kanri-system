@@ -12,6 +12,9 @@ export interface Member {
   name: string;
   nameKana?: string; // 氏名（フリガナ）
   sotomei?: string; // 宗名
+  branch?: string; // 支部
+  shachu?: string; // 社中（代表・師匠にあたる会員名。社中代表を師匠として扱う運用）
+  age?: number; // 年齢
   birthDate?: string; // YYYY-MM-DD
   guardian?: string; // 保護者名（未成年会員のみ）
   guardianKana?: string;

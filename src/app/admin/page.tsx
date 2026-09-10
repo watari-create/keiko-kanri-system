@@ -27,6 +27,7 @@ import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { LICENSE_STATUS_EMOJI } from "@/types";
+import CsvImportModal from "@/components/CsvImportModal";
 import type {
   Member,
   LicenseRequest,
@@ -138,6 +139,9 @@ export default function AdminPage() {
   // スタッフ編集モーダル
   const [staffDraft, setStaffDraft] = useState<StaffDraft | null>(null);
   const [savingStaff, setSavingStaff] = useState(false);
+
+  // CSV名簿インポート（宗徧流稽古のみ）
+  const [showCsvImport, setShowCsvImport] = useState(false);
 
   // 次回のお稽古（Googleカレンダー同期）
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
@@ -253,7 +257,9 @@ export default function AdminPage() {
 
   const showBilling = area === "本部稽古";
   const showAffiliation = area === "UCI";
-  const colCount = 6 + (showAffiliation ? 1 : 0) + (showBilling ? 4 : 0);
+  const showSohenDetails = area === "宗徧流稽古";
+  const colCount =
+    6 + (showAffiliation ? 1 : 0) + (showBilling ? 4 : 0) + (showSohenDetails ? 3 : 0);
 
   async function updateMemberField<K extends keyof Member>(
     memberId: string,
@@ -565,15 +571,28 @@ export default function AdminPage() {
 
       {area !== "スタッフ管理" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
-          <h2 className="font-bold mb-1">会員名簿</h2>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-bold">会員名簿</h2>
+            {area === "宗徧流稽古" && (
+              <button
+                className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5"
+                onClick={() => setShowCsvImport(true)}
+              >
+                CSVから名簿を更新
+              </button>
+            )}
+          </div>
           <p className="text-xs text-muted mb-3">氏名をクリックすると詳細の閲覧・編集ができます</p>
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-muted border-b border-line">
                 <th className="py-2 pr-3">会員番号</th>
                 {showAffiliation && <th className="pr-3">所属</th>}
+                {showSohenDetails && <th className="pr-3">支部</th>}
                 <th className="pr-3">氏名</th>
                 <th className="pr-3">保護者名</th>
+                {showSohenDetails && <th className="pr-3">年齢</th>}
+                {showSohenDetails && <th className="pr-3">社中</th>}
                 <th className="pr-3">許状段階</th>
                 <th className="pr-3">入会日</th>
                 {showBilling && (
@@ -592,6 +611,7 @@ export default function AdminPage() {
                 <tr key={m.id} className="border-b border-line">
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
                   {showAffiliation && <td className="pr-3">{m.group}</td>}
+                  {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
                   <td className="pr-3">
                     <button
                       className="font-semibold text-matcha-deep underline decoration-dotted underline-offset-2"
@@ -601,6 +621,8 @@ export default function AdminPage() {
                     </button>
                   </td>
                   <td className="pr-3">{m.guardian ?? "—"}</td>
+                  {showSohenDetails && <td className="pr-3">{m.age ?? "—"}</td>}
+                  {showSohenDetails && <td className="pr-3">{m.shachu ?? "—"}</td>}
                   <td className="pr-3">{m.license ?? "—"}</td>
                   <td className="pr-3">{m.joinDate}</td>
                   {showBilling && (
@@ -946,6 +968,33 @@ export default function AdminPage() {
                   onChange={(e) => setDraft({ ...draft, sotomei: e.target.value })}
                 />
               </Field>
+              <Field label="支部">
+                <input
+                  className="input"
+                  value={draft.branch ?? ""}
+                  onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
+                />
+              </Field>
+              <Field label="社中（代表）">
+                <input
+                  className="input"
+                  value={draft.shachu ?? ""}
+                  onChange={(e) => setDraft({ ...draft, shachu: e.target.value })}
+                />
+              </Field>
+              <Field label="年齢">
+                <input
+                  type="number"
+                  className="input"
+                  value={draft.age ?? ""}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      age: e.target.value === "" ? undefined : Number(e.target.value),
+                    })
+                  }
+                />
+              </Field>
               <Field label="生年月日">
                 <input
                   type="date"
@@ -1206,6 +1255,14 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      <CsvImportModal
+        open={showCsvImport}
+        onClose={() => setShowCsvImport(false)}
+        group={group}
+        groupCategory="宗徧流稽古"
+        existingMembers={members}
+      />
 
       <style jsx global>{`
         .input {
