@@ -181,6 +181,9 @@ export default function EnrollPage() {
               <div className="w-10 h-10 rounded-full bg-matcha-pale text-matcha-deep flex items-center justify-center mx-auto mb-3 text-lg">
                 ✓
               </div>
+              <div className="text-base font-bold text-matcha-deep mb-1">
+                ご入会いただきありがとうございます
+              </div>
               <div className="text-sm text-muted">お申し込みを受け付けました</div>
             </div>
 
