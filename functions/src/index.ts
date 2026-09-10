@@ -316,6 +316,10 @@ export const onMemberCreated = onDocumentCreated(
     const data = event.data?.data();
     if (!data) return;
 
+    // 本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）の入会申込のみ通知する。
+    // 宗徧流稽古・UCIの新規登録（名簿のCSV一括取り込みを含む）ではSlack通知しない。
+    if (data.groupCategory !== "本部稽古") return;
+
     // 名月会の新規入門なら、入門セット在庫を自動的に1減らす（Slack通知の有無に関わらず実行）。
     const lowStockItems =
       data.group === MEIGETSUKAI_GROUP ? await decrementNyumonSetInventory() : [];
