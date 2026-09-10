@@ -19,6 +19,7 @@ export interface Member {
   birthDate?: string; // YYYY-MM-DD
   guardian?: string; // 保護者名（未成年会員のみ）
   guardianKana?: string;
+  gender?: "男の子" | "女の子"; // 性別（現在は名月会の入会フォームでのみ収集。入門セット在庫の自動減算に使う）
   grade?: string; // 学年（未成年会員のみ）
   occupation?: string; // ご職業
   otherLessons?: string; // 他のお稽古事

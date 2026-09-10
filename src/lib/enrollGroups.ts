@@ -53,6 +53,13 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
       { id: "name", label: "お子様のお名前", type: "text", placeholder: "山田 太郎", required: true },
       { id: "nameKana", label: "お子様のお名前（フリガナ）", type: "text", placeholder: "ヤマダ タロウ", required: true },
       { id: "birthDate", label: "生年月日", type: "date" },
+      {
+        id: "gender",
+        label: "性別",
+        type: "select",
+        options: ["男の子", "女の子"],
+        required: true,
+      },
       { id: "grade", label: "学年", type: "text", placeholder: "小学3年生" },
       { id: "otherLessons", label: "他のお稽古事", type: "text" },
       { id: "healthNotes", label: "アレルギーなど健康上の留意点", type: "text" },
