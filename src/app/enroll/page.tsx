@@ -118,6 +118,12 @@ export default function EnrollPage() {
   return (
     <div className="max-w-md mx-auto mt-16 p-6">
       <div className="text-center mb-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/meigetsukai-crest.png"
+          alt="家紋"
+          className="w-20 h-20 mx-auto mb-3"
+        />
         <div className="text-[11px] text-[#B8934A] tracking-widest mb-2">ENROLLMENT</div>
         <h1 className="text-xl font-bold text-matcha-deep">入会のお申し込み</h1>
       </div>
