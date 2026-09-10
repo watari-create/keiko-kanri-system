@@ -94,7 +94,7 @@ function areaForGroup(g: string): Area {
   return "UCI";
 }
 
-// 名月会の入門セット在庫。まだ何も登録されていない場合は、扇子・懐紙・服紗の3品目を0件で初期表示する。
+// 名月会の入門セット在庫。まだ何も登録されていない場合は、女性用/男性用入門セットと単品3品目を0件で初期表示する。
 type InventoryDraftRow = { name: string; qty: string };
 function inventoryToDraft(items: Record<string, number> | undefined): InventoryDraftRow[] {
   const entries = Object.entries(items ?? {});
@@ -263,8 +263,13 @@ export default function AdminPage() {
   const showBilling = area === "本部稽古";
   const showAffiliation = area === "UCI";
   const showSohenDetails = area === "宗徧流稽古";
+  const showGuardian = !showSohenDetails; // 宗徧流稽古は保護者欄を使わない
   const colCount =
-    6 + (showAffiliation ? 1 : 0) + (showBilling ? 4 : 0) + (showSohenDetails ? 3 : 0);
+    5 +
+    (showGuardian ? 1 : 0) +
+    (showAffiliation ? 1 : 0) +
+    (showBilling ? 4 : 0) +
+    (showSohenDetails ? 3 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
   const memberSections = useMemo(() => {
@@ -465,6 +470,16 @@ export default function AdminPage() {
     await deleteDoc(doc(db, "staff", s.id));
   }
 
+  async function removeMember(m: Member) {
+    if (
+      !confirm(
+        `${m.name}さん（会員番号${m.id}）を名簿から削除しますか？\nこの操作は取り消せません。`
+      )
+    )
+      return;
+    await deleteDoc(doc(db, "members", m.id));
+  }
+
   if (loading || role !== "honbu") return <div className="p-8 text-muted">確認中…</div>;
 
   return (
@@ -614,7 +629,7 @@ export default function AdminPage() {
                 {showAffiliation && <th className="pr-3">所属</th>}
                 {showSohenDetails && <th className="pr-3">支部</th>}
                 <th className="pr-3">氏名</th>
-                <th className="pr-3">保護者名</th>
+                {showGuardian && <th className="pr-3">保護者名</th>}
                 {showSohenDetails && <th className="pr-3">年齢</th>}
                 {showSohenDetails && <th className="pr-3">社中</th>}
                 <th className="pr-3">許状段階</th>
@@ -653,7 +668,7 @@ export default function AdminPage() {
                       {m.name}
                     </button>
                   </td>
-                  <td className="pr-3">{m.guardian ?? "—"}</td>
+                  {showGuardian && <td className="pr-3">{m.guardian ?? "—"}</td>}
                   {showSohenDetails && <td className="pr-3">{m.age ?? "—"}</td>}
                   {showSohenDetails && <td className="pr-3">{m.shachu ?? "—"}</td>}
                   <td className="pr-3">{m.license ?? "—"}</td>
@@ -689,6 +704,14 @@ export default function AdminPage() {
                       <option>休会</option>
                       <option>退会</option>
                     </select>
+                    {m.status === "退会" && (
+                      <button
+                        className="ml-2 text-xs text-hanko underline decoration-dotted underline-offset-2"
+                        onClick={() => removeMember(m)}
+                      >
+                        削除
+                      </button>
+                    )}
                   </td>
                 </tr>
                   ))}
@@ -1068,13 +1091,15 @@ export default function AdminPage() {
                   <option>女の子</option>
                 </select>
               </Field>
-              <Field label="保護者名">
-                <input
-                  className="input"
-                  value={draft.guardian ?? ""}
-                  onChange={(e) => setDraft({ ...draft, guardian: e.target.value })}
-                />
-              </Field>
+              {area !== "宗徧流稽古" && (
+                <Field label="保護者名">
+                  <input
+                    className="input"
+                    value={draft.guardian ?? ""}
+                    onChange={(e) => setDraft({ ...draft, guardian: e.target.value })}
+                  />
+                </Field>
+              )}
               <Field label="学年">
                 <input
                   className="input"
