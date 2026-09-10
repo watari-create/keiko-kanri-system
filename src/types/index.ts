@@ -13,6 +13,7 @@ export interface Member {
   nameKana?: string; // 氏名（フリガナ）
   sotomei?: string; // 宗名
   branch?: string; // 支部
+  subGroup?: string; // 組（雪月花内の雪組・月組・花組など。他の会では未使用）
   shachu?: string; // 社中（代表・師匠にあたる会員名。社中代表を師匠として扱う運用）
   age?: number; // 年齢
   birthDate?: string; // YYYY-MM-DD

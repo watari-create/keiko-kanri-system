@@ -22,6 +22,7 @@ type TargetField =
   | "branch"
   | "shachu"
   | "age"
+  | "subGroup"
   | "license"
   | "joinDate"
   | "status"
@@ -44,6 +45,7 @@ const TARGET_FIELDS: {
   { key: "branch", label: "支部", aliases: ["支部"] },
   { key: "shachu", label: "社中（代表）", aliases: ["社中", "社中代表", "師匠"] },
   { key: "age", label: "年齢", aliases: ["年齢", "age"] },
+  { key: "subGroup", label: "組（雪月花のみ）", aliases: ["組"] },
   { key: "license", label: "許状段階", aliases: ["許状段階", "許状"] },
   { key: "joinDate", label: "入会日", aliases: ["入会日", "入会年月日", "入会年"] },
   { key: "status", label: "ステータス", aliases: ["ステータス", "状態"] },
@@ -233,6 +235,8 @@ export default function CsvImportModal({
         const ageNum = Number(ageRaw);
         if (!Number.isNaN(ageNum)) data.age = ageNum;
       }
+      const subGroup = get("subGroup");
+      if (subGroup) data.subGroup = subGroup;
       const license = get("license");
       if (license) data.license = license;
       const joinDateRaw = get("joinDate");

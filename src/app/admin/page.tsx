@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // ⑤スタッフ（世話人・講師）アカウントの管理 をFirestore連携で実装している。
 // 出席簿・入金確認などは、同じパターン（Firestoreのコレクションを読み書きするだけ）で追加できる。
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -48,6 +48,9 @@ const AREA_GROUPS: Record<string, string[]> = {
   "宗徧流稽古": ["雪月花", "一喝会", "星組", "不識会", "萌芽会", "紅月会"],
   "本部稽古": ["名月会", "茶道教室", "Gマダムの茶の湯講座"],
 };
+
+// 雪月花は雪組・月組・花組の3つの実際のグループを束ねたもの。名簿はこの3区分で表示する。
+const SOHEN_SUBGROUPS = ["雪組", "月組", "花組"];
 
 const AREA_DESCRIPTION: Record<Area, string> = {
   "宗徧流稽古":
@@ -260,6 +263,25 @@ export default function AdminPage() {
   const showSohenDetails = area === "宗徧流稽古";
   const colCount =
     6 + (showAffiliation ? 1 : 0) + (showBilling ? 4 : 0) + (showSohenDetails ? 3 : 0);
+
+  // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
+  const memberSections = useMemo(() => {
+    if (group !== "雪月花") return [{ label: null as string | null, members }];
+    const bySub = new Map<string, Member[]>();
+    SOHEN_SUBGROUPS.forEach((s) => bySub.set(s, []));
+    const others: Member[] = [];
+    members.forEach((m) => {
+      const list = m.subGroup ? bySub.get(m.subGroup) : undefined;
+      if (list) list.push(m);
+      else others.push(m);
+    });
+    const sections = SOHEN_SUBGROUPS.map((s) => ({
+      label: s as string | null,
+      members: bySub.get(s)!,
+    })).filter((sec) => sec.members.length > 0);
+    if (others.length > 0) sections.push({ label: "組未設定", members: others });
+    return sections;
+  }, [group, members]);
 
   async function updateMemberField<K extends keyof Member>(
     memberId: string,
@@ -607,7 +629,16 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {members.map((m) => (
+              {memberSections.map((section) => (
+                <Fragment key={section.label ?? "__all__"}>
+                  {section.label && (
+                    <tr>
+                      <td colSpan={colCount} className="pt-4 pb-1 text-xs font-bold text-matcha-deep">
+                        {section.label}（{section.members.length}名）
+                      </td>
+                    </tr>
+                  )}
+                  {section.members.map((m) => (
                 <tr key={m.id} className="border-b border-line">
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
                   {showAffiliation && <td className="pr-3">{m.group}</td>}
@@ -658,6 +689,8 @@ export default function AdminPage() {
                     </select>
                   </td>
                 </tr>
+                  ))}
+                </Fragment>
               ))}
               {members.length === 0 && (
                 <tr>
@@ -994,6 +1027,20 @@ export default function AdminPage() {
                     })
                   }
                 />
+              </Field>
+              <Field label="組（雪月花のみ）">
+                <select
+                  className="input"
+                  value={draft.subGroup ?? ""}
+                  onChange={(e) =>
+                    setDraft({ ...draft, subGroup: e.target.value || undefined })
+                  }
+                >
+                  <option value="">（未設定）</option>
+                  <option>雪組</option>
+                  <option>月組</option>
+                  <option>花組</option>
+                </select>
               </Field>
               <Field label="生年月日">
                 <input
