@@ -124,8 +124,8 @@ export default function EnrollPage() {
           alt="家紋"
           className="w-20 h-20 mx-auto mb-3"
         />
-        <div className="text-[11px] text-[#B8934A] tracking-widest mb-2">ENROLLMENT</div>
-        <h1 className="text-xl font-bold text-matcha-deep">入会のお申し込み</h1>
+        <div className="text-[11px] text-[#B8934A] tracking-widest mb-2">茶道宗徧流不審庵</div>
+        <h1 className="text-xl font-bold text-matcha-deep">お稽古入会のお申し込み</h1>
       </div>
 
       {step === "form" && group.notice && (
