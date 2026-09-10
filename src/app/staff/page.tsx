@@ -23,6 +23,7 @@ import {
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES } from "@/lib/licenseFees";
+import { isHonbuKeikoGroup } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { LICENSE_STATUS_EMOJI } from "@/types";
@@ -72,7 +73,9 @@ export default function StaffPage() {
   }, [group]);
 
   useEffect(() => {
-    if (!group || account?.role !== "teacher") return;
+    // 許状申請は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）のグループのみ対象。
+    // 宗徧流稽古側のグループでは、スタッフの役割（世話人・講師）に関わらず対象外。
+    if (!group || !isHonbuKeikoGroup(group)) return;
     const q = query(collection(db, "licenseRequests"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
@@ -125,7 +128,8 @@ export default function StaffPage() {
     <div className="max-w-3xl mx-auto p-6">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-lg font-bold text-matcha-deep">
-          {account.role === "sewanin" ? "宗徧流稽古（世話人）" : "本部稽古（講師）"}
+          {isHonbuKeikoGroup(group) ? "本部稽古" : "宗徧流稽古"}
+          （{account.role === "sewanin" ? "世話人" : "講師"}）
         </h1>
         <div className="flex items-center gap-3">
           <Link
@@ -192,7 +196,7 @@ export default function StaffPage() {
         />
       </section>
 
-      {account.role === "teacher" && (
+      {isHonbuKeikoGroup(group) && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
           <h2 className="font-bold mb-3">許状申請の提出</h2>
           <select
@@ -229,7 +233,7 @@ export default function StaffPage() {
         </section>
       )}
 
-      {account.role === "teacher" && (
+      {isHonbuKeikoGroup(group) && (
         <section className="bg-paper border border-line rounded-md p-5">
           <h2 className="font-bold mb-1">許状申請の状況</h2>
           <p className="text-xs text-muted mb-3">

@@ -406,7 +406,10 @@ export default function AdminPage() {
     if (!selectedMember || !draft) return;
     setSavingDetail(true);
     try {
-      await updateDoc(doc(db, "members", selectedMember.id), { ...draft });
+      await updateDoc(doc(db, "members", selectedMember.id), {
+        ...draft,
+        email: draft.email.trim(),
+      });
       closeMemberDetail();
     } finally {
       setSavingDetail(false);

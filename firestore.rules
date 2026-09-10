@@ -36,6 +36,12 @@ service cloud.firestore {
       return isStaffFor(group) && staffDoc().role == 'teacher';
     }
 
+    // 許状申請（licenseRequests）は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）のみ対象。
+    // 宗徧流稽古側のグループでは、スタッフの役割（世話人・講師）に関わらず許状申請の機能自体を使わない。
+    function isHonbuKeikoGroup(group) {
+      return group in ['名月会', '茶道教室', 'Gマダムの茶の湯講座'];
+    }
+
     // 本人（マイページ）かどうか
     function isSelf(memberId) {
       return isSignedIn() && request.auth.token.memberId == memberId;
@@ -104,16 +110,18 @@ service cloud.firestore {
 
     // ---- licenseRequests（許状申請） ----
     match /licenseRequests/{requestId} {
-      allow read: if isHonbu() || isStaffFor(resource.data.group);
+      allow read: if isHonbu() || (isStaffFor(resource.data.group) && isHonbuKeikoGroup(resource.data.group));
 
-      // 講師：新規作成は可能
-      allow create: if isTeacherFor(request.resource.data.group);
+      // 講師：新規作成は可能（ただし本部稽古のグループのみ）
+      allow create: if isTeacherFor(request.resource.data.group)
+        && isHonbuKeikoGroup(request.resource.data.group);
 
       // 本部：全ステータス変更可
       allow update: if isHonbu();
 
-      // 講師：「発行済」→「お渡し済」の変更のみ可（他のフィールドは変更不可）
+      // 講師：「発行済」→「お渡し済」の変更のみ可（他のフィールドは変更不可、本部稽古のグループのみ）
       allow update: if isTeacherFor(resource.data.group)
+        && isHonbuKeikoGroup(resource.data.group)
         && resource.data.status == '発行済'
         && request.resource.data.status == 'お渡し済'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'updatedBy']);

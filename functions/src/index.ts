@@ -26,6 +26,10 @@ const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
 // Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
 const slackHqChannel = defineString("SLACK_HQ_CHANNEL");
 
+// 請求書発行依頼のSlack通知でメンションする人のSlackユーザーID（例：U0123456）。
+// 未設定でもエラーにはならず、メンションなしで通知するだけになる。
+const slackLicenseMentionUserId = defineString("SLACK_LICENSE_MENTION_USER_ID", { default: "" });
+
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
 const hqCalendarId = defineString("HQ_CALENDAR_ID");
@@ -46,7 +50,7 @@ export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(asy
 
   // まず会員（マイページ）として確認
   const memberSnap = await db.collection("members").doc(memberNo).get();
-  if (memberSnap.exists && (memberSnap.data()?.email || "").toLowerCase() === normalizedEmail) {
+  if (memberSnap.exists && (memberSnap.data()?.email || "").trim().toLowerCase() === normalizedEmail) {
     const uid = `member_${memberNo}`;
     const token = await admin.auth().createCustomToken(uid, {
       role: "member",
@@ -57,7 +61,7 @@ export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(asy
 
   // 次にスタッフ（世話人・講師）として確認
   const staffSnap = await db.collection("staff").doc(memberNo).get();
-  if (staffSnap.exists && (staffSnap.data()?.email || "").toLowerCase() === normalizedEmail) {
+  if (staffSnap.exists && (staffSnap.data()?.email || "").trim().toLowerCase() === normalizedEmail) {
     const uid = `staff_${memberNo}`;
     const token = await admin.auth().createCustomToken(uid, {
       role: "staff",
@@ -198,7 +202,10 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
       return;
     }
 
+    const mentionUserId = slackLicenseMentionUserId.value();
+    const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
     const text =
+      mentionPrefix +
       `請求書発行のご依頼です\n` +
       `会員：${after.memberName}様\n` +
       `許状：${after.licenseName}\n` +
