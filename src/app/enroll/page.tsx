@@ -18,7 +18,7 @@ import type { PaymentMethod } from "@/types";
 type Step = "form" | "confirm";
 
 export default function EnrollPage() {
-  const [groupKey, setGroupKey] = useState<string>("gmadam");
+  const [groupKey, setGroupKey] = useState<string>("meigetsu");
   const [values, setValues] = useState<Record<string, string>>({});
   const [step, setStep] = useState<Step>("form");
   const [issuedNo, setIssuedNo] = useState<string | null>(null);
