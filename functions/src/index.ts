@@ -271,11 +271,54 @@ export const onLeaveRequestCreated = onDocumentCreated(
  * members に新規ドキュメントが作成されたら（/enroll ページからの入会申し込み）、
  * Slackに通知する（入門セット準備の合図）。承認フローは無く、通知のみ。
  */
+// 名月会のFirestore上のgroup名。入門セット在庫の自動減算の対象を判定するのに使う。
+const MEIGETSUKAI_GROUP = "名月会";
+
+/**
+ * 名月会の入門セット（扇子・懐紙・服紗など）在庫を、新規入門1件につき1ずつ減らす。
+ * meta/nyumonSetInventory の items（品名→残数のマップ）に登録済みの品目すべてが対象。
+ * 0未満にはせず、減らした結果0になった品目名を返す（Slack通知で在庫不足として知らせる）。
+ * ドキュメントが未作成の場合は何もしない（先に管理画面で在庫を登録しておく想定）。
+ */
+async function decrementNyumonSetInventory(): Promise<string[]> {
+  const ref = db.doc("meta/nyumonSetInventory");
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) {
+        console.warn(
+          "meta/nyumonSetInventory が未作成のため、入門セット在庫の自動減算をスキップしました。"
+        );
+        return [];
+      }
+      const current = (snap.data()?.items ?? {}) as Record<string, number>;
+      const updates: Record<string, unknown> = {};
+      const lowStock: string[] = [];
+      for (const [name, qty] of Object.entries(current)) {
+        const next = Math.max(0, (Number(qty) || 0) - 1);
+        updates[`items.${name}`] = next;
+        if (next === 0) lowStock.push(name);
+      }
+      updates.updatedAt = new Date().toISOString();
+      updates.updatedBy = "system:入門登録";
+      tx.update(ref, updates);
+      return lowStock;
+    });
+  } catch (err) {
+    console.error("入門セット在庫の自動減算に失敗しました", err);
+    return [];
+  }
+}
+
 export const onMemberCreated = onDocumentCreated(
   { document: "members/{memberId}", secrets: [slackBotToken] },
   async (event) => {
     const data = event.data?.data();
     if (!data) return;
+
+    // 名月会の新規入門なら、入門セット在庫を自動的に1減らす（Slack通知の有無に関わらず実行）。
+    const lowStockItems =
+      data.group === MEIGETSUKAI_GROUP ? await decrementNyumonSetInventory() : [];
 
     const token = slackBotToken.value();
     if (!token) {
@@ -292,7 +335,10 @@ export const onMemberCreated = onDocumentCreated(
       `新しい入会申込がありました\n` +
       `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
       `会員No：${event.params.memberId}\n` +
-      `入門セット（扇子、懐紙、服紗）をご用意ください。`;
+      `入門セット（扇子、懐紙、服紗）をご用意ください。` +
+      (lowStockItems.length > 0
+        ? `\n⚠️ 入門セットの在庫が不足しています：${lowStockItems.join("、")}`
+        : "");
 
     try {
       await postSlackMessage(token, channel, text);

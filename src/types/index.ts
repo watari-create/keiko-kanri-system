@@ -161,3 +161,14 @@ export interface G1ShippingLog {
   createdAt: string;
   updatedAt?: string;
 }
+
+// ---- 名月会 入門セット在庫管理 ----
+// meta/nyumonSetInventory に保存する、入門セット（扇子・懐紙・服紗など）の残数。
+// items は「品名 → 残数」のマップ（品目を増減しても型を変えずに対応できるようにしている）。
+// 名月会で新規入門があるたびに、Cloud Functions（onMemberCreated）が items の全品目を
+// 自動的に1ずつ減らす（0未満にはしない。0になった品目はSlack通知で在庫不足として知らせる）。
+export interface NyumonSetInventory {
+  items: Record<string, number>;
+  updatedAt?: string;
+  updatedBy?: string;
+}

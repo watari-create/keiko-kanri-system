@@ -162,5 +162,11 @@ service cloud.firestore {
       allow create, update: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
       allow delete: if isHonbu();
     }
+
+    // ---- meta/nyumonSetInventory（名月会の入門セット在庫。本部が管理画面で編集し、
+    //      新規入門時はCloud Functions（Admin SDK、ルール適用外）が自動的に数量を減らす） ----
+    match /meta/nyumonSetInventory {
+      allow write: if isHonbu();
+    }
   }
 }
