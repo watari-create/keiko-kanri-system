@@ -100,9 +100,11 @@ function inventoryToDraft(items: Record<string, number> | undefined): InventoryD
   const entries = Object.entries(items ?? {});
   if (entries.length === 0) {
     return [
-      { name: "扇子", qty: "0" },
-      { name: "懐紙", qty: "0" },
-      { name: "服紗", qty: "0" },
+      { name: "女性用入門セット", qty: "0" },
+      { name: "男性用入門セット", qty: "0" },
+      { name: "こども服紗（オレンジ）", qty: "0" },
+      { name: "男性用扇子", qty: "0" },
+      { name: "女性用扇子", qty: "0" },
     ];
   }
   return entries.map(([name, qty]) => ({ name, qty: String(qty) }));
@@ -708,7 +710,7 @@ export default function AdminPage() {
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
           <h2 className="font-bold mb-2">出席簿</h2>
           <AttendanceGrid
-            members={members}
+            sections={memberSections}
             editable
             onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
           />
@@ -1049,6 +1051,22 @@ export default function AdminPage() {
                   value={draft.birthDate ?? ""}
                   onChange={(e) => setDraft({ ...draft, birthDate: e.target.value })}
                 />
+              </Field>
+              <Field label="性別（名月会のみ）">
+                <select
+                  className="input"
+                  value={draft.gender ?? ""}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      gender: (e.target.value || undefined) as typeof draft.gender,
+                    })
+                  }
+                >
+                  <option value="">（未設定）</option>
+                  <option>男の子</option>
+                  <option>女の子</option>
+                </select>
               </Field>
               <Field label="保護者名">
                 <input
