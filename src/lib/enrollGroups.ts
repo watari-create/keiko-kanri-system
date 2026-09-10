@@ -13,12 +13,21 @@ export interface EnrollField {
   required?: boolean;
 }
 
+// 会ごとの入会ページ上部の案内文（任意）。「入会の手引き」等の事前配布物への
+// ダウンロードリンクをまとめて表示するのに使う。設定しない会には何も表示されない。
+export interface EnrollGroupNotice {
+  body: string; // 改行込みの案内文（\nで改行）
+  guideUrl: string; // 「入会の手引き」等のダウンロードリンク（Dropbox/Google Driveの共有URLなど）
+  guideLabel?: string; // ダウンロードボタンの文言。省略時は「入会の手引きをダウンロード」
+}
+
 export interface EnrollGroupConfig {
   key: string;
   title: string; // Firestore上の group 名と一致させる
   amounts: { subscription: string; onetime: string };
   links: { subscription: string; onetime: string };
   fields: EnrollField[];
+  notice?: EnrollGroupNotice;
 }
 
 export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
@@ -54,6 +63,15 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
     links: {
       subscription: "https://checkout.square.site/merchant/MLX6H1BZAD14K/checkout/63FIWTMF4GKEBR35VEPGHC2A",
       onetime: "https://checkout.square.site/merchant/MLX6H1BZAD14K/checkout/INUH7BL7UTWK5JCBJEMFWR2I",
+    },
+    notice: {
+      body:
+        "この度は名月会にご興味お持ちいただきありがとうございます。\n" +
+        "下記の入会申込フォームより、入会手続きを行っていただきますようお願いいたします。\n" +
+        "入会の前に、下記より「入会の手引き」をダウンロードいただき、必ずお読みください。",
+      guideUrl:
+        "https://www.dropbox.com/scl/fi/hghqn5u0v7725b5h6yf7k/2025ver.pdf?rlkey=th6jyc9t5u6luqqdfr1vehr3n&st=0gbgwirb&dl=1",
+      guideLabel: "入会の手引きをダウンロード",
     },
     fields: [
       { id: "name", label: "お子様のお名前", type: "text", placeholder: "山田 太郎", required: true },

@@ -9,7 +9,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
@@ -27,6 +27,13 @@ export default function EnrollPage() {
   const [error, setError] = useState<string | null>(null);
 
   const group = ENROLL_GROUPS[groupKey];
+
+  // URLに ?group=meigetsu のように付けてアクセスした場合、その会をあらかじめ選択しておく。
+  // 会ごとの募集チラシ・SNS等から、案内文つきのページへ直接誘導するのに使う。
+  useEffect(() => {
+    const g = new URLSearchParams(window.location.search).get("group");
+    if (g && ENROLL_GROUPS[g]) setGroupKey(g);
+  }, []);
 
   function setField(id: string, v: string) {
     setValues((prev) => ({ ...prev, [id]: v }));
@@ -114,6 +121,20 @@ export default function EnrollPage() {
         <div className="text-[11px] text-[#B8934A] tracking-widest mb-2">ENROLLMENT</div>
         <h1 className="text-xl font-bold text-matcha-deep">入会のお申し込み</h1>
       </div>
+
+      {step === "form" && group.notice && (
+        <div className="bg-matcha-pale border border-line rounded-md p-5 mb-6 text-sm leading-relaxed">
+          <p className="whitespace-pre-line mb-4">{group.notice.body}</p>
+          <a
+            href={group.notice.guideUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-center bg-white border border-matcha-deep text-matcha-deep rounded py-3 text-sm font-semibold"
+          >
+            {group.notice.guideLabel ?? "入会の手引きをダウンロード"}
+          </a>
+        </div>
+      )}
 
       <div className="bg-paper border border-line rounded-md p-6">
         {step === "form" ? (
