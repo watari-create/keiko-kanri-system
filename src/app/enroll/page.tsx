@@ -154,7 +154,7 @@ export default function EnrollPage() {
               >
                 {Object.values(ENROLL_GROUPS).map((g) => (
                   <option key={g.key} value={g.key}>
-                    {g.title}
+                    {g.label ?? g.title}
                   </option>
                 ))}
               </select>

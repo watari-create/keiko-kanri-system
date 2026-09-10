@@ -23,7 +23,8 @@ export interface EnrollGroupNotice {
 
 export interface EnrollGroupConfig {
   key: string;
-  title: string; // Firestore上の group 名と一致させる
+  title: string; // Firestore上の group 名と一致させる（会員データの group フィールドに使うため変更しないこと）
+  label?: string; // 入会ページの選択肢に表示する名称。省略時は title を表示する（例：表示だけ「G1マダムの茶の湯講座」としたい場合に使う）
   amounts: { subscription: string; onetime: string };
   links: { subscription: string; onetime: string };
   fields: EnrollField[];
@@ -31,31 +32,6 @@ export interface EnrollGroupConfig {
 }
 
 export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
-  gmadam: {
-    key: "gmadam",
-    title: "Gマダムの茶の湯講座",
-    amounts: { subscription: "¥20,000", onetime: "¥20,000" },
-    links: {
-      subscription: "https://square.link/u/PdnF0sNj",
-      onetime: "https://square.link/u/PdnF0sNj",
-    },
-    fields: [
-      { id: "name", label: "氏名", type: "text", placeholder: "山田 花子", required: true },
-      { id: "nameKana", label: "氏名（フリガナ）", type: "text", placeholder: "ヤマダ ハナコ", required: true },
-      { id: "birthDate", label: "生年月日", type: "date" },
-      { id: "email", label: "メールアドレス", type: "email", placeholder: "example@mail.com", required: true },
-      { id: "phone", label: "電話番号", type: "tel", placeholder: "090-0000-0000", required: true },
-      { id: "address", label: "ご住所", type: "text" },
-      { id: "occupation", label: "ご職業", type: "text" },
-      {
-        id: "paymentMethod",
-        label: "お支払い方法",
-        type: "select",
-        options: ["月謝（自動払い）", "都度払い"],
-        required: true,
-      },
-    ],
-  },
   meigetsu: {
     key: "meigetsu",
     title: "名月会",
@@ -87,6 +63,32 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
       { id: "address", label: "ご住所", type: "text" },
       { id: "emergencyContact", label: "緊急連絡先", type: "tel" },
       { id: "expectations", label: "お稽古に期待すること", type: "text" },
+      {
+        id: "paymentMethod",
+        label: "お支払い方法",
+        type: "select",
+        options: ["月謝（自動払い）", "都度払い"],
+        required: true,
+      },
+    ],
+  },
+  gmadam: {
+    key: "gmadam",
+    title: "Gマダムの茶の湯講座",
+    label: "G1マダムの茶の湯講座",
+    amounts: { subscription: "¥20,000", onetime: "¥20,000" },
+    links: {
+      subscription: "https://square.link/u/PdnF0sNj",
+      onetime: "https://square.link/u/PdnF0sNj",
+    },
+    fields: [
+      { id: "name", label: "氏名", type: "text", placeholder: "山田 花子", required: true },
+      { id: "nameKana", label: "氏名（フリガナ）", type: "text", placeholder: "ヤマダ ハナコ", required: true },
+      { id: "birthDate", label: "生年月日", type: "date" },
+      { id: "email", label: "メールアドレス", type: "email", placeholder: "example@mail.com", required: true },
+      { id: "phone", label: "電話番号", type: "tel", placeholder: "090-0000-0000", required: true },
+      { id: "address", label: "ご住所", type: "text" },
+      { id: "occupation", label: "ご職業", type: "text" },
       {
         id: "paymentMethod",
         label: "お支払い方法",
