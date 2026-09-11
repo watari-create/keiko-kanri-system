@@ -17,6 +17,7 @@ import {
   where,
   onSnapshot,
   doc,
+  getDoc,
   updateDoc,
   setDoc,
   deleteDoc,
@@ -353,6 +354,97 @@ export default function AdminPage() {
       status: "取消",
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  function formatIssueMonth(issueMonth?: string): string {
+    if (!issueMonth) return "";
+    const [y, m] = issueMonth.split("-");
+    if (!y || !m) return issueMonth;
+    return `${y}年${parseInt(m, 10)}月`;
+  }
+
+  // 許状申請者一覧（対応中の全グループ分）を印刷する。
+  // 性別・年齢は会員ドキュメントから取得するため、印刷時にまとめて取得する。
+  async function printLicenseRequests() {
+    const activeRequests = allLicenseRequests
+      .filter((r) => r.status !== "完了" && r.status !== "取消")
+      .slice()
+      .sort((a, b) => a.group.localeCompare(b.group, "ja") || a.memberName.localeCompare(b.memberName, "ja"));
+
+    if (activeRequests.length === 0) {
+      alert("対応中の許状申請はありません。");
+      return;
+    }
+
+    const uniqueMemberIds = Array.from(new Set(activeRequests.map((r) => r.memberId)));
+    const memberSnaps = await Promise.all(
+      uniqueMemberIds.map((id) => getDoc(doc(db, "members", id)))
+    );
+    const memberById = new Map(
+      memberSnaps.map((snap) => [snap.id, snap.exists() ? (snap.data() as Member) : null])
+    );
+
+    const rowsHtml = activeRequests
+      .map((r) => {
+        const m = memberById.get(r.memberId);
+        return `<tr>
+          <td>${r.group}</td>
+          <td>${r.memberName}</td>
+          <td>${m?.gender ?? ""}</td>
+          <td>${m?.age ?? ""}</td>
+          <td>${r.licenseName}</td>
+          <td>${formatIssueMonth(r.issueMonth)}</td>
+        </tr>`;
+      })
+      .join("\n");
+
+    const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>許状申請者一覧</title>
+<style>
+  body { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; padding: 24px; color: #1a1a1a; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  p.meta { font-size: 12px; color: #555; margin-top: 0; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+  th { background: #f0f0f0; }
+  @media print {
+    body { padding: 0; }
+  }
+</style>
+</head>
+<body>
+  <h1>許状申請者一覧</h1>
+  <p class="meta">印刷日：${new Date().toLocaleDateString("ja-JP")}　対応中：${activeRequests.length}件</p>
+  <table>
+    <thead>
+      <tr>
+        <th>会</th>
+        <th>氏名</th>
+        <th>性別</th>
+        <th>年齢</th>
+        <th>申請許状名</th>
+        <th>申請月</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) {
+      alert("ポップアップがブロックされました。ブラウザの設定を確認してください。");
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
   }
 
   async function decideLeave(req: LeaveRequest, decision: "approved" | "rejected") {
@@ -842,12 +934,21 @@ export default function AdminPage() {
           </section>
 
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
-            <h2 className="font-bold mb-1">
-              許状申請（
-              {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length}件 対応中）
-            </h2>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-bold">
+                許状申請（
+                {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length}件 対応中）
+              </h2>
+              <button
+                className="text-xs border border-line text-ink rounded px-3 py-1.5"
+                onClick={printLicenseRequests}
+              >
+                申請者一覧を印刷
+              </button>
+            </div>
             <p className="text-xs text-muted mb-3">
               受付 → 請求書発行依頼 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
+              （「申請者一覧を印刷」は、全グループの対応中の申請をまとめて印刷します）
             </p>
             <div className="space-y-3">
               {requests

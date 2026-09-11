@@ -26,6 +26,7 @@ import { LICENSE_FEES } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import type { StaffAccount, Member, LicenseRequest } from "@/types";
 
@@ -38,6 +39,7 @@ export default function StaffPage() {
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
   const [applyMemberId, setApplyMemberId] = useState("");
   const [applyLicenseName, setApplyLicenseName] = useState(LICENSE_FEES[0].name);
+  const [applyIssueMonth, setApplyIssueMonth] = useState(currentMonthKey());
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
 
@@ -112,9 +114,11 @@ export default function StaffPage() {
       fee: licenseFee.fee + licenseFee.rei, // 申請料＋御礼の合計
       status: "受付",
       appliedDate: new Date().toISOString(),
+      issueMonth: applyIssueMonth,
     });
     setApplyMsg(`${member.name}様の「${licenseFee.name}」許状申請を提出しました。`);
     setApplyMemberId("");
+    setApplyIssueMonth(currentMonthKey());
   }
 
   async function logout() {
@@ -212,7 +216,7 @@ export default function StaffPage() {
             ))}
           </select>
           <select
-            className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
+            className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
             value={applyLicenseName}
             onChange={(e) => setApplyLicenseName(e.target.value)}
           >
@@ -222,6 +226,13 @@ export default function StaffPage() {
               </option>
             ))}
           </select>
+          <label className="block text-xs text-muted mb-1">申請月（許状に記載する月）</label>
+          <input
+            type="month"
+            className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
+            value={applyIssueMonth}
+            onChange={(e) => setApplyIssueMonth(e.target.value)}
+          />
           <button
             className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm disabled:opacity-50"
             disabled={!applyMemberId}

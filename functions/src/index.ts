@@ -30,6 +30,12 @@ const slackHqChannel = defineString("SLACK_HQ_CHANNEL");
 // 未設定でもエラーにはならず、メンションなしで通知するだけになる。
 const slackLicenseMentionUserId = defineString("SLACK_LICENSE_MENTION_USER_ID", { default: "" });
 
+// 許状「発行済」のSlack通知でメンションする人のSlackユーザーID（例：U0123456）。
+// 未設定でもエラーにはならず、メンションなしで通知するだけになる。
+const slackLicenseIssuedMentionUserId = defineString("SLACK_LICENSE_ISSUED_MENTION_USER_ID", {
+  default: "",
+});
+
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
 const hqCalendarId = defineString("HQ_CALENDAR_ID");
@@ -120,7 +126,10 @@ export const onLicenseIssued = onDocumentUpdated(
       const token = slackBotToken.value();
       const channel = slackHqChannel.value();
       if (token && channel) {
+        const mentionUserId = slackLicenseIssuedMentionUserId.value();
+        const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
         const text =
+          mentionPrefix +
           `許状が発行されました\n` +
           `会員：${after.memberName}様\n` +
           `許状：${after.licenseName}\n` +
