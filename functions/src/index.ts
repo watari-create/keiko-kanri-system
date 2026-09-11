@@ -34,6 +34,9 @@ const slackLicenseMentionUserId = defineString("SLACK_LICENSE_MENTION_USER_ID", 
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
 const hqCalendarId = defineString("HQ_CALENDAR_ID");
 
+// アプリの本番URL。Slack通知の「detail」ボタンのリンク先などに使う。
+const APP_BASE_URL = "https://okeiko.sohenryu.com";
+
 /**
  * マイページ・スタッフポータルのログイン確認。
  * 会員番号＋メールアドレスの組み合わせが members または staff コレクションと一致すれば、
@@ -97,8 +100,12 @@ export const onLeaveRequestApproved = onDocumentUpdated(
 );
 
 /**
- * licenseRequests のステータスが「発行済」に変わったら、
- * members 側の許状段階を更新し、通知ログに記録する。
+ * licenseRequests のステータス変更に応じて、Slack通知と許状段階の反映を行う。
+ *
+ * ・「発行済」になったら → 講師が生徒にお渡しできるよう、Slackに通知する
+ *   （許状段階の反映はまだ行わない。✔️リアクションで「お渡し済」に進む）。
+ * ・「完了」になったら → members 側の許状段階（license）を実際に更新し、通知ログに記録する
+ *   （本部の管理者が管理画面で最後の「次に進める」を押したタイミング）。
  */
 export const onLicenseIssued = onDocumentUpdated(
   { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
@@ -106,15 +113,8 @@ export const onLicenseIssued = onDocumentUpdated(
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!before || !after) return;
-    if (before.status !== "発行済" && after.status === "発行済") {
-      await db.collection("members").doc(after.memberId).update({ license: after.licenseName });
-      await db.collection("notifications").add({
-        kind: "license_issued",
-        message: `${after.memberName}様の「${after.licenseName}」が発行されました。`,
-        createdAt: new Date().toISOString(),
-        read: false,
-      });
 
+    if (before.status !== "発行済" && after.status === "発行済") {
       // 講師が生徒に許状をお渡しできたら✔️のリアクションで「お渡し済」に進められるよう、
       // 本部稽古boチャンネルに通知する（下のslackEventsで突き合わせに使う）。
       const token = slackBotToken.value();
@@ -141,6 +141,16 @@ export const onLicenseIssued = onDocumentUpdated(
         console.warn("SLACK_BOT_TOKEN または SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
       }
     }
+
+    if (before.status !== "完了" && after.status === "完了") {
+      await db.collection("members").doc(after.memberId).update({ license: after.licenseName });
+      await db.collection("notifications").add({
+        kind: "license_issued",
+        message: `${after.memberName}様の「${after.licenseName}」の手続きが完了しました。`,
+        createdAt: new Date().toISOString(),
+        read: false,
+      });
+    }
   }
 );
 
@@ -148,11 +158,15 @@ export const onLicenseIssued = onDocumentUpdated(
  * Slack Web API（chat.postMessage）でメッセージを送信する。
  * Incoming Webhookと違い、送信したメッセージの ts（タイムスタンプ／ID）が返ってくるため、
  * あとで届く reaction_added イベントと突き合わせることができる。
+ *
+ * blocks を渡すと、Block Kitのリッチな表示（ボタンなど）で送信する
+ * （text はその場合も通知プレビュー用のフォールバックとして必須）。
  */
 async function postSlackMessage(
   token: string,
   channel: string,
-  text: string
+  text: string,
+  blocks?: unknown[]
 ): Promise<{ ts: string; channel: string } | null> {
   const res = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
@@ -160,7 +174,7 @@ async function postSlackMessage(
       "Content-Type": "application/json; charset=utf-8",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ channel, text }),
+    body: JSON.stringify(blocks ? { channel, text, blocks } : { channel, text }),
   });
   const data = (await res.json()) as {
     ok: boolean;
@@ -173,6 +187,28 @@ async function postSlackMessage(
     return null;
   }
   return { ts: data.ts, channel: data.channel };
+}
+
+/**
+ * Slackメッセージに「detail」ボタン（押すと指定URLへ移動）を付けるためのBlock Kitブロックを作る。
+ */
+function detailButtonBlocks(bodyText: string, url: string): unknown[] {
+  return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: bodyText },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "detail", emoji: true },
+          url,
+        },
+      ],
+    },
+  ];
 }
 
 /**
@@ -221,6 +257,44 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
         });
         console.log(`Slack通知を送信しました ts=${posted.ts}`);
       }
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
+    }
+  }
+);
+
+/**
+ * licenseRequests が新規作成されたら（講師が許状申請した直後、status: "受付"）、Slackに通知する。
+ * 「detail」ボタンを押すと、管理画面のその申請までジャンプできる。
+ *
+ * ステータスの進行はここでは行わない（本部の担当者が管理画面の「次に進める」を押して進める）。
+ */
+export const onLicenseRequestCreated = onDocumentCreated(
+  { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    if (data.status !== "受付") return;
+
+    const token = slackBotToken.value();
+    if (!token) {
+      console.warn("SLACK_BOT_TOKEN が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+    const channel = slackHqChannel.value();
+    if (!channel) {
+      console.warn("SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const detailUrl = `${APP_BASE_URL}/admin?licenseRequestId=${event.params.requestId}`;
+    const text =
+      `許状申請が届きました\n` +
+      `会員：${data.memberName}様（${data.group ?? ""}）\n` +
+      `許状：${data.licenseName}`;
+
+    try {
+      await postSlackMessage(token, channel, text, detailButtonBlocks(text, detailUrl));
     } catch (err) {
       console.error("Slack通知の送信に失敗しました", err);
     }
@@ -386,7 +460,7 @@ export const onMemberCreated = onDocumentCreated(
 /**
  * Slack Events API受信エンドポイント。
  * 「請求書発行依頼」のSlackメッセージに✔️（heavy_check_mark）のリアクションがつくと、
- * 対応するlicenseRequestsのステータスを自動的に「請求書発行済」に進める。
+ * 対応するlicenseRequestsのステータスを自動的に「発行手続き中」に進める。
  *
  * 事前準備（Slack App側）：
  * 1. api.slack.com/apps でAppを作成
@@ -449,7 +523,7 @@ export const slackEvents = onRequest(
           const requestDoc = snap.docs[0];
           if (requestDoc.data().status === "請求書発行依頼") {
             await requestDoc.ref.update({
-              status: "請求書発行済",
+              status: "発行手続き中",
               updatedAt: new Date().toISOString(),
             });
             console.log(`✔️リアクションによりステータスを更新しました requestId=${requestDoc.id}`);

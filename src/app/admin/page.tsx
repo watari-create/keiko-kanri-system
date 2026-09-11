@@ -161,6 +161,22 @@ export default function AdminPage() {
     if (!loading && role !== "honbu") router.replace("/login");
   }, [loading, role, router]);
 
+  // Slack通知の「detail」ボタン（?licenseRequestId=...）から来た場合、
+  // 許状申請セクションのその申請までスクロールして知らせる。
+  const [highlightRequestId, setHighlightRequestId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("licenseRequestId");
+    if (!id) return;
+    setArea("本部稽古");
+    setHighlightRequestId(id);
+  }, []);
+  useEffect(() => {
+    if (!highlightRequestId) return;
+    const el = document.getElementById(`license-request-${highlightRequestId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightRequestId, requests]);
+
   useEffect(() => {
     if (area !== "本部稽古") {
       setNextLesson(null);
@@ -839,7 +855,10 @@ export default function AdminPage() {
                 .map((r) => (
                   <div
                     key={r.id}
-                    className="flex items-center justify-between border-b border-line pb-3"
+                    id={`license-request-${r.id}`}
+                    className={`flex items-center justify-between border-b border-line pb-3 ${
+                      r.id === highlightRequestId ? "bg-matcha-pale -mx-2 px-2 rounded" : ""
+                    }`}
                   >
                     <div>
                       <div className="font-semibold text-sm">{r.memberName}</div>
