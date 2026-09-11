@@ -357,16 +357,29 @@ export default function AdminPage() {
     });
   }
 
-  // 許状申請者一覧（対応中の全グループ分）を印刷する。
-  // 性別・年齢は会員ドキュメントから取得するため、印刷時にまとめて取得する。
+  // 生年月日から満年齢を計算する（印刷時点の年齢を毎回計算するため、常に最新）。
+  function calculateAge(birthDate?: string, at: Date = new Date()): number | null {
+    if (!birthDate) return null;
+    const bd = new Date(birthDate);
+    if (Number.isNaN(bd.getTime())) return null;
+    let age = at.getFullYear() - bd.getFullYear();
+    const monthDiff = at.getMonth() - bd.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && at.getDate() < bd.getDate())) {
+      age--;
+    }
+    return age;
+  }
+
+  // 許状申請者一覧（現在表示中のグループの、対応中の申請）を印刷する。
+  // 性別は会員ドキュメントの性別欄、年齢は生年月日から自動計算して取得する。
   async function printLicenseRequests() {
-    const activeRequests = allLicenseRequests
+    const activeRequests = requests
       .filter((r) => r.status !== "完了" && r.status !== "取消")
       .slice()
-      .sort((a, b) => a.group.localeCompare(b.group, "ja") || a.memberName.localeCompare(b.memberName, "ja"));
+      .sort((a, b) => a.memberName.localeCompare(b.memberName, "ja"));
 
     if (activeRequests.length === 0) {
-      alert("対応中の許状申請はありません。");
+      alert(`${group}の対応中の許状申請はありません。`);
       return;
     }
 
@@ -381,11 +394,11 @@ export default function AdminPage() {
     const rowsHtml = activeRequests
       .map((r) => {
         const m = memberById.get(r.memberId);
+        const age = m?.age != null ? m.age : calculateAge(m?.birthDate);
         return `<tr>
-          <td>${r.group}</td>
           <td>${r.memberName}</td>
           <td>${m?.gender ?? ""}</td>
-          <td>${m?.age ?? ""}</td>
+          <td>${age ?? ""}</td>
           <td>${r.licenseName}</td>
           <td>${formatYearMonth(r.issueMonth)}</td>
         </tr>`;
@@ -396,7 +409,7 @@ export default function AdminPage() {
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>許状申請者一覧</title>
+<title>許状申請者一覧（${group}）</title>
 <style>
   body { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; padding: 24px; color: #1a1a1a; }
   h1 { font-size: 18px; margin-bottom: 4px; }
@@ -410,12 +423,11 @@ export default function AdminPage() {
 </style>
 </head>
 <body>
-  <h1>許状申請者一覧</h1>
+  <h1>許状申請者一覧（${group}）</h1>
   <p class="meta">印刷日：${new Date().toLocaleDateString("ja-JP")}　対応中：${activeRequests.length}件</p>
   <table>
     <thead>
       <tr>
-        <th>会</th>
         <th>氏名</th>
         <th>性別</th>
         <th>年齢</th>
@@ -942,7 +954,7 @@ export default function AdminPage() {
             </div>
             <p className="text-xs text-muted mb-3">
               受付 → 請求書発行依頼 → 請求書発行済 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
-              （「申請者一覧を印刷」は、全グループの対応中の申請をまとめて印刷します）
+              （「申請者一覧を印刷」は、現在表示中の「{group}」の対応中の申請を印刷します）
             </p>
             <div className="space-y-3">
               {requests
