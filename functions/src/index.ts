@@ -32,6 +32,7 @@ const slackLicenseMentionUserId = defineString("SLACK_LICENSE_MENTION_USER_ID", 
 
 // 許状「発行済」のSlack通知でメンションする人のSlackユーザーID（例：U0123456）。
 // 未設定でもエラーにはならず、メンションなしで通知するだけになる。
+// メンションするのは名月会・Gマダムの茶の湯講座の申請のみ（下のonLicenseIssued内で判定）。
 const slackLicenseIssuedMentionUserId = defineString("SLACK_LICENSE_ISSUED_MENTION_USER_ID", {
   default: "",
 });
@@ -126,7 +127,11 @@ export const onLicenseIssued = onDocumentUpdated(
       const token = slackBotToken.value();
       const channel = slackHqChannel.value();
       if (token && channel) {
-        const mentionUserId = slackLicenseIssuedMentionUserId.value();
+        // メンションするのは名月会・Gマダムの茶の湯講座のみ（茶道教室では通知するがメンションしない）。
+        const mentionTargetGroups = ["名月会", "Gマダムの茶の湯講座"];
+        const mentionUserId = mentionTargetGroups.includes(after.group)
+          ? slackLicenseIssuedMentionUserId.value()
+          : "";
         const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
         const text =
           mentionPrefix +
