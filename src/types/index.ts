@@ -29,6 +29,9 @@ export interface Member {
   group: string; // 所属する会（例：名月会、雪月花）
   groupCategory: GroupCategory;
   license?: string; // 許状段階
+  // 茶歴（許状の取得履歴）。キーは許状名（LICENSE_FEESのnameと一致）、値は取得年月（"YYYY-MM"）。
+  // 本部稽古のみで使用。許状申請が「完了」になると自動で追記される。
+  licenseHistory?: Record<string, string>;
   joinDate: string; // YYYY-MM-DD
   status: MemberStatus;
   paymentMethod?: PaymentMethod; // 本部稽古のみ

@@ -28,6 +28,7 @@ import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { LICENSE_STATUS_EMOJI } from "@/types";
+import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import CsvImportModal from "@/components/CsvImportModal";
 import type {
   Member,
@@ -356,13 +357,6 @@ export default function AdminPage() {
     });
   }
 
-  function formatIssueMonth(issueMonth?: string): string {
-    if (!issueMonth) return "";
-    const [y, m] = issueMonth.split("-");
-    if (!y || !m) return issueMonth;
-    return `${y}年${parseInt(m, 10)}月`;
-  }
-
   // 許状申請者一覧（対応中の全グループ分）を印刷する。
   // 性別・年齢は会員ドキュメントから取得するため、印刷時にまとめて取得する。
   async function printLicenseRequests() {
@@ -393,7 +387,7 @@ export default function AdminPage() {
           <td>${m?.gender ?? ""}</td>
           <td>${m?.age ?? ""}</td>
           <td>${r.licenseName}</td>
-          <td>${formatIssueMonth(r.issueMonth)}</td>
+          <td>${formatYearMonth(r.issueMonth)}</td>
         </tr>`;
       })
       .join("\n");
@@ -1366,6 +1360,36 @@ export default function AdminPage() {
                 />
               </Field>
             </div>
+
+            {selectedMember.groupCategory === "本部稽古" && (
+              <div className="mt-4 pt-4 border-t border-line">
+                <h4 className="text-sm font-bold mb-1">茶歴</h4>
+                <p className="text-xs text-muted mb-2">
+                  各許状を取得した年月を記録します（未取得は空欄のまま）。許状申請が「完了」になると自動で記録されます。
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2">
+                  {LICENSE_FEES.map((l) => (
+                    <div key={l.name} className="flex items-center gap-2">
+                      <span className="text-xs w-24 shrink-0">{l.name}</span>
+                      <input
+                        type="month"
+                        className="input text-xs"
+                        value={draft.licenseHistory?.[l.name] ?? ""}
+                        onChange={(e) => {
+                          const next = { ...(draft.licenseHistory ?? {}) };
+                          if (e.target.value) {
+                            next[l.name] = e.target.value;
+                          } else {
+                            delete next[l.name];
+                          }
+                          setDraft({ ...draft, licenseHistory: next });
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 mt-6">
               <button

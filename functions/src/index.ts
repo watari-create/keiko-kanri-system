@@ -152,7 +152,19 @@ export const onLicenseIssued = onDocumentUpdated(
     }
 
     if (before.status !== "完了" && after.status === "完了") {
-      await db.collection("members").doc(after.memberId).update({ license: after.licenseName });
+      // 茶歴（licenseHistory）にも取得年月を記録する。申請時に指定された申請月（issueMonth）が
+      // あればそれを使い、なければ完了操作を行った今月を使う。
+      const now = new Date();
+      const fallbackMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const issueMonth = after.issueMonth || fallbackMonth;
+
+      await db
+        .collection("members")
+        .doc(after.memberId)
+        .update({
+          license: after.licenseName,
+          [`licenseHistory.${after.licenseName}`]: issueMonth,
+        });
       await db.collection("notifications").add({
         kind: "license_issued",
         message: `${after.memberName}様の「${after.licenseName}」の手続きが完了しました。`,

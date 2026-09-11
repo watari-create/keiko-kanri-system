@@ -25,3 +25,13 @@ export const LICENSE_FEES: LicenseFee[] = [
   { name: "教授補", rank: "普通会員", fee: 70000, rei: 0 },
   { name: "教授職", rank: "正会員", fee: 100000, rei: 0 },
 ];
+
+
+// "YYYY-MM" 形式の年月を「2026年9月」のような表示用文字列に変換する。
+// 許状申請の申請月（issueMonth）・会員の茶歴（licenseHistory）の両方で使う。
+export function formatYearMonth(value?: string): string {
+  if (!value) return "";
+  const [y, m] = value.split("-");
+  if (!y || !m) return value;
+  return `${y}年${parseInt(m, 10)}月`;
+}
