@@ -61,7 +61,6 @@ export interface StaffAccount {
 export type LicenseStatus =
   | "受付"
   | "請求書発行依頼"
-  | "請求書発行済"
   | "発行手続き中"
   | "発行済"
   | "お渡し済"
@@ -72,7 +71,6 @@ export type LicenseStatus =
 export const LICENSE_STATUS_EMOJI: Record<LicenseStatus, string> = {
   "受付": "📨",
   "請求書発行依頼": "📄",
-  "請求書発行済": "💰",
   "発行手続き中": "✍️",
   "発行済": "📜",
   "お渡し済": "🤝",
