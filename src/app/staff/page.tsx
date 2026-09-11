@@ -40,6 +40,7 @@ export default function StaffPage() {
   const [applyMemberId, setApplyMemberId] = useState("");
   const [applyLicenseName, setApplyLicenseName] = useState(LICENSE_FEES[0].name);
   const [applyIssueMonth, setApplyIssueMonth] = useState(currentMonthKey());
+  const [showLicenseHistory, setShowLicenseHistory] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
 
@@ -193,40 +194,55 @@ export default function StaffPage() {
 
       {isHonbuKeikoGroup(group) && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
-          <h2 className="font-bold mb-3">許状履歴</h2>
-          <div className="overflow-x-auto">
-            <table className="text-sm border-collapse">
-              <thead>
-                <tr className="text-left text-muted border-b border-line">
-                  <th className="py-2 pr-3 sticky left-0 bg-paper">氏名</th>
-                  {LICENSE_FEES.map((l) => (
-                    <th key={l.name} className="py-2 px-2 whitespace-nowrap font-normal">
-                      {l.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((m) => (
-                  <tr key={m.id} className="border-b border-line">
-                    <td className="py-2 pr-3 sticky left-0 bg-paper whitespace-nowrap">{m.name}</td>
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold">許状履歴</h2>
+            <button
+              className="text-xs border border-line text-ink rounded px-3 py-1.5"
+              onClick={() => setShowLicenseHistory((v) => !v)}
+            >
+              {showLicenseHistory ? "隠す" : "許状履歴を見る"}
+            </button>
+          </div>
+          {showLicenseHistory && (
+            <div className="overflow-x-auto mt-3">
+              <table className="text-sm border-collapse">
+                <thead>
+                  <tr className="text-left text-muted border-b border-line">
+                    <th className="py-2 pr-3 sticky left-0 bg-paper">氏名</th>
                     {LICENSE_FEES.map((l) => (
-                      <td key={l.name} className="py-2 px-2 whitespace-nowrap text-xs">
-                        {formatYearMonth(m.licenseHistory?.[l.name])}
-                      </td>
+                      <th key={l.name} className="py-2 px-2 whitespace-nowrap font-normal">
+                        {l.name}
+                      </th>
                     ))}
                   </tr>
-                ))}
-                {members.length === 0 && (
-                  <tr>
-                    <td colSpan={LICENSE_FEES.length + 1} className="py-4 text-center text-muted">
-                      会員がいません
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {members.map((m) => (
+                    <tr key={m.id} className="border-b border-line">
+                      <td className="py-2 pr-3 sticky left-0 bg-paper whitespace-nowrap">{m.name}</td>
+                      {LICENSE_FEES.map((l) => (
+                        <td
+                          key={l.name}
+                          className={`py-2 px-2 whitespace-nowrap text-xs ${
+                            l.name === m.license ? "bg-matcha-pale text-matcha-deep font-semibold" : ""
+                          }`}
+                        >
+                          {formatYearMonth(m.licenseHistory?.[l.name])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {members.length === 0 && (
+                    <tr>
+                      <td colSpan={LICENSE_FEES.length + 1} className="py-4 text-center text-muted">
+                        会員がいません
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 
