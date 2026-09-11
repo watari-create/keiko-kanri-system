@@ -204,43 +204,38 @@ export default function StaffPage() {
             </button>
           </div>
           {showLicenseHistory && (
-            <div className="overflow-x-auto mt-3">
-              <table className="text-sm border-collapse">
-                <thead>
-                  <tr className="text-left text-muted border-b border-line">
-                    <th className="py-2 pr-3 sticky left-0 bg-paper">氏名</th>
-                    {LICENSE_FEES.map((l) => (
-                      <th key={l.name} className="py-2 px-2 whitespace-nowrap font-normal">
-                        {l.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map((m) => (
-                    <tr key={m.id} className="border-b border-line">
-                      <td className="py-2 pr-3 sticky left-0 bg-paper whitespace-nowrap">{m.name}</td>
-                      {LICENSE_FEES.map((l) => (
-                        <td
-                          key={l.name}
-                          className={`py-2 px-2 whitespace-nowrap text-xs ${
-                            l.name === m.license ? "bg-matcha-pale text-matcha-deep font-semibold" : ""
-                          }`}
-                        >
-                          {formatYearMonth(m.licenseHistory?.[l.name])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                  {members.length === 0 && (
-                    <tr>
-                      <td colSpan={LICENSE_FEES.length + 1} className="py-4 text-center text-muted">
-                        会員がいません
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="mt-3 space-y-3">
+              {members.map((m) => {
+                const acquired = LICENSE_FEES.filter((l) => m.licenseHistory?.[l.name]);
+                return (
+                  <div key={m.id} className="border-b border-line pb-2">
+                    <div className="text-sm font-semibold mb-1">{m.name}</div>
+                    {acquired.length === 0 ? (
+                      <p className="text-xs text-muted">茶歴の記録がありません</p>
+                    ) : (
+                      <p className="text-xs leading-relaxed">
+                        {acquired.map((l, i) => (
+                          <span key={l.name}>
+                            <span
+                              className={
+                                l.name === m.license
+                                  ? "bg-matcha-pale text-matcha-deep font-semibold rounded px-1.5 py-0.5"
+                                  : ""
+                              }
+                            >
+                              {l.name}（{formatYearMonth(m.licenseHistory?.[l.name])}）
+                            </span>
+                            {i < acquired.length - 1 && <span className="text-muted mx-1">→</span>}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              {members.length === 0 && (
+                <p className="text-sm text-muted text-center py-4">会員がいません</p>
+              )}
             </div>
           )}
         </section>
