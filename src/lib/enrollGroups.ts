@@ -117,4 +117,7 @@ export function getOnetimeLinkForGroup(groupTitle: string): string | undefined {
 
 // 会員番号の自動採番の開始値。firestore.rules 側の counters/members 検証と対にしてある。
 // 実際の現行の最大会員番号が変わった場合は、両方を合わせて更新すること。
-export const MEMBER_COUNTER_START = 30000070;
+// 2026-09-11: counters/membersドキュメントが存在しない状態でテスト入会が行われ、
+// 既存の会員（30000070）が上書きされる事故があったため、実際の最大会員番号（30000071）
+// より後ろの30000073から始まるよう修正した。
+export const MEMBER_COUNTER_START = 30000073;

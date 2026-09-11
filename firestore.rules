@@ -96,7 +96,8 @@ service cloud.firestore {
     match /counters/{counterId} {
       allow read: if true;
       // 初回作成：合意済みの開始値からのみ許可
-      allow create: if counterId == 'members' && request.resource.data.next == 30000071;
+      // 2026-09-11: 実際の最大会員番号（30000071）との衝突事故を受け、開始値を30000073に変更。
+      allow create: if counterId == 'members' && request.resource.data.next == 30000074;
       // 更新：必ず1つずつ進める（飛び番・巻き戻しを禁止）
       allow update: if counterId == 'members'
         && request.resource.data.next == resource.data.next + 1;
