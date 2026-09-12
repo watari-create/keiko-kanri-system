@@ -95,17 +95,18 @@ function areaForGroup(g: string): Area {
   return "UCI";
 }
 
-// 名月会の入門セット在庫。まだ何も登録されていない場合は、女性用/男性用入門セットと単品3品目を0件で初期表示する。
+// 名月会の入門セット在庫。まだ何も登録されていない場合は、以下の5品目を0件で初期表示する
+// （年齢・性別に応じて入会時に自動で減算される品目。functions/src/index.tsのdecrementNyumonSetInventoryと対にしてある）。
 type InventoryDraftRow = { name: string; qty: string };
 function inventoryToDraft(items: Record<string, number> | undefined): InventoryDraftRow[] {
   const entries = Object.entries(items ?? {});
   if (entries.length === 0) {
     return [
-      { name: "女性用入門セット", qty: "0" },
-      { name: "男性用入門セット", qty: "0" },
-      { name: "こども服紗（オレンジ）", qty: "0" },
-      { name: "男性用扇子", qty: "0" },
-      { name: "女性用扇子", qty: "0" },
+      { name: "子供用服紗（3歳から8歳まで）", qty: "0" },
+      { name: "服紗（9歳以上）", qty: "0" },
+      { name: "扇子　女性用", qty: "0" },
+      { name: "扇子　男性用", qty: "0" },
+      { name: "懐紙", qty: "0" },
     ];
   }
   return entries.map(([name, qty]) => ({ name, qty: String(qty) }));

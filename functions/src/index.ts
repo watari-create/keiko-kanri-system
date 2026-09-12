@@ -381,28 +381,58 @@ export const onLeaveRequestCreated = onDocumentCreated(
 // 名月会のFirestore上のgroup名。入門セット在庫の自動減算の対象を判定するのに使う。
 const MEIGETSUKAI_GROUP = "名月会";
 
-// 会員の性別（入会フォームの「性別」欄）から、減らすべき入門セットの品目名を決める。
+// 生年月日から満年齢を計算する（入会した瞬間の年齢を計算する）。
+function calculateAgeFromBirthDate(birthDate: unknown, at: Date = new Date()): number | null {
+  if (typeof birthDate !== "string" || !birthDate) return null;
+  const bd = new Date(birthDate);
+  if (Number.isNaN(bd.getTime())) return null;
+  let age = at.getFullYear() - bd.getFullYear();
+  const monthDiff = at.getMonth() - bd.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && at.getDate() < bd.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+// 年齢から、減らすべき服紗の品目名を決める（3〜8歳と9歳以上で品目が分かれている）。
+// 3歳未満・年齢不明の場合は null を返し、服紗の在庫は減らさない。
+function fukusaKeyForAge(age: number | null): string | null {
+  if (age === null) return null;
+  if (age >= 3 && age <= 8) return "子供用服紗（3歳から8歳まで）";
+  if (age >= 9) return "服紗（9歳以上）";
+  return null;
+}
+
+// 性別（入会フォームの「性別」欄）から、減らすべき扇子の品目名を決める。
 // 性別が未設定・不明な場合は null を返し、在庫は減らさない。
-function nyumonSetKeyForGender(gender: unknown): string | null {
-  if (gender === "男の子") return "男性用入門セット";
-  if (gender === "女の子") return "女性用入門セット";
+function sensuKeyForGender(gender: unknown): string | null {
+  if (gender === "男の子") return "扇子　男性用";
+  if (gender === "女の子") return "扇子　女性用";
   return null;
 }
 
 /**
- * 名月会の入門セット在庫を、新規入門1件につき1つ減らす。
- * 男の子なら「男性用入門セット」、女の子なら「女性用入門セット」を、それぞれ1つだけ減らす
- * （こども服紗・扇子などの単品は自動では減らさない。管理画面から手動で調整する）。
- * 0未満にはせず、結果が0になった場合はその品目名を返す（Slack通知で在庫不足として知らせる）。
- * ドキュメントが未作成、または対象の品目が未登録の場合は何もしない
- * （先に管理画面で在庫を登録しておく想定）。性別が未設定・不明な場合も何もしない。
+ * 名月会の入門セット在庫を、新規入門1件につき減らす。
+ * ・服紗：年齢に応じて「子供用服紗（3歳から8歳まで）」または「服紗（9歳以上）」を1つ
+ * ・扇子：性別に応じて「扇子　男性用」または「扇子　女性用」を1つ
+ * ・懐紙：年齢・性別に関わらず、必ず1つ
+ * をそれぞれ減らす（年齢・性別が未設定/不明、または3歳未満の場合は、服紗・扇子はその分だけスキップする）。
+ * 0未満にはせず、結果が0になった品目名を返す（Slack通知で在庫不足として知らせる）。
+ * ドキュメントが未作成、または対象の品目が未登録の場合はその品目だけスキップする
+ * （先に管理画面で在庫を登録しておく想定）。
  */
-async function decrementNyumonSetInventory(gender: unknown): Promise<string[]> {
-  const key = nyumonSetKeyForGender(gender);
-  if (!key) {
-    console.warn(`性別が未設定または不明（"${String(gender)}"）のため、入門セット在庫の自動減算をスキップしました。`);
-    return [];
+async function decrementNyumonSetInventory(gender: unknown, birthDate: unknown): Promise<string[]> {
+  const age = calculateAgeFromBirthDate(birthDate);
+  const fukusaKey = fukusaKeyForAge(age);
+  const sensuKey = sensuKeyForGender(gender);
+  if (!fukusaKey) {
+    console.warn(`年齢が不明または3歳未満（"${String(age)}"）のため、服紗の在庫の自動減算をスキップしました。`);
   }
+  if (!sensuKey) {
+    console.warn(`性別が未設定または不明（"${String(gender)}"）のため、扇子の在庫の自動減算をスキップしました。`);
+  }
+  const keysToDecrement = ["懐紙", fukusaKey, sensuKey].filter((k): k is string => !!k);
+
   const ref = db.doc("meta/nyumonSetInventory");
   try {
     return await db.runTransaction(async (tx) => {
@@ -414,19 +444,26 @@ async function decrementNyumonSetInventory(gender: unknown): Promise<string[]> {
         return [];
       }
       const current = (snap.data()?.items ?? {}) as Record<string, number>;
-      if (!(key in current)) {
-        console.warn(
-          `meta/nyumonSetInventory に「${key}」が登録されていないため、入門セット在庫の自動減算をスキップしました。`
-        );
-        return [];
+      const updates: Record<string, number> = {};
+      const lowStock: string[] = [];
+      for (const key of keysToDecrement) {
+        if (!(key in current)) {
+          console.warn(
+            `meta/nyumonSetInventory に「${key}」が登録されていないため、この品目の自動減算をスキップしました。`
+          );
+          continue;
+        }
+        const next = Math.max(0, (Number(current[key]) || 0) - 1);
+        updates[`items.${key}`] = next;
+        if (next === 0) lowStock.push(key);
       }
-      const next = Math.max(0, (Number(current[key]) || 0) - 1);
+      if (Object.keys(updates).length === 0) return [];
       tx.update(ref, {
-        [`items.${key}`]: next,
+        ...updates,
         updatedAt: new Date().toISOString(),
         updatedBy: "system:入門登録",
       });
-      return next === 0 ? [key] : [];
+      return lowStock;
     });
   } catch (err) {
     console.error("入門セット在庫の自動減算に失敗しました", err);
@@ -444,9 +481,11 @@ export const onMemberCreated = onDocumentCreated(
     // 宗徧流稽古・UCIの新規登録（名簿のCSV一括取り込みを含む）ではSlack通知しない。
     if (data.groupCategory !== "本部稽古") return;
 
-    // 名月会の新規入門なら、性別に応じた入門セット在庫を自動的に1減らす（Slack通知の有無に関わらず実行）。
+    // 名月会の新規入門なら、年齢・性別に応じた入門セット在庫を自動的に減らす（Slack通知の有無に関わらず実行）。
     const lowStockItems =
-      data.group === MEIGETSUKAI_GROUP ? await decrementNyumonSetInventory(data.gender) : [];
+      data.group === MEIGETSUKAI_GROUP
+        ? await decrementNyumonSetInventory(data.gender, data.birthDate)
+        : [];
 
     const token = slackBotToken.value();
     if (!token) {
