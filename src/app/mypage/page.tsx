@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { doc, getDoc, onSnapshot, updateDoc, collection, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
@@ -110,6 +111,15 @@ export default function MyPage() {
       <button className="text-xs text-muted underline mb-4" onClick={logout}>
         ログアウト
       </button>
+
+      {member.group === "茶道教室" && (
+        <Link
+          href="/keiko-note"
+          className="block text-center text-sm bg-matcha-pale text-matcha-deep rounded-md py-2.5 mb-4"
+        >
+          お稽古ノートを見る
+        </Link>
+      )}
 
       <div className="bg-paper border border-line rounded-md p-6 mb-4 text-center">
         <div className="text-lg font-bold text-matcha-deep">{member.name} 様</div>

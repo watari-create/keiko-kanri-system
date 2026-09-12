@@ -1,0 +1,488 @@
+/* お稽古ノートページ専用スタイル。
+   プロトタイプ（https://okeiko-note-saturday.netlify.app/）の見た目をそのまま移植したもの。
+   他ページのTailwindスタイルと衝突しないよう、すべて .keiko-note-page 配下に閉じ込めている。 */
+
+.keiko-note-page{
+  --paper: #EFEAD9;
+  --paper-raised: #F8F4E8;
+  --ink: #2C2A24;
+  --ink-soft: #6B6553;
+  --matcha: #4B5D3A;
+  --matcha-deep: #37452A;
+  --gold: #A8823C;
+  --seal: #A23B2E;
+  --rule: #D9D2BC;
+  --rule-soft: #E6E0CC;
+
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Noto Sans JP', sans-serif;
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+.keiko-note-page *{box-sizing:border-box;}
+.keiko-note-page .wrap{
+  max-width:640px;
+  margin:0 auto;
+  padding:32px 20px 80px;
+}
+.keiko-note-page header{
+  padding-bottom:20px;
+  margin-bottom:24px;
+  border-bottom:1px solid var(--rule);
+}
+.keiko-note-page .eyebrow{
+  font-size:12px;
+  letter-spacing:0.2em;
+  color:var(--matcha);
+  margin:0 0 6px;
+  font-weight:700;
+}
+.keiko-note-page h1{
+  font-family:'Noto Serif JP', serif;
+  font-size:28px;
+  font-weight:600;
+  margin:0 0 6px;
+  letter-spacing:0.04em;
+}
+.keiko-note-page .sub{
+  font-size:13px;
+  color:var(--ink-soft);
+  margin:0;
+}
+.keiko-note-page .class-tabs{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:22px;
+}
+.keiko-note-page .class-tab{
+  flex:1 1 150px;
+  text-align:left;
+  padding:11px 14px;
+  border:1px solid var(--rule);
+  border-radius:6px;
+  background:var(--paper-raised);
+  cursor:pointer;
+  font-family:'Noto Sans JP', sans-serif;
+}
+.keiko-note-page .class-tab .ct-main{
+  font-size:13px;
+  font-weight:700;
+  color:var(--ink);
+}
+.keiko-note-page .class-tab .ct-sub{
+  font-size:11px;
+  color:var(--ink-soft);
+  margin-top:2px;
+}
+.keiko-note-page .class-tab.active{
+  background:var(--matcha);
+  border-color:var(--matcha);
+}
+.keiko-note-page .class-tab.active .ct-main,
+.keiko-note-page .class-tab.active .ct-sub{
+  color:#fff;
+}
+.keiko-note-page .mode-row{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:10px;
+  margin-bottom:18px;
+}
+.keiko-note-page .mode-label{
+  font-size:12px;
+  color:var(--ink-soft);
+}
+.keiko-note-page .toggle{
+  position:relative;
+  width:44px;
+  height:24px;
+  border-radius:12px;
+  background:var(--rule);
+  border:none;
+  cursor:pointer;
+  transition:background .2s ease;
+  flex-shrink:0;
+}
+.keiko-note-page .toggle.on{ background:var(--matcha); }
+.keiko-note-page .toggle .knob{
+  position:absolute;
+  top:2px; left:2px;
+  width:20px; height:20px;
+  border-radius:50%;
+  background:#fff;
+  transition:transform .2s ease;
+  box-shadow:0 1px 2px rgba(0,0,0,0.25);
+}
+.keiko-note-page .toggle.on .knob{ transform:translateX(20px); }
+
+.keiko-note-page .add-btn{
+  display:block;
+  width:100%;
+  padding:14px;
+  margin-bottom:16px;
+  background:var(--paper-raised);
+  border:1px dashed var(--gold);
+  border-radius:6px;
+  color:var(--gold);
+  font-family:'Noto Sans JP', sans-serif;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+  text-align:center;
+}
+.keiko-note-page .add-btn:hover{ background:#f2ead2; }
+
+.keiko-note-page .entry{
+  border-bottom:1px solid var(--rule-soft);
+}
+.keiko-note-page .entry-head{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:16px 4px;
+  cursor:pointer;
+}
+.keiko-note-page .bar{
+  width:4px;
+  align-self:stretch;
+  background:var(--matcha);
+  border-radius:2px;
+  flex-shrink:0;
+}
+.keiko-note-page .date-block{ flex:1; min-width:0; }
+.keiko-note-page .date-main{
+  font-family:'Noto Serif JP', serif;
+  font-size:18px;
+  font-weight:600;
+}
+.keiko-note-page .date-meta{
+  font-size:12px;
+  color:var(--ink-soft);
+  margin-top:2px;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.keiko-note-page .teacher-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+}
+.keiko-note-page .seal{
+  width:16px;height:16px;
+  border-radius:50%;
+  border:1.5px solid var(--seal);
+  color:var(--seal);
+  font-size:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-family:'Noto Serif JP', serif;
+  font-weight:600;
+  flex-shrink:0;
+}
+.keiko-note-page .chevron{
+  width:14px; height:14px;
+  border-right:2px solid var(--ink-soft);
+  border-bottom:2px solid var(--ink-soft);
+  transform:rotate(45deg);
+  transition:transform .25s ease;
+  margin-right:6px;
+  flex-shrink:0;
+}
+.keiko-note-page .entry.open .chevron{ transform:rotate(-135deg); }
+
+.keiko-note-page .entry-body{
+  display:none;
+}
+.keiko-note-page .entry.open .entry-body{ display:block; }
+.keiko-note-page .entry-body-inner{
+  padding:0 4px 20px 22px;
+  font-size:14px;
+  line-height:1.9;
+}
+.keiko-note-page .field-label{
+  font-size:11px;
+  color:var(--matcha);
+  font-weight:700;
+  letter-spacing:0.05em;
+  margin:14px 0 4px;
+}
+.keiko-note-page .field-label:first-child{ margin-top:0; }
+.keiko-note-page .field-text{
+  white-space:pre-wrap;
+  color:var(--ink);
+}
+.keiko-note-page .entry-title{
+  font-size:13px;
+  color:var(--ink-soft);
+}
+.keiko-note-page .toriawase{
+  border-top:1px solid var(--rule-soft);
+  margin-top:6px;
+}
+.keiko-note-page .toriawase-row{
+  padding:9px 0;
+  border-bottom:1px solid var(--rule-soft);
+}
+.keiko-note-page .toriawase-row .t-label{
+  font-family:'Noto Serif JP', serif;
+  font-size:12px;
+  color:var(--gold);
+  font-weight:600;
+  margin-bottom:2px;
+}
+.keiko-note-page .toriawase-row .t-value{
+  font-size:13px;
+  color:var(--ink);
+  line-height:1.7;
+}
+.keiko-note-page .content-para{
+  margin:0 0 12px;
+  white-space:pre-wrap;
+}
+.keiko-note-page .content-para:last-child{ margin-bottom:0; }
+.keiko-note-page .video-card{
+  padding:14px;
+  margin-top:6px;
+  background:var(--paper-raised);
+  border:1px solid var(--rule);
+  border-radius:6px;
+}
+.keiko-note-page .video-card-link{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  text-decoration:none;
+}
+.keiko-note-page .video-play{
+  width:32px; height:32px;
+  border-radius:50%;
+  background:var(--matcha);
+  flex-shrink:0;
+  position:relative;
+}
+.keiko-note-page .video-play::after{
+  content:'';
+  position:absolute;
+  top:50%; left:58%;
+  transform:translate(-50%,-50%);
+  border-style:solid;
+  border-width:6px 0 6px 10px;
+  border-color:transparent transparent transparent #fff;
+}
+.keiko-note-page .video-label{
+  font-size:14px;
+  font-weight:700;
+  color:var(--matcha-deep);
+}
+.keiko-note-page .video-caption{
+  font-size:12px;
+  color:var(--ink-soft);
+  line-height:1.7;
+  margin:8px 0 0;
+  padding-left:44px;
+}
+
+/* ブロック単位のリッチコンテンツ（お知らせ等） */
+.keiko-note-page .block{ margin-bottom:18px; }
+.keiko-note-page .block:last-child{ margin-bottom:0; }
+.keiko-note-page .block-title{
+  font-size:11px;
+  color:var(--matcha);
+  font-weight:700;
+  letter-spacing:0.05em;
+  margin:0 0 8px;
+}
+.keiko-note-page .block-title.warn{ color:var(--seal); }
+.keiko-note-page .bullets{
+  margin:0;
+  padding-left:1.2em;
+}
+.keiko-note-page .bullets li{
+  margin-bottom:6px;
+  line-height:1.8;
+}
+.keiko-note-page .bullets li:last-child{ margin-bottom:0; }
+.keiko-note-page .tools-list{
+  border-top:1px solid var(--rule-soft);
+}
+.keiko-note-page .tools-row{
+  padding:9px 0;
+  border-bottom:1px solid var(--rule-soft);
+}
+.keiko-note-page .tools-row .tool-name{
+  font-family:'Noto Serif JP', serif;
+  font-size:13px;
+  font-weight:600;
+  color:var(--ink);
+}
+.keiko-note-page .tools-row .tool-desc{
+  font-size:12px;
+  color:var(--ink-soft);
+  margin-top:2px;
+}
+.keiko-note-page .link-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 14px;
+  background:var(--paper-raised);
+  border:1px solid var(--rule);
+  border-radius:6px;
+  text-decoration:none;
+}
+.keiko-note-page .link-icon{
+  width:22px; height:22px;
+  flex-shrink:0;
+  border:1.5px solid var(--gold);
+  border-radius:4px;
+  position:relative;
+}
+.keiko-note-page .link-icon::after{
+  content:'';
+  position:absolute;
+  top:5px; left:5px; right:5px;
+  height:1.5px;
+  background:var(--gold);
+  box-shadow:0 4px 0 var(--gold), 0 8px 0 var(--gold);
+}
+.keiko-note-page .link-label{
+  font-size:13px;
+  color:var(--matcha-deep);
+  font-weight:700;
+}
+.keiko-note-page .video-group-item{
+  margin-bottom:12px;
+}
+.keiko-note-page .video-group-item:last-child{ margin-bottom:0; }
+.keiko-note-page .vgi-title{
+  font-family:'Noto Serif JP', serif;
+  font-size:13px;
+  font-weight:600;
+  margin:0 0 2px;
+}
+.keiko-note-page .vgi-note{
+  font-size:11px;
+  color:var(--ink-soft);
+  margin:0 0 6px;
+}
+.keiko-note-page .vgi-variants{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  align-items:flex-start;
+}
+.keiko-note-page .vgi-variants a{
+  font-size:12px;
+  color:var(--matcha-deep);
+  background:var(--paper-raised);
+  border:1px solid var(--rule);
+  border-radius:4px;
+  padding:7px 12px;
+  text-decoration:none;
+  display:block;
+  width:100%;
+}
+.keiko-note-page .vgi-variants.inline{
+  flex-direction:row;
+  flex-wrap:wrap;
+}
+.keiko-note-page .vgi-variants.inline a{ width:auto; }
+.keiko-note-page .vgi-variants a:hover{ background:#f2ead2; }
+.keiko-note-page .entry-actions{
+  margin-top:16px;
+  display:flex;
+  gap:14px;
+}
+.keiko-note-page .entry-actions button{
+  background:none;
+  border:none;
+  font-size:12px;
+  color:var(--ink-soft);
+  cursor:pointer;
+  padding:4px 0;
+  text-decoration:underline;
+  font-family:'Noto Sans JP', sans-serif;
+}
+.keiko-note-page .entry-actions button:hover{ color:var(--seal); }
+
+.keiko-note-page .empty{
+  text-align:center;
+  padding:60px 20px;
+  color:var(--ink-soft);
+  font-size:14px;
+  line-height:1.9;
+}
+
+/* フォーム */
+.keiko-note-page .form-panel{
+  background:var(--paper-raised);
+  border:1px solid var(--rule);
+  border-radius:8px;
+  padding:20px;
+  margin-bottom:20px;
+}
+.keiko-note-page .form-title{
+  font-family:'Noto Serif JP', serif;
+  font-size:16px;
+  font-weight:600;
+  margin:0 0 16px;
+}
+.keiko-note-page .form-row{ margin-bottom:14px; }
+.keiko-note-page .form-row label{
+  display:block;
+  font-size:12px;
+  color:var(--ink-soft);
+  margin-bottom:5px;
+  font-weight:700;
+}
+.keiko-note-page .form-row input,
+.keiko-note-page .form-row textarea,
+.keiko-note-page .form-row select{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--rule);
+  border-radius:5px;
+  font-family:'Noto Sans JP', sans-serif;
+  font-size:14px;
+  background:#fff;
+  color:var(--ink);
+  resize:vertical;
+}
+.keiko-note-page .form-row textarea{ min-height:70px; line-height:1.7; }
+.keiko-note-page .form-actions{
+  display:flex;
+  gap:10px;
+  margin-top:18px;
+}
+.keiko-note-page .btn-primary,
+.keiko-note-page .btn-secondary{
+  padding:10px 18px;
+  border-radius:5px;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+  font-family:'Noto Sans JP', sans-serif;
+  border:none;
+}
+.keiko-note-page .btn-primary{
+  background:var(--matcha);
+  color:#fff;
+}
+.keiko-note-page .btn-primary:hover{ background:var(--matcha-deep); }
+.keiko-note-page .btn-secondary{
+  background:none;
+  color:var(--ink-soft);
+  border:1px solid var(--rule);
+}
+.keiko-note-page .status{
+  font-size:12px;
+  color:var(--ink-soft);
+  text-align:center;
+  margin-top:20px;
+}

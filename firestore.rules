@@ -177,5 +177,13 @@ service cloud.firestore {
     match /meta/nyumonSetInventory {
       allow write: if isHonbu();
     }
+
+    // ---- keikoNoteEntries（茶道教室：お稽古ノート） ----
+    // このノートは一般公開ページ（ログイン不要で誰でも閲覧可）。
+    // 記録の追加・編集・削除は本部、または茶道教室担当の世話人・講師のみ（ログイン必須）。
+    match /keikoNoteEntries/{entryId} {
+      allow read: if true;
+      allow write: if isHonbu() || isStaffFor('茶道教室');
+    }
   }
 }

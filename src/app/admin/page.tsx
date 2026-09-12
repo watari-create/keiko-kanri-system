@@ -685,6 +685,14 @@ export default function AdminPage() {
           >
             G1発送物
           </Link>
+          <Link
+            href="/keiko-note"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink"
+          >
+            お稽古ノート
+          </Link>
         </div>
       </div>
 

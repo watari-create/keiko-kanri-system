@@ -178,3 +178,58 @@ export interface NyumonSetInventory {
   updatedAt?: string;
   updatedBy?: string;
 }
+
+// ---- お稽古ノート（茶道教室：土曜日・日曜日・火曜日クラスの記録） ----
+export interface KeikoNoteToriawaseItem {
+  label: string;
+  value: string;
+}
+
+export interface KeikoNoteVideo {
+  label: string;
+  url: string;
+  caption?: string;
+}
+
+export type KeikoNoteBlock =
+  | { type: "text"; text: string }
+  | { type: "section"; title?: string; text: string }
+  | { type: "bullets"; title?: string; items: string[] }
+  | { type: "tools"; title?: string; items: { name: string; desc: string }[] }
+  | { type: "toriawase"; title?: string; items: KeikoNoteToriawaseItem[] }
+  | { type: "link"; label: string; url: string }
+  | { type: "videos"; title?: string; emphasize?: boolean; items: KeikoNoteVideo[] }
+  | {
+      type: "videoGroup";
+      title?: string;
+      groups: { title?: string; note?: string; variants: { label: string; url: string }[] }[];
+    };
+
+export type KeikoNoteBlockType = KeikoNoteBlock["type"];
+
+export interface KeikoNoteClass {
+  id: string;
+  main: string; // 例：土曜日クラス
+  sub: string; // 例：風炉薄茶平点前
+}
+
+// 1件のお稽古記録。シンプルフォーム（topic/tools/notes/video(s)）と
+// ブロック編集（blocks）のどちらの形式も持ちうる（blocksがあればそちらを優先表示）。
+export interface KeikoNoteEntry {
+  id: string;
+  classId: string;
+  date: string; // YYYY-MM-DD
+  title?: string;
+  teacher?: string;
+  toriawase?: KeikoNoteToriawaseItem[];
+  topic?: string;
+  tools?: string;
+  notes?: string;
+  content?: string;
+  video?: KeikoNoteVideo;
+  videos?: KeikoNoteVideo[];
+  blocks?: KeikoNoteBlock[];
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}

@@ -137,6 +137,16 @@ export default function StaffPage() {
           （{account.role === "sewanin" ? "世話人" : "講師"}）
         </h1>
         <div className="flex items-center gap-3">
+          {account.groups.includes("茶道教室") && (
+            <Link
+              href="/keiko-note"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink"
+            >
+              お稽古ノート
+            </Link>
+          )}
           <Link
             href="/g1-shipping"
             target="_blank"
