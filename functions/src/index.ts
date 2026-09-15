@@ -37,6 +37,11 @@ const slackLicenseIssuedMentionUserId = defineString("SLACK_LICENSE_ISSUED_MENTI
   default: "",
 });
 
+// 名月会の新規入会があったときの「入会金 請求書発行依頼」Slack通知でメンションする人（大谷さん）の
+// SlackユーザーID（例：U0123456）。通知先チャンネルはSLACK_LICENSE_CHANNEL（請求書-経理全般）を流用する。
+// 未設定でもエラーにはならず、メンションなしで通知するだけになる。
+const slackEntryFeeMentionUserId = defineString("SLACK_ENTRY_FEE_MENTION_USER_ID", { default: "" });
+
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
 const hqCalendarId = defineString("HQ_CALENDAR_ID");
@@ -492,25 +497,50 @@ export const onMemberCreated = onDocumentCreated(
       console.warn("SLACK_BOT_TOKEN が未設定のため、Slack通知をスキップしました。");
       return;
     }
+
     const channel = slackHqChannel.value();
     if (!channel) {
       console.warn("SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
-      return;
+    } else {
+      const text =
+        `新しい入会申込がありました\n` +
+        `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
+        `会員No：${event.params.memberId}\n` +
+        `入門セット（扇子、懐紙、服紗）をご用意ください。` +
+        (lowStockItems.length > 0
+          ? `\n⚠️ 入門セットの在庫が不足しています：${lowStockItems.join("、")}`
+          : "");
+
+      try {
+        await postSlackMessage(token, channel, text);
+      } catch (err) {
+        console.error("Slack通知の送信に失敗しました", err);
+      }
     }
 
-    const text =
-      `新しい入会申込がありました\n` +
-      `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
-      `会員No：${event.params.memberId}\n` +
-      `入門セット（扇子、懐紙、服紗）をご用意ください。` +
-      (lowStockItems.length > 0
-        ? `\n⚠️ 入門セットの在庫が不足しています：${lowStockItems.join("、")}`
-        : "");
-
-    try {
-      await postSlackMessage(token, channel, text);
-    } catch (err) {
-      console.error("Slack通知の送信に失敗しました", err);
+    // 名月会の新規入会なら、入会金（¥33,000）の請求書発行依頼を経理チャンネルに送る（大谷さん宛）。
+    // 経理タブでの入金確認（entryFeeStatus）とは連動しない、あくまで発行依頼の合図。
+    if (data.group === MEIGETSUKAI_GROUP) {
+      const entryFeeChannel = slackLicenseChannel.value();
+      if (!entryFeeChannel) {
+        console.warn(
+          "SLACK_LICENSE_CHANNEL が未設定のため、入会金請求書発行依頼のSlack通知をスキップしました。"
+        );
+      } else {
+        const mentionUserId = slackEntryFeeMentionUserId.value();
+        const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
+        const entryFeeText =
+          mentionPrefix +
+          `入会金の請求書発行のご依頼です\n` +
+          `会員：${data.name ?? ""}様（名月会）\n` +
+          `会員No：${event.params.memberId}\n` +
+          `入会金：¥33,000`;
+        try {
+          await postSlackMessage(token, entryFeeChannel, entryFeeText);
+        } catch (err) {
+          console.error("入会金請求書発行依頼のSlack通知に失敗しました", err);
+        }
+      }
     }
 
     await db.collection("notifications").add({
