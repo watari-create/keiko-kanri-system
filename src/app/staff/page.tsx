@@ -43,6 +43,7 @@ export default function StaffPage() {
   const [showLicenseHistory, setShowLicenseHistory] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
@@ -180,21 +181,36 @@ export default function StaffPage() {
         </select>
       )}
 
-      <section className="bg-paper border border-line rounded-md p-5 mb-6">
-        <h2 className="font-bold mb-3">会員名簿</h2>
-        <table className="w-full text-sm">
+      <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
+        <h2 className="font-bold mb-1">会員名簿</h2>
+        <p className="text-xs text-muted mb-3">氏名をクリックすると詳細を見られます</p>
+        <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="text-left text-muted border-b border-line">
-              <th className="py-2">氏名</th>
-              <th>許状段階</th>
+              <th className="py-2 pr-3">会員番号</th>
+              <th className="pr-3">氏名</th>
+              <th className="pr-3">許状段階</th>
+              {isHonbuKeikoGroup(group) && <th className="pr-3">支払い方法</th>}
               <th>ステータス</th>
             </tr>
           </thead>
           <tbody>
             {members.map((m) => (
               <tr key={m.id} className="border-b border-line">
-                <td className="py-2">{m.name}</td>
-                <td>{m.license ?? "—"}</td>
+                <td className="py-2 pr-3">{m.id}</td>
+                <td className="pr-3">
+                  <button
+                    type="button"
+                    className="text-matcha-deep underline underline-offset-2"
+                    onClick={() => setSelectedMember(m)}
+                  >
+                    {m.name}
+                  </button>
+                </td>
+                <td className="pr-3">{m.license ?? "—"}</td>
+                {isHonbuKeikoGroup(group) && (
+                  <td className="pr-3">{m.paymentMethod ?? "—"}</td>
+                )}
                 <td>{m.status}</td>
               </tr>
             ))}
@@ -336,6 +352,46 @@ export default function StaffPage() {
               ))}
           </div>
         </section>
+      )}
+
+      {selectedMember && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50"
+          onClick={() => setSelectedMember(null)}
+        >
+          <div
+            className="bg-paper border border-line rounded-md p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-matcha-deep">{selectedMember.name}</h3>
+                <p className="text-xs text-muted">会員番号：{selectedMember.id}</p>
+              </div>
+              <button
+                type="button"
+                className="text-muted text-sm"
+                onClick={() => setSelectedMember(null)}
+              >
+                閉じる
+              </button>
+            </div>
+            <dl className="text-sm space-y-2">
+              <div className="flex justify-between border-b border-line pb-2">
+                <dt className="text-muted">保護者名</dt>
+                <dd>{selectedMember.guardian ?? "—"}</dd>
+              </div>
+              <div className="flex justify-between border-b border-line pb-2">
+                <dt className="text-muted">登録メールアドレス</dt>
+                <dd>{selectedMember.email || "—"}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-muted">入会日</dt>
+                <dd>{selectedMember.joinDate || "—"}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
       )}
     </div>
   );
