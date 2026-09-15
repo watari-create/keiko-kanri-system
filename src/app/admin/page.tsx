@@ -315,6 +315,20 @@ export default function AdminPage() {
     return sections;
   }, [group, members]);
 
+  // 経理タブ：都度払い会員の月謝グリッド対象（休会・退会中は対象外。アンジェラさんのように休会中の会員は掲載しない）
+  const sessionPaymentMembers = useMemo(
+    () => members.filter((m) => m.paymentMethod === "都度払い" && m.status === "在籍"),
+    [members]
+  );
+
+  // 経理タブ：入会金の対象会員（名月会のみ）。入会金の徴収は吉井さんの入会から始まったため、
+  // 吉井さんより前に入会した会員は対象外。吉井さん以降に入会した会員（今後の新規入会者を含む）のみ表示する
+  const entryFeeMembers = useMemo(() => {
+    const meigetsukai = members.filter((m) => m.group === "名月会");
+    const yoshii = meigetsukai.find((m) => m.name.includes("吉井"));
+    return yoshii ? meigetsukai.filter((m) => m.joinDate >= yoshii.joinDate) : meigetsukai;
+  }, [members]);
+
   async function updateMemberField<K extends keyof Member>(
     memberId: string,
     field: K,
@@ -781,9 +795,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {members
-                  .filter((m) => m.paymentMethod === "都度払い")
-                  .map((m) => (
+                {sessionPaymentMembers.map((m) => (
                     <tr key={m.id} className="border-b border-line">
                       <td className="py-2 pr-2 sticky left-0 bg-paper w-24">
                         <span className="block truncate" title={`${m.name}（${m.group}）`}>
@@ -816,7 +828,7 @@ export default function AdminPage() {
                       })}
                     </tr>
                   ))}
-                {members.filter((m) => m.paymentMethod === "都度払い").length === 0 && (
+                {sessionPaymentMembers.length === 0 && (
                   <tr>
                     <td colSpan={13} className="py-4 text-center text-muted">
                       都度払いの会員がいません
@@ -901,9 +913,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {members
-                  .filter((m) => m.group === "名月会")
-                  .map((m) => (
+                {entryFeeMembers.map((m) => (
                     <tr key={m.id} className="border-b border-line">
                       <td className="py-2 pr-3 font-semibold">{m.name}</td>
                       <td className="pr-3">{m.joinDate}</td>
@@ -929,7 +939,7 @@ export default function AdminPage() {
                       </td>
                     </tr>
                   ))}
-                {members.filter((m) => m.group === "名月会").length === 0 && (
+                {entryFeeMembers.length === 0 && (
                   <tr>
                     <td colSpan={4} className="py-4 text-center text-muted">
                       名月会の会員がいません
