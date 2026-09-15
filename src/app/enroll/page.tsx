@@ -76,7 +76,7 @@ export default function EnrollPage() {
           name: values.name ?? "",
           nameKana: values.nameKana ?? "",
           birthDate: values.birthDate ?? "",
-          gender: values.gender === "男の子" || values.gender === "女の子" ? values.gender : "",
+          gender: values.gender === "男性" || values.gender === "女性" ? values.gender : "",
           guardian: values.guardian ?? "",
           guardianKana: values.guardianKana ?? "",
           grade: values.grade ?? "",

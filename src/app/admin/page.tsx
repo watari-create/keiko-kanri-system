@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 // 本部用の管理画面。
-// 上部タブで「宗徧流稽古／本部稽古／UCI／スタッフ管理」の4エリアを切り替える。
+// 上部タブで「宗徧流稽古／本部稽古／経理／スタッフ管理」の4エリアを切り替える。
 // ①名簿の閲覧・編集 ②許状申請の進行 ③退会・休会・復会申請の承認 ④新着通知（申請中の案件一覧）
 // ⑤スタッフ（世話人・講師）アカウントの管理 をFirestore連携で実装している。
 // 出席簿・入金確認などは、同じパターン（Firestoreのコレクションを読み書きするだけ）で追加できる。
@@ -27,6 +27,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import CsvImportModal from "@/components/CsvImportModal";
@@ -36,16 +37,18 @@ import type {
   LicenseStatus,
   LeaveRequest,
   PaymentMethod,
-  Rsvp,
   StaffAccount,
   StaffRole,
   NyumonSetInventory,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "スタッフ管理";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "スタッフ管理"];
+type Area = "宗徧流稽古" | "本部稽古" | "経理" | "スタッフ管理";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "経理", "スタッフ管理"];
 
-// エリアごとの対象グループ。UCI・スタッフ管理はグループ選択なし（下のコードで分岐）。
+// 経理タブの対象グループ（名月会・Gマダムの茶の湯講座のみ）
+const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座"];
+
+// エリアごとの対象グループ。経理・スタッフ管理はグループ選択なし（下のコードで分岐）。
 const AREA_GROUPS: Record<string, string[]> = {
   "宗徧流稽古": ["雪月花", "一喝会", "星組", "不識会", "萌芽会", "紅月会"],
   "本部稽古": ["名月会", "茶道教室", "Gマダムの茶の湯講座"],
@@ -59,7 +62,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
     "直門（雪月花・一喝会・星組・不識会）・萌芽会・紅月会が対象。世話人が名簿と出席を管理します。",
   "本部稽古":
     "名月会・茶道教室・Gマダムの茶の湯講座が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
-  "UCI": "UCIの会員名簿です。グループ構成が決まり次第、グループ別の表示に対応します。",
+  "経理": "名月会・Gマダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
 };
 
@@ -92,7 +95,8 @@ function toDraft(m: Member): MemberDraft {
 function areaForGroup(g: string): Area {
   if (AREA_GROUPS["本部稽古"].includes(g)) return "本部稽古";
   if (AREA_GROUPS["宗徧流稽古"].includes(g)) return "宗徧流稽古";
-  return "UCI";
+  // UCIタブ廃止（経理タブに置き換え）に伴い、どちらにも属さない会は本部稽古にフォールバックする
+  return "本部稽古";
 }
 
 // 名月会の入門セット在庫。まだ何も登録されていない場合は、以下の5品目を0件で初期表示する
@@ -214,21 +218,24 @@ export default function AdminPage() {
       return;
     }
     const q =
-      area === "UCI"
-        ? query(collection(db, "members"), where("groupCategory", "==", "UCI"))
+      area === "経理"
+        ? query(collection(db, "members"), where("group", "in", KEIRI_GROUPS))
         : query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
     });
   }, [area, group]);
 
-  // 許状申請をリアルタイム購読（本部稽古のみ。宗徧流稽古は許状申請の仕組みを使わない）
+  // 許状申請をリアルタイム購読（本部稽古・経理のみ。宗徧流稽古は許状申請の仕組みを使わない）
   useEffect(() => {
-    if (area !== "本部稽古") {
+    if (area !== "本部稽古" && area !== "経理") {
       setRequests([]);
       return;
     }
-    const q = query(collection(db, "licenseRequests"), where("group", "==", group));
+    const q =
+      area === "経理"
+        ? query(collection(db, "licenseRequests"), where("group", "in", KEIRI_GROUPS))
+        : query(collection(db, "licenseRequests"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
     });
@@ -279,14 +286,14 @@ export default function AdminPage() {
   const notificationCount = pendingLicense.length + pendingLeave.length;
 
   const showBilling = area === "本部稽古";
-  const showAffiliation = area === "UCI";
+  const showAffiliation = false; // UCIタブ廃止（経理タブに置き換え）により所属列は使用しない
   const showSohenDetails = area === "宗徧流稽古";
   const showGuardian = !showSohenDetails; // 宗徧流稽古は保護者欄を使わない
   const colCount =
     5 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
-    (showBilling ? 4 : 0) +
+    (showBilling ? 2 : 0) +
     (showSohenDetails ? 3 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
@@ -324,6 +331,27 @@ export default function AdminPage() {
     await updateDoc(doc(db, "members", memberId), {
       [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
     });
+  }
+
+  // 経理タブ：入会金の入金状況（名月会のみ）
+  async function setEntryFeeStatus(memberId: string, value: "済" | "未納") {
+    await updateMemberField(memberId, "entryFeeStatus", value);
+  }
+
+  // 経理タブ：都度払い会員の、出席した月ごとの月謝入金状況
+  async function setSessionPayment(
+    memberId: string,
+    monthKey: string,
+    value: "済" | "未納" | undefined
+  ) {
+    await updateDoc(doc(db, "members", memberId), {
+      [`sessionPayments.${monthKey}`]: value === undefined ? deleteField() : value,
+    });
+  }
+
+  // 経理タブ：許状代金の入金確認（許状の進行ステータスとは独立して経理側で管理する）
+  async function setLicenseAccountingStatus(requestId: string, value: "済" | "未納") {
+    await updateDoc(doc(db, "licenseRequests", requestId), { accountingPaymentStatus: value });
   }
 
   async function advanceLicense(req: LicenseRequest) {
@@ -733,7 +761,188 @@ export default function AdminPage() {
         </div>
       )}
 
-      {area !== "スタッフ管理" && (
+      {area === "経理" && (
+        <>
+          {/* セクション1：都度払い会員の月謝（出席回ごと） */}
+          <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
+            <h2 className="font-bold mb-1">都度払い会員の月謝（出席回ごと）</h2>
+            <p className="text-xs text-muted mb-3">
+              出席簿と同じ形式です。セルをクリックして入金済/未納を切り替えます（出席していない月は「－」）
+            </p>
+            <table className="text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-muted border-b border-line">
+                  <th className="py-2 pr-2 sticky left-0 bg-paper w-24">氏名</th>
+                  {fiscalYearMonths().map((mk) => (
+                    <th key={mk} className="px-1 text-center font-medium">
+                      {monthLabel(mk)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {members
+                  .filter((m) => m.paymentMethod === "都度払い")
+                  .map((m) => (
+                    <tr key={m.id} className="border-b border-line">
+                      <td className="py-2 pr-2 sticky left-0 bg-paper w-24">
+                        <span className="block truncate" title={`${m.name}（${m.group}）`}>
+                          {m.name}（{m.group}）
+                        </span>
+                      </td>
+                      {fiscalYearMonths().map((mk) => {
+                        const attended = m.attendance?.[mk] === "出席";
+                        const val = m.sessionPayments?.[mk];
+                        if (!attended) {
+                          return (
+                            <td key={mk} className="w-9 h-9 text-center border border-line text-muted">
+                              －
+                            </td>
+                          );
+                        }
+                        const colorClass =
+                          val === "済"
+                            ? "text-matcha-deep font-bold bg-matcha-pale"
+                            : "text-hanko font-bold bg-hanko-pale";
+                        return (
+                          <td
+                            key={mk}
+                            className={`w-9 h-9 text-center border border-line cursor-pointer hover:bg-matcha-pale/40 ${colorClass}`}
+                            onClick={() => setSessionPayment(m.id, mk, val === "済" ? "未納" : "済")}
+                          >
+                            {val === "済" ? "済" : "未"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                {members.filter((m) => m.paymentMethod === "都度払い").length === 0 && (
+                  <tr>
+                    <td colSpan={13} className="py-4 text-center text-muted">
+                      都度払いの会員がいません
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <div className="flex gap-4 mt-2 text-xs text-muted">
+              <span>済　入金あり</span>
+              <span>未　出席したが未納</span>
+              <span>－　未出席・対象外</span>
+            </div>
+          </section>
+
+          {/* セクション2：許状代金の入金確認 */}
+          <section className="bg-paper border border-line rounded-md p-5 mb-6">
+            <h2 className="font-bold mb-1">許状代金の入金確認</h2>
+            <p className="text-xs text-muted mb-3">
+              請求書を発行し「発行手続き中」以降に進んだ申請が対象です（請求書発行依頼・お渡し済・完了・取消は含みません）。ここでの入金確認は許状の進行状況とは別に、経理側で個別に管理します。
+            </p>
+            <div className="space-y-3">
+              {requests
+                .filter((r) => {
+                  const idx = LICENSE_STAGES.indexOf(r.status);
+                  return (
+                    idx >= LICENSE_STAGES.indexOf("発行手続き中") &&
+                    idx <= LICENSE_STAGES.indexOf("発行済")
+                  );
+                })
+                .map((r) => (
+                  <div key={r.id} className="flex items-center justify-between border-b border-line pb-3">
+                    <div>
+                      <div className="font-semibold text-sm">
+                        {r.memberName}（{r.group}）
+                      </div>
+                      <div className="text-xs text-muted">
+                        {r.licenseName}　合計：¥{r.fee.toLocaleString()}　申請月：{formatYearMonth(r.issueMonth)}
+                      </div>
+                    </div>
+                    {r.accountingPaymentStatus === "済" ? (
+                      <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
+                        済
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs bg-hanko-pale text-hanko rounded-full px-3 py-1">
+                          未納
+                        </span>
+                        <button
+                          className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
+                          onClick={() => setLicenseAccountingStatus(r.id, "済")}
+                        >
+                          入金済にする
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              {requests.filter((r) => {
+                const idx = LICENSE_STAGES.indexOf(r.status);
+                return (
+                  idx >= LICENSE_STAGES.indexOf("発行手続き中") && idx <= LICENSE_STAGES.indexOf("発行済")
+                );
+              }).length === 0 && (
+                <p className="text-sm text-muted text-center py-4">対象の申請はありません</p>
+              )}
+            </div>
+          </section>
+
+          {/* セクション3：入会金の入金確認（名月会のみ） */}
+          <section className="bg-paper border border-line rounded-md p-5 mb-6">
+            <h2 className="font-bold mb-1">入会金の入金確認（名月会のみ）</h2>
+            <p className="text-xs text-muted mb-3">入会金は一律 ¥33,000（Gマダムの茶の湯講座は対象外）</p>
+            <table className="w-full text-sm whitespace-nowrap">
+              <thead>
+                <tr className="text-left text-muted border-b border-line">
+                  <th className="py-2 pr-3">会員名</th>
+                  <th className="pr-3">入会日</th>
+                  <th className="pr-3">入会金</th>
+                  <th>入金状況</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members
+                  .filter((m) => m.group === "名月会")
+                  .map((m) => (
+                    <tr key={m.id} className="border-b border-line">
+                      <td className="py-2 pr-3 font-semibold">{m.name}</td>
+                      <td className="pr-3">{m.joinDate}</td>
+                      <td className="pr-3">¥33,000</td>
+                      <td>
+                        {m.entryFeeStatus === "済" ? (
+                          <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
+                            済
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs bg-hanko-pale text-hanko rounded-full px-3 py-1">
+                              未納
+                            </span>
+                            <button
+                              className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
+                              onClick={() => setEntryFeeStatus(m.id, "済")}
+                            >
+                              入金済にする
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                {members.filter((m) => m.group === "名月会").length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-4 text-center text-muted">
+                      名月会の会員がいません
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {area !== "スタッフ管理" && area !== "経理" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
@@ -761,10 +970,8 @@ export default function AdminPage() {
                 <th className="pr-3">入会日</th>
                 {showBilling && (
                   <>
-                    <th className="pr-3">入金状況</th>
                     <th className="pr-3">次回請求日</th>
                     <th className="pr-3">支払い方法</th>
-                    <th className="pr-3">次回出欠</th>
                   </>
                 )}
                 <th>ステータス</th>
@@ -800,7 +1007,6 @@ export default function AdminPage() {
                   <td className="pr-3">{m.joinDate}</td>
                   {showBilling && (
                     <>
-                      <td className="pr-3">{m.paymentStatus ?? "—"}</td>
                       <td className="pr-3">{m.nextBillingDate ?? "—"}</td>
                       <td className="pr-3">
                         <select
@@ -814,7 +1020,6 @@ export default function AdminPage() {
                           <option>都度払い</option>
                         </select>
                       </td>
-                      <td className="pr-3">{m.rsvp ?? "未回答"}</td>
                     </>
                   )}
                   <td>
@@ -1224,8 +1429,8 @@ export default function AdminPage() {
                   }
                 >
                   <option value="">（未設定）</option>
-                  <option>男の子</option>
-                  <option>女の子</option>
+                  <option>男性</option>
+                  <option>女性</option>
                 </select>
               </Field>
               {area !== "宗徧流稽古" && (
@@ -1286,21 +1491,6 @@ export default function AdminPage() {
                       <option>都度払い</option>
                     </select>
                   </Field>
-                  <Field label="入金状況">
-                    <select
-                      className="input"
-                      value={draft.paymentStatus ?? "未納"}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          paymentStatus: e.target.value as "済" | "未納",
-                        })
-                      }
-                    >
-                      <option>済</option>
-                      <option>未納</option>
-                    </select>
-                  </Field>
                   <Field label="次回請求日">
                     <input
                       type="date"
@@ -1308,17 +1498,6 @@ export default function AdminPage() {
                       value={draft.nextBillingDate ?? ""}
                       onChange={(e) => setDraft({ ...draft, nextBillingDate: e.target.value })}
                     />
-                  </Field>
-                  <Field label="次回出欠">
-                    <select
-                      className="input"
-                      value={draft.rsvp ?? "未回答"}
-                      onChange={(e) => setDraft({ ...draft, rsvp: e.target.value as Rsvp })}
-                    >
-                      <option>出席</option>
-                      <option>欠席</option>
-                      <option>未回答</option>
-                    </select>
                   </Field>
                 </>
               )}

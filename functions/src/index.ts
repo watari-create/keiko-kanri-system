@@ -406,8 +406,8 @@ function fukusaKeyForAge(age: number | null): string | null {
 // 性別（入会フォームの「性別」欄）から、減らすべき扇子の品目名を決める。
 // 性別が未設定・不明な場合は null を返し、在庫は減らさない。
 function sensuKeyForGender(gender: unknown): string | null {
-  if (gender === "男の子") return "扇子　男性用";
-  if (gender === "女の子") return "扇子　女性用";
+  if (gender === "男性") return "扇子　男性用";
+  if (gender === "女性") return "扇子　女性用";
   return null;
 }
 

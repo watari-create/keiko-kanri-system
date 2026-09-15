@@ -19,7 +19,7 @@ export interface Member {
   birthDate?: string; // YYYY-MM-DD
   guardian?: string; // 保護者名（未成年会員のみ）
   guardianKana?: string;
-  gender?: "男の子" | "女の子"; // 性別（現在は名月会の入会フォームでのみ収集。入門セット在庫の自動減算に使う）
+  gender?: "男性" | "女性"; // 性別（現在は名月会の入会フォームでのみ収集。入門セット在庫の自動減算に使う）
   grade?: string; // 学年（未成年会員のみ）
   occupation?: string; // ご職業
   otherLessons?: string; // 他のお稽古事
@@ -41,6 +41,10 @@ export interface Member {
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
+  // 入会金の入金状況（名月会のみ対象、一律¥33,000。経理タブで管理）
+  entryFeeStatus?: "済" | "未納";
+  // 都度払い会員の、出席した月ごとの月謝入金状況（キーはattendanceと同じ会計年度の月）。経理タブで管理
+  sessionPayments?: Record<string, "済" | "未納">;
   email: string;
   phone?: string;
   address?: string;
@@ -91,6 +95,8 @@ export interface LicenseRequest {
   deliveryDate?: string; // お渡し予定日
   updatedAt?: string;
   updatedBy?: string; // 更新した人のUIDまたは会員番号
+  // 経理タブ用の入金確認（許状の進行ステータスとは独立して経理側で管理する）
+  accountingPaymentStatus?: "済" | "未納";
 }
 
 export type LeaveRequestType = "休会" | "退会" | "復会";

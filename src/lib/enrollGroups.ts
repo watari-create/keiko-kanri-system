@@ -57,7 +57,7 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
         id: "gender",
         label: "性別",
         type: "select",
-        options: ["男の子", "女の子"],
+        options: ["男性", "女性"],
         required: true,
       },
       { id: "grade", label: "学年", type: "text", placeholder: "小学3年生" },
