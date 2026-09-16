@@ -18,6 +18,14 @@ const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
 // 設定方法： firebase functions:secrets:set SLACK_SIGNING_SECRET
 const slackSigningSecret = defineSecret("SLACK_SIGNING_SECRET");
 
+// LINE公式アカウント（Messaging API）のチャンネルアクセストークン。応答メッセージの送信に使う。
+// 設定方法： firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
+const lineChannelAccessToken = defineSecret("LINE_CHANNEL_ACCESS_TOKEN");
+
+// LINE公式アカウントのチャンネルシークレット。Webhookの送信元がLINEであることを検証するのに使う。
+// 設定方法： firebase functions:secrets:set LINE_CHANNEL_SECRET
+const lineChannelSecret = defineSecret("LINE_CHANNEL_SECRET");
+
 // 請求書発行依頼の通知を送るSlackチャンネルのID（例：C0123456789）。
 // Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
 const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
@@ -658,6 +666,191 @@ export const slackEvents = onRequest(
             console.log(`✔️リアクションにより休会・退会・復会申請を承認しました requestId=${leaveDoc.id}`);
           }
         }
+      }
+    }
+
+    res.status(200).send("ok");
+  }
+);
+
+/**
+ * LINE公式アカウントに応答メッセージ（replyToken使用・無料）を送信する。
+ * プッシュメッセージと違い、ユーザーからのメッセージ受信をきっかけにした返信のみに使える。
+ */
+async function replyLineMessage(replyToken: string, accessToken: string, text: string): Promise<void> {
+  const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ replyToken, messages: [{ type: "text", text }] }),
+  });
+  if (!res.ok) {
+    console.error(`LINE応答メッセージの送信に失敗しました: ${res.status} ${await res.text()}`);
+  }
+}
+
+function formatDateJp(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  return `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]})`;
+}
+
+/**
+ * LINE連携済みの会員に「予約状況」と聞かれたときの返信文を組み立てる。
+ * 茶道教室・土曜日クラスの会員は直近の予約（午前/午後・担当講師）、それ以外は
+ * 次回のお稽古日と現在の出欠回答（rsvp）を案内する。
+ */
+async function buildLineStatusMessage(
+  member: FirebaseFirestore.DocumentData & { id: string }
+): Promise<string> {
+  if (member.group === "茶道教室" && member.chadoClass === "土曜日") {
+    const today = new Date().toISOString().slice(0, 10);
+    const snap = await db
+      .collection("chadoSaturdaySessions")
+      .where("date", ">=", today)
+      .orderBy("date")
+      .limit(10)
+      .get();
+    for (const sessionDoc of snap.docs) {
+      const data = sessionDoc.data();
+      const amBookings = (data.amBookings ?? []) as Array<{ memberId: string }>;
+      const pmBookings = (data.pmBookings ?? []) as Array<{ memberId: string }>;
+      if (amBookings.some((b) => b.memberId === member.id)) {
+        return `${member.name}様
+${formatDateJp(data.date)}（午前）にご予約があります。${
+          data.amTeacher ? `担当：${data.amTeacher}` : ""
+        }`;
+      }
+      if (pmBookings.some((b) => b.memberId === member.id)) {
+        return `${member.name}様
+${formatDateJp(data.date)}（午後）にご予約があります。${
+          data.pmTeacher ? `担当：${data.pmTeacher}` : ""
+        }`;
+      }
+    }
+    return `${member.name}様
+現在、今後のご予約はありません。ご予約はマイページからどうぞ。`;
+  }
+
+  const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
+  const dates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+  const next = dates?.[member.group];
+  const rsvp = member.rsvp ?? "未回答";
+  if (next) {
+    return `${member.name}様
+次回のお稽古：${formatDateJp(next.date)}
+出欠回答：${rsvp}`;
+  }
+  return `${member.name}様
+現在の出欠回答：${rsvp}`;
+}
+
+/**
+ * LINE公式アカウントのWebhook（メッセージ受信）を処理する。
+ * 応答メッセージ（replyToken使用）のみを使うため、料金は一切発生しない。
+ *
+ * 会員番号（数字）を送ると、そのLINEアカウントを会員（members/{id}）に連携する
+ * （members/{id}.lineUserId に保存）。連携済みのアカウントが「予約状況」を含む
+ * メッセージを送ると、予約・出欠の状況を返信する。
+ *
+ * リッチメニューのボタンは、LINE公式アカウントマネージャー側で
+ * 「アクション：テキスト」「テキスト：予約状況」のように設定すれば、
+ * ユーザーがそのボタンを押したときと同じメッセージイベントとして届く
+ * （Webhook側で個別のpostback対応を実装する必要はない）。
+ */
+export const lineEvents = onRequest(
+  { secrets: [lineChannelAccessToken, lineChannelSecret] },
+  async (req, res) => {
+    const signature = req.headers["x-line-signature"] as string | undefined;
+    const channelSecret = lineChannelSecret.value();
+    if (!signature || !channelSecret) {
+      res.status(400).send("bad request");
+      return;
+    }
+
+    const rawBody = (req as unknown as { rawBody: Buffer }).rawBody;
+    const expectedSignature = crypto
+      .createHmac("sha256", channelSecret)
+      .update(rawBody)
+      .digest("base64");
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      res.status(401).send("invalid signature");
+      return;
+    }
+
+    const accessToken = lineChannelAccessToken.value();
+    const events = (req.body?.events ?? []) as Array<{
+      type: string;
+      replyToken?: string;
+      source?: { userId?: string };
+      message?: { type: string; text?: string };
+    }>;
+
+    for (const event of events) {
+      if (event.type !== "message" || event.message?.type !== "text") continue;
+      const replyToken = event.replyToken;
+      const userId = event.source?.userId;
+      const text = event.message.text?.trim() ?? "";
+      if (!replyToken || !userId || !text) continue;
+
+      try {
+        if (/^\d{5,}$/.test(text)) {
+          // 数字（会員番号）が送られてきたら連携する
+          const memberRef = db.collection("members").doc(text);
+          const memberSnap = await memberRef.get();
+          if (memberSnap.exists) {
+            await memberRef.update({ lineUserId: userId });
+            await replyLineMessage(
+              replyToken,
+              accessToken,
+              `${memberSnap.data()!.name}様、連携が完了しました。
+「予約状況」と送るとご予約・出欠の状況を確認できます。`
+            );
+          } else {
+            await replyLineMessage(
+              replyToken,
+              accessToken,
+              "その会員番号は見つかりませんでした。ご確認のうえ、もう一度お送りください。"
+            );
+          }
+          continue;
+        }
+
+        if (text.includes("予約") || text.includes("出欠")) {
+          const linkedSnap = await db
+            .collection("members")
+            .where("lineUserId", "==", userId)
+            .limit(1)
+            .get();
+          if (linkedSnap.empty) {
+            await replyLineMessage(
+              replyToken,
+              accessToken,
+              "まだ連携されていません。お手数ですが会員番号（数字）を送ってください。"
+            );
+          } else {
+            const memberDoc = linkedSnap.docs[0];
+            const statusText = await buildLineStatusMessage({
+              id: memberDoc.id,
+              ...memberDoc.data(),
+            });
+            await replyLineMessage(replyToken, accessToken, statusText);
+          }
+          continue;
+        }
+
+        await replyLineMessage(
+          replyToken,
+          accessToken,
+          "「予約状況」と送ると、ご予約・出欠の状況を確認できます。\n初めての方は会員番号（数字）を送って連携してください。"
+        );
+      } catch (err) {
+        console.error("LINE Webhookの処理でエラーが発生しました", err);
       }
     }
 

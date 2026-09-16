@@ -44,6 +44,7 @@ export interface Member {
   chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日）
   chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は1回として扱う）
   chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
+  lineUserId?: string; // 公式LINEアカウントと連携した際のLINEユーザーID（Cloud Functions経由で設定）
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
