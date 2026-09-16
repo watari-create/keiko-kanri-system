@@ -65,7 +65,7 @@ export default function SaturdayReservation({ memberId }: { memberId: string }) 
 
   return (
     <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-3">土曜日クラスの予約（午前・午後より選択、各3名まで）</h2>
+      <h2 className="text-sm text-muted mb-3">講師名</h2>
       {sessions.length === 0 && (
         <p className="text-xs text-muted">現在、予約可能な開催日はありません。本部にお問い合わせください。</p>
       )}
