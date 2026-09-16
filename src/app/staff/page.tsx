@@ -22,6 +22,7 @@ import {
   deleteDoc,
   deleteField,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
@@ -51,10 +52,20 @@ export default function StaffPage() {
   const [newNoteBody, setNewNoteBody] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
+  const [broadcastSelected, setBroadcastSelected] = useState<Set<string>>(new Set());
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
   }, [loading, role, router]);
+
+  useEffect(() => {
+    setBroadcastSelected(new Set());
+    setBroadcastMessage("");
+    setBroadcastResult(null);
+  }, [group]);
 
   useEffect(() => {
     if (!group) return;
@@ -256,6 +267,16 @@ export default function StaffPage() {
         <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="text-left text-muted border-b border-line">
+              <th className="py-2 pr-2">
+                <input
+                  type="checkbox"
+                  checked={members.length > 0 && members.every((m) => broadcastSelected.has(m.id))}
+                  onChange={(e) => {
+                    if (e.target.checked) setBroadcastSelected(new Set(members.map((m) => m.id)));
+                    else setBroadcastSelected(new Set());
+                  }}
+                />
+              </th>
               <th className="py-2 pr-3">会員番号</th>
               <th className="pr-3">氏名</th>
               <th className="pr-3">許状段階</th>
@@ -266,6 +287,20 @@ export default function StaffPage() {
           <tbody>
             {members.map((m) => (
               <tr key={m.id} className="border-b border-line">
+                <td className="py-2 pr-2">
+                  <input
+                    type="checkbox"
+                    checked={broadcastSelected.has(m.id)}
+                    onChange={(e) => {
+                      setBroadcastSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(m.id);
+                        else next.delete(m.id);
+                        return next;
+                      });
+                    }}
+                  />
+                </td>
                 <td className="py-2 pr-3">{m.id}</td>
                 <td className="pr-3">
                   <button
@@ -285,6 +320,58 @@ export default function StaffPage() {
             ))}
           </tbody>
         </table>
+
+        <div className="mt-4 pt-4 border-t border-line">
+          <h3 className="text-sm font-bold mb-2">LINE一斉送信</h3>
+          <p className="text-xs text-muted mb-2">
+            チェックした{broadcastSelected.size}名（LINE未連携の生徒には届きません）にメッセージを送ります。
+          </p>
+          <textarea
+            className="input w-full mb-2"
+            rows={3}
+            placeholder="例：来週のお稽古はお休みです。"
+            value={broadcastMessage}
+            onChange={(e) => setBroadcastMessage(e.target.value)}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50"
+              disabled={sendingBroadcast || broadcastSelected.size === 0 || !broadcastMessage.trim()}
+              onClick={async () => {
+                setSendingBroadcast(true);
+                setBroadcastResult(null);
+                try {
+                  const send = httpsCallable<
+                    { memberIds: string[]; message: string },
+                    { sent: number; skipped: string[] }
+                  >(getFunctions(), "sendStaffLineBroadcast");
+                  const res = await send({
+                    memberIds: Array.from(broadcastSelected),
+                    message: broadcastMessage.trim(),
+                  });
+                  const { sent, skipped } = res.data;
+                  setBroadcastResult(
+                    skipped.length > 0
+                      ? `${sent}名に送信しました（LINE未連携などで${skipped.length}名には届きませんでした）`
+                      : `${sent}名に送信しました。`
+                  );
+                  setBroadcastMessage("");
+                  setBroadcastSelected(new Set());
+                } catch (err) {
+                  setBroadcastResult(
+                    err instanceof Error ? `送信に失敗しました：${err.message}` : "送信に失敗しました。"
+                  );
+                } finally {
+                  setSendingBroadcast(false);
+                }
+              }}
+            >
+              {sendingBroadcast ? "送信中…" : "選択した生徒にLINE送信"}
+            </button>
+            {broadcastResult && <p className="text-xs text-muted">{broadcastResult}</p>}
+          </div>
+        </div>
       </section>
 
       {group === "茶道教室" && (

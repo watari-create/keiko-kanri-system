@@ -691,6 +691,46 @@ async function replyLineMessage(replyToken: string, accessToken: string, text: s
   }
 }
 
+/**
+ * LINE公式アカウントからプッシュメッセージ(1人宛)を送信する。応答メッセージと違い、
+ * 無料枠(月200通)を消費するため、必要な相手にだけ送るよう呼び出し側で絞り込むこと。
+ */
+async function pushLineMessage(userId: string, accessToken: string, text: string): Promise<void> {
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ to: userId, messages: [{ type: "text", text }] }),
+  });
+  if (!res.ok) {
+    console.error(`LINEプッシュメッセージの送信に失敗しました(to=${userId}): ${res.status} ${await res.text()}`);
+  }
+}
+
+/**
+ * LINE公式アカウントからマルチキャストメッセージ(複数人へ一括送信)を送信する。宛先ごとに
+ * 無料枠(月200通)を消費する。LINE側の上限(1回あたり500人まで)に合わせて分割して送る。
+ */
+async function multicastLineMessage(userIds: string[], accessToken: string, text: string): Promise<void> {
+  const chunkSize = 500;
+  for (let i = 0; i < userIds.length; i += chunkSize) {
+    const chunk = userIds.slice(i, i + chunkSize);
+    const res = await fetch("https://api.line.me/v2/bot/message/multicast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ to: chunk, messages: [{ type: "text", text }] }),
+    });
+    if (!res.ok) {
+      console.error(`LINEマルチキャストメッセージの送信に失敗しました: ${res.status} ${await res.text()}`);
+    }
+  }
+}
+
 function formatDateJp(dateStr: string): string {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
@@ -940,6 +980,137 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
   await db.doc("meta/nextLessonDates").set({ dates, updatedAt: new Date().toISOString() });
   return { dates };
 });
+
+/**
+ * 出欠・予約のリマインドを自動プッシュ送信する(LINE連携済みの会員のみが対象)。
+ * 毎日18:00(JST)に実行し、「明日」が対象のお稽古・予約についてのみ送る(前日リマインド)。
+ * 応答メッセージと違い、宛先ごとに無料枠(月200通)を消費するので注意。
+ */
+export const sendLineReminders = onSchedule(
+  { schedule: "0 18 * * *", timeZone: "Asia/Tokyo", secrets: [lineChannelAccessToken] },
+  async () => {
+    const accessToken = lineChannelAccessToken.value();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowKey = tomorrow.toISOString().slice(0, 10);
+
+    // 1. 予約リマインド:茶道教室・土曜日クラスの、明日の予約者
+    const sessionSnap = await db
+      .collection("chadoSaturdaySessions")
+      .where("date", "==", tomorrowKey)
+      .get();
+    for (const sessionDoc of sessionSnap.docs) {
+      const data = sessionDoc.data() as {
+        amTeacher?: string;
+        pmTeacher?: string;
+        amBookings?: ChadoSaturdayBookingDoc[];
+        pmBookings?: ChadoSaturdayBookingDoc[];
+      };
+      const slots: { label: string; teacher?: string; bookings: ChadoSaturdayBookingDoc[] }[] = [
+        { label: "午前", teacher: data.amTeacher, bookings: data.amBookings ?? [] },
+        { label: "午後", teacher: data.pmTeacher, bookings: data.pmBookings ?? [] },
+      ];
+      for (const slot of slots) {
+        for (const booking of slot.bookings) {
+          const memberSnap = await db.collection("members").doc(booking.memberId).get();
+          const member = memberSnap.data();
+          if (!member || !member.lineUserId) continue;
+          const teacherText = slot.teacher ? `担当:${slot.teacher}` : "";
+          await pushLineMessage(
+            member.lineUserId,
+            accessToken,
+            `${member.name}様
+明日${formatDateJp(tomorrowKey)}(${slot.label})のお稽古のご予約があります。${teacherText}`
+          );
+        }
+      }
+    }
+
+    // 2. 出欠リマインド:明日が「次回のお稽古」日の会について、出欠未回答の会員に送る
+    // (茶道教室・土曜日クラスは予約制のため対象外。木曜日・日曜日クラスはrsvpで管理するため対象)
+    const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
+    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+    if (nextDates) {
+      for (const [group, info] of Object.entries(nextDates)) {
+        if (info.date !== tomorrowKey) continue;
+        const membersSnap = await db.collection("members").where("group", "==", group).get();
+        for (const memberDoc of membersSnap.docs) {
+          const member = memberDoc.data();
+          if (member.group === "茶道教室" && member.chadoClass === "土曜日") continue;
+          if (!member.lineUserId) continue;
+          if ((member.rsvp ?? "未回答") !== "未回答") continue;
+          await pushLineMessage(
+            member.lineUserId,
+            accessToken,
+            `${member.name}様
+明日${formatDateJp(tomorrowKey)}のお稽古の出欠がまだ未回答です。マイページからご回答をお願いします。`
+          );
+        }
+      }
+    }
+  }
+);
+
+/**
+ * 講師・本部がスタッフページ/管理画面から選択した生徒に、LINEで一斉送信する(マルチキャスト)。
+ * 講師(role: "staff")はなりすまし防止のため、自分の担当グループ(staffドキュメントのgroups)に
+ * 含まれる生徒にしか送れない。本部(role: "honbu")はグループの制限なく送信できる。
+ * 応答メッセージと違い、宛先ごとに無料枠(月200通)を消費するので注意。
+ */
+export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: string }>(
+  { secrets: [lineChannelAccessToken] },
+  async (request) => {
+    const role = request.auth?.token?.role;
+    if (role !== "staff" && role !== "honbu") {
+      throw new HttpsError("permission-denied", "スタッフとしてログインしてください。");
+    }
+
+    const { memberIds, message } = request.data ?? ({} as { memberIds?: string[]; message?: string });
+    if (!Array.isArray(memberIds) || memberIds.length === 0 || typeof message !== "string" || !message.trim()) {
+      throw new HttpsError("invalid-argument", "送信先とメッセージを指定してください。");
+    }
+    if (memberIds.length > 500) {
+      throw new HttpsError("invalid-argument", "一度に送信できるのは500人までです。");
+    }
+
+    let allowedGroups: string[] | null = null;
+    if (role === "staff") {
+      const staffId = request.auth?.token?.staffId as string | undefined;
+      if (!staffId) {
+        throw new HttpsError("permission-denied", "スタッフ情報が確認できません。");
+      }
+      const staffSnap = await db.collection("staff").doc(staffId).get();
+      allowedGroups = (staffSnap.data()?.groups as string[] | undefined) ?? [];
+    }
+
+    const memberSnaps = await Promise.all(memberIds.map((id) => db.collection("members").doc(id).get()));
+
+    const targetUserIds: string[] = [];
+    const skipped: string[] = [];
+    for (const snap of memberSnaps) {
+      const data = snap.data();
+      if (!data) {
+        skipped.push(snap.id);
+        continue;
+      }
+      if (allowedGroups && !allowedGroups.includes(data.group)) {
+        throw new HttpsError("permission-denied", `担当外の会員が含まれています(${data.name})。`);
+      }
+      if (data.lineUserId) {
+        targetUserIds.push(data.lineUserId);
+      } else {
+        skipped.push(data.name ?? snap.id);
+      }
+    }
+
+    if (targetUserIds.length > 0) {
+      const accessToken = lineChannelAccessToken.value();
+      await multicastLineMessage(targetUserIds, accessToken, message.trim());
+    }
+
+    return { sent: targetUserIds.length, skipped };
+  }
+);
 
 // ---- 茶道教室：土曜日クラスの予約（午前／午後、各枠定員制） ----
 // 会員本人のマイページから呼び出す。定員チェックをAdmin SDKのトランザクションで行うことで、
