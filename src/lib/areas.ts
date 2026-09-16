@@ -26,3 +26,11 @@ const GROUP_DISPLAY_NAMES: Record<string, string> = {
 export function groupDisplayName(group: string): string {
   return GROUP_DISPLAY_NAMES[group] ?? group;
 }
+
+// 保護者欄（保護者名）の入力・表示が不要な会。未成年向けの名月会と違い、
+// 茶道教室・Gマダムの茶の湯講座は成人が対象のため保護者欄を使わない。
+export const GROUPS_WITHOUT_GUARDIAN = ["茶道教室", "Gマダムの茶の湯講座"];
+
+export function groupHasGuardianField(group: string): boolean {
+  return !GROUPS_WITHOUT_GUARDIAN.includes(group);
+}

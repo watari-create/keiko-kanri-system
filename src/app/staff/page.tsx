@@ -23,7 +23,7 @@ import {
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { isHonbuKeikoGroup, groupDisplayName } from "@/lib/areas";
+import { isHonbuKeikoGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
@@ -379,10 +379,12 @@ export default function StaffPage() {
               </button>
             </div>
             <dl className="text-sm space-y-2">
-              <div className="flex justify-between border-b border-line pb-2">
-                <dt className="text-muted">保護者名</dt>
-                <dd>{selectedMember.guardian ?? "—"}</dd>
-              </div>
+              {groupHasGuardianField(group) && (
+                <div className="flex justify-between border-b border-line pb-2">
+                  <dt className="text-muted">保護者名</dt>
+                  <dd>{selectedMember.guardian ?? "—"}</dd>
+                </div>
+              )}
               <div className="flex justify-between border-b border-line pb-2">
                 <dt className="text-muted">登録メールアドレス</dt>
                 <dd>{selectedMember.email || "—"}</dd>

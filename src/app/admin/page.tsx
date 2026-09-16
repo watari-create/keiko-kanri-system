@@ -32,7 +32,7 @@ import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { groupDisplayName } from "@/lib/areas";
+import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
 import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY } from "@/lib/chadoClasses";
 import type {
@@ -309,7 +309,7 @@ export default function AdminPage() {
   const showBilling = area === "本部稽古";
   const showAffiliation = false; // UCIタブ廃止（経理タブに置き換え）により所属列は使用しない
   const showSohenDetails = area === "宗徧流稽古";
-  const showGuardian = !showSohenDetails; // 宗徧流稽古は保護者欄を使わない
+  const showGuardian = !showSohenDetails && groupHasGuardianField(group); // 宗徧流稽古・茶道教室・Gマダムの茶の湯講座は保護者欄を使わない
   const showChadoClass = area === "本部稽古" && group === "茶道教室"; // 茶道教室のみ、曜日クラス列を表示
   const colCount =
     5 +
@@ -1701,7 +1701,7 @@ export default function AdminPage() {
                   <option>女性</option>
                 </select>
               </Field>
-              {area !== "宗徧流稽古" && (
+              {area !== "宗徧流稽古" && groupHasGuardianField(selectedMember.group) && (
                 <Field label="保護者名">
                   <input
                     className="input"
