@@ -43,7 +43,16 @@ export default function MemberLoginPage() {
   return (
     <div className="max-w-md mx-auto mt-16 p-6">
       <div className="bg-paper border border-line rounded-md p-8">
-        <h1 className="text-xl font-bold text-matcha-deep text-center mb-1">マイページ ログイン</h1>
+        <div className="text-center mb-6">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/nozoki-ume.png"
+            alt="のぞき梅"
+            className="w-20 h-20 mx-auto mb-3"
+          />
+          <div className="text-[11px] text-[#B8934A] tracking-widest mb-2">茶道宗徧流不審庵</div>
+          <h1 className="text-xl font-bold text-matcha-deep">お稽古マイページ</h1>
+        </div>
         <p className="text-sm text-muted text-center mb-6">会員番号とメールアドレスでログインします</p>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -76,11 +85,6 @@ export default function MemberLoginPage() {
             はじめての方・新しく入会される方はこちら
           </a>
         </form>
-
-        <p className="text-center text-xs text-muted mt-6">
-          世話人・講師の方は<a href="/staff/login" className="underline">こちら</a>／本部の方は
-          <a href="/login" className="underline">こちら</a>
-        </p>
       </div>
     </div>
   );
