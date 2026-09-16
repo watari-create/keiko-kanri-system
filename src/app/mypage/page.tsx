@@ -33,6 +33,18 @@ export default function MyPage() {
   }, [loading, role, router]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const linked = params.get("lineLinked");
+    if (linked === "success") {
+      setSavedMsg("公式LINEとの連携が完了しました。");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (linked === "error") {
+      setSavedMsg("LINE連携に失敗しました。お手数ですが、もう一度お試しください。");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!member?.group) return;
     return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
       const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
@@ -137,6 +149,27 @@ export default function MyPage() {
             <span>{member.license ?? "—"}</span>
           </div>
         </div>
+      </div>
+
+      <div className="bg-paper border border-line rounded-md p-6 mb-4">
+        <h2 className="text-sm text-muted mb-3">公式LINEとの連携</h2>
+        {member.lineUserId ? (
+          <p className="text-sm text-matcha-deep">
+            連携済みです。お稽古前日にリマインドが届きます。
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted mb-3">
+              連携すると、お稽古前日の出欠・ご予約のリマインドが公式LINEに届くようになります。
+            </p>
+            <a
+              href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
+              className="block text-center w-full bg-matcha-deep text-white rounded py-2 text-sm"
+            >
+              LINEでログインして連携する
+            </a>
+          </>
+        )}
       </div>
 
       {member.groupCategory === "本部稽古" &&

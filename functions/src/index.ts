@@ -26,6 +26,12 @@ const lineChannelAccessToken = defineSecret("LINE_CHANNEL_ACCESS_TOKEN");
 // 設定方法： firebase functions:secrets:set LINE_CHANNEL_SECRET
 const lineChannelSecret = defineSecret("LINE_CHANNEL_SECRET");
 
+// LIFFアプリを追加した「LINEログイン」チャネル（Messaging APIのチャネルとは別チャネル。
+// LIFFアプリはLINEログインチャネルにしか追加できない）のチャネルID。チャネル基本設定タブに表示される数字。
+// マイページのLIFF連携で受け取るID Tokenの検証（audクレームの確認）に使う。
+// デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
+const liffChannelId = defineString("LINE_LIFF_CHANNEL_ID");
+
 // 請求書発行依頼の通知を送るSlackチャンネルのID（例：C0123456789）。
 // Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
 const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
@@ -897,6 +903,45 @@ export const lineEvents = onRequest(
     res.status(200).send("ok");
   }
 );
+
+/**
+ * マイページのLIFFページ（/mypage/line-link）が、LIFF SDKで取得したID Tokenを渡して呼び出す。
+ * LINEの検証エンドポイントでID Tokenの正当性とaud（このMessaging APIチャネル宛かどうか）を確認し、
+ * 取得したユーザーID（sub）を members/{memberId} に lineUserId として保存する。
+ * クライアントから直接userIdを送らせず、必ずID Tokenをサーバー側で検証してから書き込む設計にしている
+ * （なりすまし防止）。
+ */
+export const linkLineViaLiff = onCall<{ idToken: string }>(async (request) => {
+  const memberId = request.auth?.token?.memberId as string | undefined;
+  if (request.auth?.token?.role !== "member" || !memberId) {
+    throw new HttpsError("permission-denied", "会員としてログインしてください。");
+  }
+
+  const { idToken } = request.data ?? ({} as { idToken?: string });
+  if (typeof idToken !== "string" || !idToken) {
+    throw new HttpsError("invalid-argument", "IDトークンが指定されていません。");
+  }
+
+  const verifyRes = await fetch("https://api.line.me/oauth2/v2.1/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      id_token: idToken,
+      client_id: liffChannelId.value(),
+    }),
+  });
+  if (!verifyRes.ok) {
+    console.error(`LIFFのID Token検証に失敗しました: ${verifyRes.status} ${await verifyRes.text()}`);
+    throw new HttpsError("unauthenticated", "LINEの認証確認に失敗しました。もう一度お試しください。");
+  }
+  const verifyData = (await verifyRes.json()) as { sub?: string };
+  if (!verifyData.sub) {
+    throw new HttpsError("internal", "LINEのユーザー情報を取得できませんでした。");
+  }
+
+  await db.collection("members").doc(memberId).update({ lineUserId: verifyData.sub });
+  return { ok: true };
+});
 
 // 「次回のお稽古」表示の対象となる会。イベントのタイトルにこの文字列が
 // 含まれているかどうかで、どの会のお稽古かを判定する（例："名月会お稽古"）。
