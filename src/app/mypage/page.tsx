@@ -12,6 +12,8 @@ import { currentMonthKey } from "@/lib/fiscalMonths";
 import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
 import { groupDisplayName } from "@/lib/areas";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME } from "@/lib/chadoClasses";
+import SaturdayReservation from "@/components/SaturdayReservation";
 import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
@@ -137,31 +139,41 @@ export default function MyPage() {
         </div>
       </div>
 
-      {member.groupCategory === "本部稽古" && (
-        <div className="bg-paper border border-line rounded-md p-6 mb-4">
-          <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
-          {nextLesson && (
-            <p className="text-xs text-matcha-deep mb-1">
-              次回：{formatLessonDate(nextLesson.date)}
-            </p>
-          )}
-          <p className="text-xs text-muted mb-3">現在の回答：{member.rsvp ?? "未回答"}</p>
-          <div className="flex gap-2">
-            <button
-              className="flex-1 bg-matcha-deep text-white rounded py-2 text-sm"
-              onClick={() => updateRsvp("出席")}
-            >
-              出席する
-            </button>
-            <button
-              className="flex-1 border border-line text-muted rounded py-2 text-sm"
-              onClick={() => updateRsvp("欠席")}
-            >
-              欠席する
-            </button>
+      {member.groupCategory === "本部稽古" &&
+        (member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
+          <SaturdayReservation memberId={member.id} />
+        ) : (
+          <div className="bg-paper border border-line rounded-md p-6 mb-4">
+            <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
+            {member.group === "茶道教室" && member.chadoClass && (
+              <p className="text-xs text-matcha-deep mb-1">
+                {member.chadoClass}クラス　{CHADO_CLASS_TIME[member.chadoClass]}
+                {CHADO_FIXED_TEACHERS[member.chadoClass] &&
+                  `　担当：${CHADO_FIXED_TEACHERS[member.chadoClass]}`}
+              </p>
+            )}
+            {nextLesson && (
+              <p className="text-xs text-matcha-deep mb-1">
+                次回：{formatLessonDate(nextLesson.date)}
+              </p>
+            )}
+            <p className="text-xs text-muted mb-3">現在の回答：{member.rsvp ?? "未回答"}</p>
+            <div className="flex gap-2">
+              <button
+                className="flex-1 bg-matcha-deep text-white rounded py-2 text-sm"
+                onClick={() => updateRsvp("出席")}
+              >
+                出席する
+              </button>
+              <button
+                className="flex-1 border border-line text-muted rounded py-2 text-sm"
+                onClick={() => updateRsvp("欠席")}
+              >
+                欠席する
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        ))}
 
       <div className="bg-paper border border-line rounded-md p-6 mb-4">
         <h2 className="text-sm text-muted mb-3">家元動画へのアクセス</h2>

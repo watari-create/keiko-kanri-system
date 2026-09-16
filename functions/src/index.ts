@@ -748,6 +748,110 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
   return { dates };
 });
 
+// ---- 茶道教室：土曜日クラスの予約（午前／午後、各枠定員制） ----
+// 会員本人のマイページから呼び出す。定員チェックをAdmin SDKのトランザクションで行うことで、
+// 同時に複数人が予約しても「定員3名」を確実に守る（クライアントの直接書き込みだと
+// レースコンディションで定員超過しうるため、あえてCloud Functions経由にしている）。
+const CHADO_SATURDAY_DEFAULT_CAPACITY = 3;
+
+interface ChadoSaturdayBookingDoc {
+  memberId: string;
+  memberName: string;
+  bookedAt: string;
+}
+
+export const bookChadoSaturdaySlot = onCall<{
+  date: string; // YYYY-MM-DD
+  slot: "am" | "pm";
+  action: "book" | "cancel";
+}>(async (request) => {
+  const memberId = request.auth?.token?.memberId as string | undefined;
+  if (request.auth?.token?.role !== "member" || !memberId) {
+    throw new HttpsError("permission-denied", "会員としてログインしてください。");
+  }
+
+  const { date, slot, action } = request.data ?? ({} as { date?: string; slot?: string; action?: string });
+  if (
+    typeof date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    (slot !== "am" && slot !== "pm") ||
+    (action !== "book" && action !== "cancel")
+  ) {
+    throw new HttpsError("invalid-argument", "パラメータが不正です。");
+  }
+
+  const memberSnap = await db.doc(`members/${memberId}`).get();
+  if (!memberSnap.exists) throw new HttpsError("not-found", "会員情報が見つかりません。");
+  const member = memberSnap.data() as { name?: string; group?: string; chadoClass?: string };
+  if (member.group !== "茶道教室" || member.chadoClass !== "土曜日") {
+    throw new HttpsError("permission-denied", "土曜日クラスの会員のみ予約できます。");
+  }
+
+  const sessionRef = db.doc(`chadoSaturdaySessions/${date}`);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(sessionRef);
+    const data = snap.exists
+      ? (snap.data() as {
+          amCapacity?: number;
+          pmCapacity?: number;
+          amTeacher?: string;
+          pmTeacher?: string;
+          amBookings?: ChadoSaturdayBookingDoc[];
+          pmBookings?: ChadoSaturdayBookingDoc[];
+        })
+      : {};
+
+    const amCapacity = data.amCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+    const pmCapacity = data.pmCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+    const filteredAm = (data.amBookings ?? []).filter((b) => b.memberId !== memberId);
+    const filteredPm = (data.pmBookings ?? []).filter((b) => b.memberId !== memberId);
+
+    if (action === "cancel") {
+      tx.set(
+        sessionRef,
+        {
+          date,
+          amCapacity,
+          pmCapacity,
+          amTeacher: data.amTeacher ?? "",
+          pmTeacher: data.pmTeacher ?? "",
+          amBookings: filteredAm,
+          pmBookings: filteredPm,
+        },
+        { merge: true }
+      );
+      return { ok: true };
+    }
+
+    const targetBookings = slot === "am" ? filteredAm : filteredPm;
+    const targetCapacity = slot === "am" ? amCapacity : pmCapacity;
+    if (targetBookings.length >= targetCapacity) {
+      throw new HttpsError("resource-exhausted", "この枠はすでに定員に達しています。");
+    }
+    targetBookings.push({
+      memberId,
+      memberName: member.name ?? "",
+      bookedAt: new Date().toISOString(),
+    });
+
+    tx.set(
+      sessionRef,
+      {
+        date,
+        amCapacity,
+        pmCapacity,
+        amTeacher: data.amTeacher ?? "",
+        pmTeacher: data.pmTeacher ?? "",
+        amBookings: slot === "am" ? targetBookings : filteredAm,
+        pmBookings: slot === "pm" ? targetBookings : filteredPm,
+      },
+      { merge: true }
+    );
+    return { ok: true };
+  });
+});
+
 // G1（Gマダムの茶の湯講座）で毎回発送する道具のデフォルト一覧。
 const G1_SHIPPING_ITEMS = ["お軸", "花入", "主茶盌", "菓子器"];
 
@@ -845,3 +949,50 @@ export const squareWebhook = onRequest(async (req, res) => {
 
   res.status(200).send("ok");
 });
+
+/**
+ * 毎週月曜3:00（JST）に、お稽古ノート（keikoNoteEntries）の内容を丸ごと
+ * keikoNoteBackups/{YYYY-MM-DD}/entries/{entryId} に複製してバックアップする。
+ * 誤操作・誤削除からの復旧用。90日より古いバックアップは自動的に削除する。
+ */
+export const backupKeikoNoteEntries = onSchedule(
+  { schedule: "every monday 03:00", timeZone: "Asia/Tokyo" },
+  async () => {
+    const snapshotId = todayKeyJST();
+    const entriesSnap = await db.collection("keikoNoteEntries").get();
+
+    const backupRef = db.collection("keikoNoteBackups").doc(snapshotId);
+    await backupRef.set({
+      createdAt: new Date().toISOString(),
+      count: entriesSnap.size,
+    });
+
+    // Firestoreの1バッチ上限（500件）に対する安全マージンとして400件ずつ書き込む
+    const docs = entriesSnap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = db.batch();
+      for (const entryDoc of docs.slice(i, i + 400)) {
+        batch.set(backupRef.collection("entries").doc(entryDoc.id), entryDoc.data());
+      }
+      await batch.commit();
+    }
+
+    // 90日より古いバックアップ（スナップショットとその配下のentries）を削除し、無制限に増え続けないようにする
+    const cutoff = addDaysToDateKey(snapshotId, -90);
+    const oldSnaps = await db
+      .collection("keikoNoteBackups")
+      .where(admin.firestore.FieldPath.documentId(), "<", cutoff)
+      .get();
+    for (const oldSnap of oldSnaps.docs) {
+      const oldEntries = await oldSnap.ref.collection("entries").get();
+      if (!oldEntries.empty) {
+        const delBatch = db.batch();
+        oldEntries.docs.forEach((e) => delBatch.delete(e.ref));
+        await delBatch.commit();
+      }
+      await oldSnap.ref.delete();
+    }
+
+    console.log(`keikoNoteEntriesのバックアップを作成しました snapshotId=${snapshotId} count=${entriesSnap.size}`);
+  }
+);

@@ -178,12 +178,32 @@ service cloud.firestore {
       allow write: if isHonbu();
     }
 
+    // ---- chadoSaturdaySessions（茶道教室：土曜日クラスの開催日ごとの午前/午後枠・予約状況） ----
+    // 会員本人の予約・キャンセルはCloud Functions（bookChadoSaturdaySlot、Admin SDK）経由のみ
+    // （定員チェックをトランザクションで確実に行うため、クライアントからの直接書き込みは許可しない）。
+    // 開催日の追加・担当講師や定員の設定、予約の手動修正は本部・茶道教室担当の世話人・講師が管理画面から行う。
+    match /chadoSaturdaySessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if isHonbu() || isStaffFor('茶道教室');
+    }
+
     // ---- keikoNoteEntries（茶道教室：お稽古ノート） ----
-    // このノートは一般公開ページ（ログイン不要で誰でも閲覧可）。
+    // このノートはログイン不要で閲覧できる公開ページだが、URLを直接知っている人にしか
+    // 開けないよう合言葉（アクセスコード）で保護している（アプリ側のmiddlewareで実施）。
     // 記録の追加・編集・削除は本部、または茶道教室担当の世話人・講師のみ（ログイン必須）。
     match /keikoNoteEntries/{entryId} {
       allow read: if true;
       allow write: if isHonbu() || isStaffFor('茶道教室');
+    }
+
+    // ---- keikoNoteBackups（お稽古ノートの週次自動バックアップ。Cloud Functions
+    //      〈backupKeikoNoteEntries〉がAdmin SDKで書き込む。ルール適用外のため、
+    //      ここではクライアントからの読み書きを明示的にすべて禁止する） ----
+    match /keikoNoteBackups/{snapshotId} {
+      allow read, write: if false;
+      match /entries/{entryId} {
+        allow read, write: if false;
+      }
     }
   }
 }

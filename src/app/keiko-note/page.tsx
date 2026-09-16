@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-// お稽古ノートページ（茶道教室：土曜日・日曜日・火曜日クラス）。
+// お稽古ノートページ（茶道教室：土曜日・日曜日・木曜日クラス）。
 // もともとプロトタイプ（https://okeiko-note-saturday.netlify.app/）として作られていたものを
 // 稽古管理システム本体に移植したもの。見た目・機能（クラス選択、講師モードでの記録・編集・削除、
 // 「簡単フォーム」「テンプレート」「ブロック編集」の3種類の記録方法）はプロトタイプのままにしてあり、
@@ -59,6 +59,12 @@ function fmtDate(iso: string): string {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function shiftDate(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 // Firestoreはundefinedを保存できないため、書き込み直前にJSONの往復で取り除く
@@ -550,7 +556,17 @@ function SimpleForm({
       </div>
       <div className="form-row">
         <label>日付</label>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div className="date-input-row">
+          <input
+            type="date"
+            value={date}
+            max={today()}
+            onChange={(e) => setDate(e.target.value)}
+          />
+          <button type="button" className="date-shift-btn" onClick={() => setDate(shiftDate(date, -1))}>
+            ＜前日
+          </button>
+        </div>
       </div>
       <div className="form-row">
         <label>お稽古の内容（点前・科目など）</label>
@@ -651,7 +667,17 @@ function BlockEditorForm({
         </div>
         <div className="form-row">
           <label>日付</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div className="date-input-row">
+            <input
+              type="date"
+              value={date}
+              max={today()}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <button type="button" className="date-shift-btn" onClick={() => setDate(shiftDate(date, -1))}>
+              ＜前日
+            </button>
+          </div>
         </div>
         <div className="form-row">
           <label>見出し（日付の下に表示・任意）</label>
@@ -825,7 +851,17 @@ function TemplateForm({
         </div>
         <div className="form-row">
           <label>日付</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div className="date-input-row">
+            <input
+              type="date"
+              value={date}
+              max={today()}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <button type="button" className="date-shift-btn" onClick={() => setDate(shiftDate(date, -1))}>
+              ＜前日
+            </button>
+          </div>
         </div>
         <div className="form-row">
           <label>見出し（日付の下に表示・任意）</label>

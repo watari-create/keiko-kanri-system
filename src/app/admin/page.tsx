@@ -15,6 +15,7 @@ import {
   collection,
   query,
   where,
+  orderBy,
   onSnapshot,
   doc,
   getDoc,
@@ -32,6 +33,7 @@ import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { groupDisplayName } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
+import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY } from "@/lib/chadoClasses";
 import type {
   Member,
   LicenseRequest,
@@ -41,6 +43,7 @@ import type {
   StaffAccount,
   StaffRole,
   NyumonSetInventory,
+  ChadoSaturdaySession,
 } from "@/types";
 
 type Area = "宗徧流稽古" | "本部稽古" | "経理" | "スタッフ管理";
@@ -163,6 +166,10 @@ export default function AdminPage() {
   const [inventoryDraft, setInventoryDraft] = useState<InventoryDraftRow[] | null>(null);
   const [savingInventory, setSavingInventory] = useState(false);
 
+  // 茶道教室：土曜日クラスの開催日・予約状況（本部稽古エリア／茶道教室グループのみ購読）
+  const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
+  const [newSessionDate, setNewSessionDate] = useState("");
+
   // 権限チェック：本部以外はログインページへ
   useEffect(() => {
     if (!loading && role !== "honbu") router.replace("/login");
@@ -205,6 +212,18 @@ export default function AdminPage() {
       setInventory(snap.exists() ? (snap.data() as NyumonSetInventory) : null);
     });
   }, [area]);
+
+  // 茶道教室：土曜日クラスの開催日・予約状況をリアルタイム購読（本部稽古エリア／茶道教室グループを開いている間のみ）
+  useEffect(() => {
+    if (area !== "本部稽古" || group !== "茶道教室") {
+      setSaturdaySessions([]);
+      return;
+    }
+    const q = query(collection(db, "chadoSaturdaySessions"), orderBy("date"));
+    return onSnapshot(q, (snap) => {
+      setSaturdaySessions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoSaturdaySession)));
+    });
+  }, [area, group]);
 
   function switchArea(a: Area) {
     setArea(a);
@@ -290,12 +309,14 @@ export default function AdminPage() {
   const showAffiliation = false; // UCIタブ廃止（経理タブに置き換え）により所属列は使用しない
   const showSohenDetails = area === "宗徧流稽古";
   const showGuardian = !showSohenDetails; // 宗徧流稽古は保護者欄を使わない
+  const showChadoClass = area === "本部稽古" && group === "茶道教室"; // 茶道教室のみ、曜日クラス列を表示
   const colCount =
     5 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
     (showBilling ? 2 : 0) +
-    (showSohenDetails ? 3 : 0);
+    (showSohenDetails ? 3 : 0) +
+    (showChadoClass ? 1 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
   const memberSections = useMemo(() => {
@@ -547,6 +568,53 @@ export default function AdminPage() {
     } finally {
       setSavingInventory(false);
     }
+  }
+
+  // 茶道教室：土曜日クラスの開催日を追加（定員はデフォルト3名、担当講師は空欄で作成し、あとで入力する）
+  async function addSaturdaySession() {
+    if (!newSessionDate) return;
+    await setDoc(
+      doc(db, "chadoSaturdaySessions", newSessionDate),
+      {
+        date: newSessionDate,
+        amCapacity: CHADO_SATURDAY_DEFAULT_CAPACITY,
+        pmCapacity: CHADO_SATURDAY_DEFAULT_CAPACITY,
+        amTeacher: "",
+        pmTeacher: "",
+        amBookings: [],
+        pmBookings: [],
+      },
+      { merge: true }
+    );
+    setNewSessionDate("");
+  }
+
+  async function updateSaturdaySessionField(
+    sessionId: string,
+    field: "amTeacher" | "pmTeacher" | "amCapacity" | "pmCapacity",
+    value: string | number
+  ) {
+    await updateDoc(doc(db, "chadoSaturdaySessions", sessionId), { [field]: value });
+  }
+
+  // 本部・世話人による予約の手動取り消し（会員から連絡があった場合の代理操作など）
+  async function removeSaturdayBooking(
+    sessionId: string,
+    slot: "am" | "pm",
+    memberIdToRemove: string
+  ) {
+    const session = saturdaySessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    const field = slot === "am" ? "amBookings" : "pmBookings";
+    const current = (slot === "am" ? session.amBookings : session.pmBookings) ?? [];
+    await updateDoc(doc(db, "chadoSaturdaySessions", sessionId), {
+      [field]: current.filter((b) => b.memberId !== memberIdToRemove),
+    });
+  }
+
+  async function deleteSaturdaySession(sessionId: string) {
+    if (!confirm("この開催日を削除しますか？（予約状況もすべて削除されます）")) return;
+    await deleteDoc(doc(db, "chadoSaturdaySessions", sessionId));
   }
 
   function openMemberDetail(m: Member) {
@@ -979,6 +1047,7 @@ export default function AdminPage() {
                 {showGuardian && <th className="pr-3">保護者名</th>}
                 {showSohenDetails && <th className="pr-3">年齢</th>}
                 {showSohenDetails && <th className="pr-3">社中</th>}
+                {showChadoClass && <th className="pr-3">曜日クラス</th>}
                 <th className="pr-3">許状段階</th>
                 <th className="pr-3">入会日</th>
                 {showBilling && (
@@ -1016,6 +1085,28 @@ export default function AdminPage() {
                   {showGuardian && <td className="pr-3">{m.guardian ?? "—"}</td>}
                   {showSohenDetails && <td className="pr-3">{m.age ?? "—"}</td>}
                   {showSohenDetails && <td className="pr-3">{m.shachu ?? "—"}</td>}
+                  {showChadoClass && (
+                    <td className="pr-3">
+                      <select
+                        className="border border-line rounded px-2 py-1 text-xs"
+                        value={m.chadoClass ?? ""}
+                        onChange={(e) =>
+                          updateMemberField(
+                            m.id,
+                            "chadoClass",
+                            (e.target.value || undefined) as Member["chadoClass"]
+                          )
+                        }
+                      >
+                        <option value="">（未設定）</option>
+                        {CHADO_CLASSES.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
                   <td className="pr-3">{m.license ?? "—"}</td>
                   <td className="pr-3">{m.joinDate}</td>
                   {showBilling && (
@@ -1164,6 +1255,108 @@ export default function AdminPage() {
               </div>
             )}
           </section>
+
+          {group === "茶道教室" && (
+            <section className="bg-paper border border-line rounded-md p-5 mb-6">
+              <h2 className="font-bold mb-1">土曜日クラスの開催日・予約状況</h2>
+              <p className="text-xs text-muted mb-3">
+                開催日ごとに午前・午後の枠を管理します（各枠デフォルト定員3名）。担当講師は交代制のため、開催日ごとに入力してください。
+                予約の受付・キャンセルは会員本人がマイページから行います（ここでは開催日の追加・担当講師や定員の設定・予約の手動修正ができます）。
+              </p>
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="date"
+                  className="input"
+                  value={newSessionDate}
+                  onChange={(e) => setNewSessionDate(e.target.value)}
+                />
+                <button
+                  className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
+                  disabled={!newSessionDate}
+                  onClick={addSaturdaySession}
+                >
+                  ＋ 開催日を追加
+                </button>
+              </div>
+              <div className="space-y-4">
+                {saturdaySessions.map((s) => (
+                  <div key={s.id} className="border border-line rounded-md p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold">{s.date}</span>
+                      <button
+                        className="text-xs text-hanko underline decoration-dotted underline-offset-2"
+                        onClick={() => deleteSaturdaySession(s.id)}
+                      >
+                        この開催日を削除
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      {(["am", "pm"] as const).map((slot) => {
+                        const isAm = slot === "am";
+                        const bookings = (isAm ? s.amBookings : s.pmBookings) ?? [];
+                        const capacity =
+                          (isAm ? s.amCapacity : s.pmCapacity) ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+                        const teacherField = isAm ? "amTeacher" : "pmTeacher";
+                        const capacityField = isAm ? "amCapacity" : "pmCapacity";
+                        return (
+                          <div key={slot}>
+                            <p className="text-xs font-bold text-matcha-deep mb-1">
+                              {isAm ? "午前" : "午後"}
+                            </p>
+                            <div className="flex items-center gap-2 mb-1">
+                              <input
+                                className="border border-line rounded px-2 py-1 text-xs flex-1"
+                                placeholder="担当講師名"
+                                defaultValue={isAm ? s.amTeacher ?? "" : s.pmTeacher ?? ""}
+                                onBlur={(e) =>
+                                  updateSaturdaySessionField(s.id, teacherField, e.target.value)
+                                }
+                              />
+                              <input
+                                type="number"
+                                min={1}
+                                className="border border-line rounded px-2 py-1 text-xs w-16"
+                                defaultValue={capacity}
+                                onBlur={(e) =>
+                                  updateSaturdaySessionField(
+                                    s.id,
+                                    capacityField,
+                                    Number(e.target.value) || CHADO_SATURDAY_DEFAULT_CAPACITY
+                                  )
+                                }
+                              />
+                            </div>
+                            <p className="text-xs text-muted mb-1">
+                              予約：{bookings.length}/{capacity}名
+                            </p>
+                            <ul className="space-y-1">
+                              {bookings.map((b) => (
+                                <li key={b.memberId} className="flex items-center justify-between text-xs">
+                                  <span>{b.memberName}</span>
+                                  <button
+                                    className="text-hanko underline decoration-dotted underline-offset-2"
+                                    onClick={() => removeSaturdayBooking(s.id, slot, b.memberId)}
+                                  >
+                                    削除
+                                  </button>
+                                </li>
+                              ))}
+                              {bookings.length === 0 && (
+                                <li className="text-xs text-muted">予約なし</li>
+                              )}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {saturdaySessions.length === 0 && (
+                  <p className="text-xs text-muted text-center py-4">開催日はまだ登録されていません</p>
+                )}
+              </div>
+            </section>
+          )}
 
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <div className="flex items-center justify-between mb-1">
@@ -1453,6 +1646,27 @@ export default function AdminPage() {
                     value={draft.guardian ?? ""}
                     onChange={(e) => setDraft({ ...draft, guardian: e.target.value })}
                   />
+                </Field>
+              )}
+              {selectedMember.group === "茶道教室" && (
+                <Field label="曜日クラス">
+                  <select
+                    className="input"
+                    value={draft.chadoClass ?? ""}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        chadoClass: (e.target.value || undefined) as typeof draft.chadoClass,
+                      })
+                    }
+                  >
+                    <option value="">（未設定）</option>
+                    {CHADO_CLASSES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
               )}
               <Field label="学年">

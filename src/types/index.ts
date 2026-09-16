@@ -7,6 +7,9 @@ export type Rsvp = "出席" | "欠席" | "未回答";
 
 export type GroupCategory = "宗徧流稽古" | "本部稽古" | "UCI";
 
+// 茶道教室の曜日クラス（土曜日は月2回・午前午後の定員制、木曜日・日曜日は毎週・人数上限なし）
+export type ChadoKyoshitsuClass = "土曜日" | "木曜日" | "日曜日";
+
 export interface Member {
   id: string; // Firestore document ID = 会員番号
   name: string;
@@ -38,6 +41,7 @@ export interface Member {
   paymentStatus?: "済" | "未納";
   nextBillingDate?: string;
   rsvp?: Rsvp;
+  chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日）
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
@@ -238,4 +242,24 @@ export interface KeikoNoteEntry {
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
+}
+
+// ---- 茶道教室：土曜日クラスの予約枠（月2回開催、午前・午後の2枠、各枠定員3名） ----
+// 木曜日・日曜日クラスは1枠のみ・人数上限なしのため、既存のrsvp/attendanceで管理する。
+// 土曜日クラスのみ、この専用コレクション（chadoSaturdaySessions、doc id = 開催日）で予約状況を管理する。
+export interface ChadoSaturdayBooking {
+  memberId: string;
+  memberName: string;
+  bookedAt: string;
+}
+
+export interface ChadoSaturdaySession {
+  id: string; // 開催日（YYYY-MM-DD）。Firestoreのドキュメント名と一致
+  date: string; // YYYY-MM-DD
+  amTeacher?: string; // 午前の担当講師（交代制のため開催日ごとに管理画面で設定）
+  pmTeacher?: string; // 午後の担当講師
+  amCapacity: number; // 午前枠の定員（デフォルト3）
+  pmCapacity: number; // 午後枠の定員（デフォルト3）
+  amBookings: ChadoSaturdayBooking[];
+  pmBookings: ChadoSaturdayBooking[];
 }

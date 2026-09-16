@@ -9,7 +9,7 @@ import type { KeikoNoteClass, KeikoNoteEntry, KeikoNoteBlock } from "@/types";
 export const KEIKO_NOTE_CLASSES: KeikoNoteClass[] = [
   { id: "sat-furo", main: "土曜日クラス", sub: "風炉薄茶平点前" },
   { id: "sun-nyumon", main: "日曜日クラス", sub: "入門" },
-  { id: "tue-nyumon", main: "火曜日クラス", sub: "入門" },
+  { id: "tue-nyumon", main: "木曜日クラス", sub: "入門" }, // 2026-09-16: 開講曜日が火曜日から木曜日に変更（idは既存Firestoreデータ互換のため据え置き）
 ];
 
 const SEED_ENTRY: KeikoNoteEntry = {
