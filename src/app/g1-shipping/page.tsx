@@ -469,7 +469,7 @@ export default function G1ShippingPage() {
             <div>
               <h1 className="text-lg font-bold text-matcha-deep">G1 発送物リスト</h1>
               <p className="text-xs text-muted mt-1">
-                Gマダムの茶の湯講座（G1）の道具・消耗品と、毎回の発送記録です。
+                G1マダムの茶の湯講座の道具・消耗品と、毎回の発送記録です。
               </p>
             </div>
             {canEdit && !editing && (

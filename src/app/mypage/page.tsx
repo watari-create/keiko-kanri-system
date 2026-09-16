@@ -10,6 +10,7 @@ import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
+import { groupDisplayName } from "@/lib/areas";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import type { Member, LeaveRequestType } from "@/types";
 
@@ -123,7 +124,7 @@ export default function MyPage() {
 
       <div className="bg-paper border border-line rounded-md p-6 mb-4 text-center">
         <div className="text-lg font-bold text-matcha-deep">{member.name} 様</div>
-        <div className="text-xs text-muted mt-1">{member.group}</div>
+        <div className="text-xs text-muted mt-1">{groupDisplayName(member.group)}</div>
         <div className="mt-4 text-sm space-y-1 text-left">
           <div className="flex justify-between border-b border-line py-1">
             <span className="text-muted">会員番号</span>

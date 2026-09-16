@@ -30,6 +30,7 @@ import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
+import { groupDisplayName } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
 import type {
   Member,
@@ -61,8 +62,8 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "宗徧流稽古":
     "直門（雪月花・一喝会・星組・不識会）・萌芽会・紅月会が対象。世話人が名簿と出席を管理します。",
   "本部稽古":
-    "名月会・茶道教室・Gマダムの茶の湯講座が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
-  "経理": "名月会・Gマダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
+    "名月会・茶道教室・G1マダムの茶の湯講座が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
+  "経理": "名月会・G1マダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
 };
 
@@ -421,7 +422,7 @@ export default function AdminPage() {
       .sort((a, b) => a.memberName.localeCompare(b.memberName, "ja"));
 
     if (activeRequests.length === 0) {
-      alert(`${group}の対応中の許状申請はありません。`);
+      alert(`${groupDisplayName(group)}の対応中の許状申請はありません。`);
       return;
     }
 
@@ -451,7 +452,7 @@ export default function AdminPage() {
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>許状申請者一覧（${group}）</title>
+<title>許状申請者一覧（${groupDisplayName(group)}）</title>
 <style>
   body { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; padding: 24px; color: #1a1a1a; }
   h1 { font-size: 18px; margin-bottom: 4px; }
@@ -465,7 +466,7 @@ export default function AdminPage() {
 </style>
 </head>
 <body>
-  <h1>許状申請者一覧（${group}）</h1>
+  <h1>許状申請者一覧（${groupDisplayName(group)}）</h1>
   <p class="meta">印刷日：${new Date().toLocaleDateString("ja-JP")}　対応中：${activeRequests.length}件</p>
   <table>
     <thead>
@@ -681,7 +682,7 @@ export default function AdminPage() {
                   >
                     <div className="text-xs text-muted">許状申請</div>
                     <div className="text-sm font-semibold">
-                      {r.memberName}（{r.group}）
+                      {r.memberName}（{groupDisplayName(r.group)}）
                     </div>
                     <div className="text-xs text-muted">
                       {r.licenseName} 申請 ・ {LICENSE_STATUS_EMOJI[r.status]} {r.status}
@@ -696,7 +697,7 @@ export default function AdminPage() {
                   >
                     <div className="text-xs text-muted">退会・休会・復会申請</div>
                     <div className="text-sm font-semibold">
-                      {r.memberName}（{r.group}）
+                      {r.memberName}（{groupDisplayName(r.group)}）
                     </div>
                     <div className="text-xs text-muted">
                       {r.type}申請 ・ {r.reason || "理由の記載なし"}
@@ -764,7 +765,9 @@ export default function AdminPage() {
             onChange={(e) => setGroup(e.target.value)}
           >
             {AREA_GROUPS[area].map((g) => (
-              <option key={g}>{g}</option>
+              <option key={g} value={g}>
+                {groupDisplayName(g)}
+              </option>
             ))}
           </select>
           {nextLesson && (
@@ -798,8 +801,8 @@ export default function AdminPage() {
                 {sessionPaymentMembers.map((m) => (
                     <tr key={m.id} className="border-b border-line">
                       <td className="py-2 pr-2 sticky left-0 bg-paper w-24">
-                        <span className="block truncate" title={`${m.name}（${m.group}）`}>
-                          {m.name}（{m.group}）
+                        <span className="block truncate" title={`${m.name}（${groupDisplayName(m.group)}）`}>
+                          {m.name}（{groupDisplayName(m.group)}）
                         </span>
                       </td>
                       {fiscalYearMonths().map((mk) => {
@@ -863,7 +866,7 @@ export default function AdminPage() {
                   <div key={r.id} className="flex items-center justify-between border-b border-line pb-3">
                     <div>
                       <div className="font-semibold text-sm">
-                        {r.memberName}（{r.group}）
+                        {r.memberName}（{groupDisplayName(r.group)}）
                       </div>
                       <div className="text-xs text-muted">
                         {r.licenseName}　合計：¥{r.fee.toLocaleString()}　申請月：{formatYearMonth(r.issueMonth)}
@@ -902,7 +905,7 @@ export default function AdminPage() {
           {/* セクション3：入会金の入金確認（名月会のみ） */}
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">入会金の入金確認（名月会のみ）</h2>
-            <p className="text-xs text-muted mb-3">入会金は一律 ¥33,000（Gマダムの茶の湯講座は対象外）</p>
+            <p className="text-xs text-muted mb-3">入会金は一律 ¥33,000（G1マダムの茶の湯講座は対象外）</p>
             <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className="text-left text-muted border-b border-line">
@@ -1000,7 +1003,7 @@ export default function AdminPage() {
                   {section.members.map((m) => (
                 <tr key={m.id} className="border-b border-line">
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
-                  {showAffiliation && <td className="pr-3">{m.group}</td>}
+                  {showAffiliation && <td className="pr-3">{groupDisplayName(m.group)}</td>}
                   {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
                   <td className="pr-3">
                     <button
@@ -1177,7 +1180,7 @@ export default function AdminPage() {
             </div>
             <p className="text-xs text-muted mb-3">
               受付 → 請求書発行依頼 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
-              （「申請者一覧を印刷」は、現在表示中の「{group}」の対応中の申請を印刷します）
+              （「申請者一覧を印刷」は、現在表示中の「{groupDisplayName(group)}」の対応中の申請を印刷します）
             </p>
             <div className="space-y-3">
               {requests
@@ -1348,7 +1351,7 @@ export default function AdminPage() {
               <div>
                 <h3 className="text-lg font-bold text-matcha-deep">{selectedMember.name}</h3>
                 <p className="text-xs text-muted">
-                  会員番号：{selectedMember.id}　所属：{selectedMember.group}
+                  会員番号：{selectedMember.id}　所属：{groupDisplayName(selectedMember.group)}
                 </p>
               </div>
               <button className="text-muted text-sm" onClick={closeMemberDetail}>

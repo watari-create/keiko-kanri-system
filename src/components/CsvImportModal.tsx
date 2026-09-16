@@ -11,6 +11,7 @@ import { collection, doc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { parseCsvWithHeader, normalizeDate } from "@/lib/csv";
 import type { GroupCategory, Member, MemberStatus } from "@/types";
+import { groupDisplayName } from "@/lib/areas";
 
 type Step = "upload" | "mapping" | "preview" | "result";
 
@@ -346,7 +347,7 @@ export default function CsvImportModal({
       >
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-lg font-bold text-matcha-deep">CSVから名簿を更新（{group}）</h3>
+            <h3 className="text-lg font-bold text-matcha-deep">CSVから名簿を更新（{groupDisplayName(group)}）</h3>
             <p className="text-xs text-muted">
               会員番号をキーに、既存の会員は更新、新しい会員番号は追加します。CSVに載っていない既存の会員は変更されません。
             </p>

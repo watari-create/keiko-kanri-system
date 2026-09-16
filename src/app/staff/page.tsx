@@ -23,7 +23,7 @@ import {
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { isHonbuKeikoGroup } from "@/lib/areas";
+import { isHonbuKeikoGroup, groupDisplayName } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
@@ -163,10 +163,10 @@ export default function StaffPage() {
       </div>
 
       <div className="text-sm text-muted mb-1">
-        {account.name}さんとしてログイン中（担当：{account.groups.join("・")}）
+        {account.name}さんとしてログイン中（担当：{account.groups.map(groupDisplayName).join("・")}）
       </div>
       <div className="text-sm text-matcha-deep mb-4">
-        {nextLesson ? `${group} 次回のお稽古：${formatLessonDate(nextLesson.date)}` : "\u00A0"}
+        {nextLesson ? `${groupDisplayName(group)} 次回のお稽古：${formatLessonDate(nextLesson.date)}` : "\u00A0"}
       </div>
 
       {account.groups.length > 1 && (
@@ -176,7 +176,9 @@ export default function StaffPage() {
           onChange={(e) => setGroup(e.target.value)}
         >
           {account.groups.map((g) => (
-            <option key={g}>{g}</option>
+            <option key={g} value={g}>
+              {groupDisplayName(g)}
+            </option>
           ))}
         </select>
       )}

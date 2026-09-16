@@ -26,6 +26,17 @@ const slackLicenseChannel = defineString("SLACK_LICENSE_CHANNEL");
 // Botをこのチャンネルに /invite しておくこと。デプロイ時にCLIから入力を求められる。
 const slackHqChannel = defineString("SLACK_HQ_CHANNEL");
 
+// Slack通知文などユーザーの目に触れるテキストに使う表示用グループ名。
+// Firestoreのgroupフィールドやクエリ条件・メンション対象判定などの内部的な値は、既存データとの
+// 整合性のためこれまで通り「Gマダムの茶の湯講座」のままにし、表示だけ「G1マダムの茶の湯講座」にする。
+const GROUP_DISPLAY_NAMES: Record<string, string> = {
+  "Gマダムの茶の湯講座": "G1マダムの茶の湯講座",
+};
+function groupDisplayName(group: unknown): string {
+  if (typeof group !== "string") return "";
+  return GROUP_DISPLAY_NAMES[group] ?? group;
+}
+
 // 請求書発行依頼のSlack通知でメンションする人のSlackユーザーID（例：U0123456）。
 // 未設定でもエラーにはならず、メンションなしで通知するだけになる。
 const slackLicenseMentionUserId = defineString("SLACK_LICENSE_MENTION_USER_ID", { default: "" });
@@ -321,7 +332,7 @@ export const onLicenseRequestCreated = onDocumentCreated(
     const detailUrl = `${APP_BASE_URL}/admin?licenseRequestId=${event.params.requestId}`;
     const text =
       `許状申請が届きました\n` +
-      `会員：${data.memberName}様（${data.group ?? ""}）\n` +
+      `会員：${data.memberName}様（${groupDisplayName(data.group)}）\n` +
       `許状：${data.licenseName}`;
 
     try {
@@ -360,7 +371,7 @@ export const onLeaveRequestCreated = onDocumentCreated(
 
     const text =
       `${data.type}申請が届きました\n` +
-      `会員：${data.memberName}様（${data.group ?? ""}）\n` +
+      `会員：${data.memberName}様（${groupDisplayName(data.group)}）\n` +
       (data.reason ? `理由：${data.reason}\n` : "") +
       `承認する場合は、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
 
@@ -504,7 +515,7 @@ export const onMemberCreated = onDocumentCreated(
     } else {
       const text =
         `新しい入会申込がありました\n` +
-        `会員：${data.name ?? ""}様（${data.group ?? ""}）\n` +
+        `会員：${data.name ?? ""}様（${groupDisplayName(data.group)}）\n` +
         `会員No：${event.params.memberId}\n` +
         `入門セット（扇子、懐紙、服紗）をご用意ください。` +
         (lowStockItems.length > 0
