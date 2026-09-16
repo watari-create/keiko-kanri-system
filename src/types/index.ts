@@ -267,3 +267,15 @@ export interface ChadoSaturdaySession {
   amBookings: ChadoSaturdayBooking[];
   pmBookings: ChadoSaturdayBooking[];
 }
+
+// 茶道教室：生徒ごとの進捗申し送り（講師間・本部との引き継ぎ用の内部メモ。
+// お稽古のたびに1件ずつ記録する時系列ログで、生徒本人には見せない）。
+export interface ChadoStudentNote {
+  id: string;
+  memberId: string;
+  memberName: string; // 一覧表示用に非正規化して保持
+  date: string; // お稽古日（YYYY-MM-DD）
+  body: string;
+  authorName: string; // 記入者名（講師名、本部の場合は「本部」）
+  createdAt: string; // ISO日時（記入日時。同じdateが複数あっても記入順が分かるように）
+}

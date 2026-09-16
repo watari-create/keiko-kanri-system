@@ -187,6 +187,13 @@ service cloud.firestore {
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }
 
+    // ---- chadoStudentNotes（茶道教室：生徒ごとの進捗申し送り） ----
+    // 講師間・本部との引き継ぎ用の内部メモ。生徒本人（マイページ）には見せないため、
+    // 読み書きとも本部、または茶道教室担当の世話人・講師のみに限定する。
+    match /chadoStudentNotes/{noteId} {
+      allow read, write: if isHonbu() || isStaffFor('茶道教室');
+    }
+
     // ---- keikoNoteEntries（茶道教室：お稽古ノート） ----
     // このノートはログイン不要で閲覧できる公開ページだが、URLを直接知っている人にしか
     // 開けないよう合言葉（アクセスコード）で保護している（アプリ側のmiddlewareで実施）。

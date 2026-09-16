@@ -45,6 +45,7 @@ import type {
   StaffRole,
   NyumonSetInventory,
   ChadoSaturdaySession,
+  ChadoStudentNote,
 } from "@/types";
 
 type Area = "宗徧流稽古" | "本部稽古" | "経理" | "スタッフ管理";
@@ -171,6 +172,12 @@ export default function AdminPage() {
   const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
   const [newSessionDate, setNewSessionDate] = useState("");
 
+  // 茶道教室：生徒ごとの進捗申し送り（会員詳細モーダルを開いている間のみ購読）
+  const [studentNotes, setStudentNotes] = useState<ChadoStudentNote[]>([]);
+  const [newNoteDate, setNewNoteDate] = useState("");
+  const [newNoteBody, setNewNoteBody] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
   // 権限チェック：本部以外はログインページへ
   useEffect(() => {
     if (!loading && role !== "honbu") router.replace("/login");
@@ -225,6 +232,23 @@ export default function AdminPage() {
       setSaturdaySessions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoSaturdaySession)));
     });
   }, [area, group]);
+
+  // 茶道教室：会員詳細モーダルで選択中の生徒の申し送りをリアルタイム購読
+  useEffect(() => {
+    if (!selectedMember || selectedMember.group !== "茶道教室") {
+      setStudentNotes([]);
+      return;
+    }
+    const q = query(
+      collection(db, "chadoStudentNotes"),
+      where("memberId", "==", selectedMember.id),
+      orderBy("date", "desc"),
+      orderBy("createdAt", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      setStudentNotes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoStudentNote)));
+    });
+  }, [selectedMember]);
 
   function switchArea(a: Area) {
     setArea(a);
@@ -658,11 +682,36 @@ export default function AdminPage() {
   function openMemberDetail(m: Member) {
     setSelectedMember(m);
     setDraft(toDraft(m));
+    setNewNoteDate(new Date().toISOString().slice(0, 10));
+    setNewNoteBody("");
   }
 
   function closeMemberDetail() {
     setSelectedMember(null);
     setDraft(null);
+  }
+
+  async function addStudentNote() {
+    if (!selectedMember || !newNoteBody.trim() || !newNoteDate) return;
+    setSavingNote(true);
+    try {
+      const ref = doc(collection(db, "chadoStudentNotes"));
+      await setDoc(ref, {
+        memberId: selectedMember.id,
+        memberName: selectedMember.name,
+        date: newNoteDate,
+        body: newNoteBody.trim(),
+        authorName: "本部",
+        createdAt: new Date().toISOString(),
+      });
+      setNewNoteBody("");
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function deleteStudentNote(noteId: string) {
+    await deleteDoc(doc(db, "chadoStudentNotes", noteId));
   }
 
   async function saveMemberDetail() {
@@ -1908,6 +1957,58 @@ export default function AdminPage() {
                       />
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {selectedMember.group === "茶道教室" && (
+              <div className="mt-4 pt-4 border-t border-line">
+                <h4 className="text-sm font-bold mb-1">生徒の申し送り</h4>
+                <p className="text-xs text-muted mb-2">
+                  講師間・本部の引き継ぎ用の内部メモです（生徒本人には表示されません）。お稽古のたびに記録してください。
+                </p>
+                <div className="space-y-2 mb-3 max-h-56 overflow-y-auto">
+                  {studentNotes.length === 0 && (
+                    <p className="text-xs text-muted">まだ記録がありません。</p>
+                  )}
+                  {studentNotes.map((n) => (
+                    <div key={n.id} className="border border-line rounded p-2 text-xs">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-muted">
+                          {n.date}　{n.authorName}
+                        </span>
+                        <button
+                          className="text-muted hover:text-red-700"
+                          onClick={() => deleteStudentNote(n.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+                      <p className="whitespace-pre-wrap">{n.body}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 items-start">
+                  <input
+                    type="date"
+                    className="input w-36 shrink-0"
+                    value={newNoteDate}
+                    onChange={(e) => setNewNoteDate(e.target.value)}
+                  />
+                  <textarea
+                    className="input flex-1"
+                    rows={2}
+                    placeholder="例：割稽古の柄杓の扱いを中心に。次回は総稽古から。"
+                    value={newNoteBody}
+                    onChange={(e) => setNewNoteBody(e.target.value)}
+                  />
+                  <button
+                    className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50 shrink-0"
+                    onClick={addStudentNote}
+                    disabled={savingNote || !newNoteBody.trim()}
+                  >
+                    記録する
+                  </button>
                 </div>
               </div>
             )}

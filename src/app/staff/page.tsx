@@ -15,9 +15,11 @@ import {
   collection,
   query,
   where,
+  orderBy,
   onSnapshot,
   updateDoc,
   addDoc,
+  deleteDoc,
   deleteField,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
@@ -28,7 +30,7 @@ import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
-import type { StaffAccount, Member, LicenseRequest } from "@/types";
+import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote } from "@/types";
 
 export default function StaffPage() {
   const { role, staffId, loading } = useAuth();
@@ -44,6 +46,10 @@ export default function StaffPage() {
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [studentNotes, setStudentNotes] = useState<ChadoStudentNote[]>([]);
+  const [newNoteDate, setNewNoteDate] = useState("");
+  const [newNoteBody, setNewNoteBody] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
@@ -85,6 +91,47 @@ export default function StaffPage() {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
     });
   }, [group, account]);
+
+  // 茶道教室：生徒詳細で選択中の生徒の申し送りをリアルタイム購読
+  useEffect(() => {
+    if (!selectedMember || group !== "茶道教室") {
+      setStudentNotes([]);
+      return;
+    }
+    setNewNoteDate(new Date().toISOString().slice(0, 10));
+    setNewNoteBody("");
+    const q = query(
+      collection(db, "chadoStudentNotes"),
+      where("memberId", "==", selectedMember.id),
+      orderBy("date", "desc"),
+      orderBy("createdAt", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      setStudentNotes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoStudentNote)));
+    });
+  }, [selectedMember, group]);
+
+  async function addStudentNote() {
+    if (!selectedMember || !account || !newNoteBody.trim() || !newNoteDate) return;
+    setSavingNote(true);
+    try {
+      await addDoc(collection(db, "chadoStudentNotes"), {
+        memberId: selectedMember.id,
+        memberName: selectedMember.name,
+        date: newNoteDate,
+        body: newNoteBody.trim(),
+        authorName: account.name,
+        createdAt: new Date().toISOString(),
+      });
+      setNewNoteBody("");
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function deleteStudentNote(noteId: string) {
+    await deleteDoc(doc(db, "chadoStudentNotes", noteId));
+  }
 
   async function markDelivered(reqId: string) {
     // Firestoreルール側で「発行済→お渡し済」以外への変更は拒否される
@@ -362,7 +409,7 @@ export default function StaffPage() {
           onClick={() => setSelectedMember(null)}
         >
           <div
-            className="bg-paper border border-line rounded-md p-6 max-w-sm w-full"
+            className="bg-paper border border-line rounded-md p-6 max-w-md w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start mb-4">
@@ -394,6 +441,58 @@ export default function StaffPage() {
                 <dd>{selectedMember.joinDate || "—"}</dd>
               </div>
             </dl>
+
+            {group === "茶道教室" && (
+              <div className="mt-4 pt-4 border-t border-line">
+                <h4 className="text-sm font-bold mb-1">生徒の申し送り</h4>
+                <p className="text-xs text-muted mb-2">
+                  講師間・本部の引き継ぎ用の内部メモです（生徒本人には表示されません）。
+                </p>
+                <div className="space-y-2 mb-3 max-h-56 overflow-y-auto">
+                  {studentNotes.length === 0 && (
+                    <p className="text-xs text-muted">まだ記録がありません。</p>
+                  )}
+                  {studentNotes.map((n) => (
+                    <div key={n.id} className="border border-line rounded p-2 text-xs">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-muted">
+                          {n.date}　{n.authorName}
+                        </span>
+                        <button
+                          className="text-muted hover:text-red-700"
+                          onClick={() => deleteStudentNote(n.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+                      <p className="whitespace-pre-wrap">{n.body}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  <input
+                    type="date"
+                    className="input"
+                    value={newNoteDate}
+                    onChange={(e) => setNewNoteDate(e.target.value)}
+                  />
+                  <textarea
+                    className="input w-full"
+                    rows={2}
+                    placeholder="例：割稽古の柄杓の扱いを中心に。次回は総稽古から。"
+                    value={newNoteBody}
+                    onChange={(e) => setNewNoteBody(e.target.value)}
+                  />
+                  <button
+                    className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50 w-full"
+                    onClick={addStudentNote}
+                    disabled={savingNote || !newNoteBody.trim()}
+                  >
+                    記録する
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
