@@ -21,7 +21,15 @@ function todayKey(): string {
   return `${y}-${m}-${day}`;
 }
 
-export default function SaturdayReservation({ memberId }: { memberId: string }) {
+export default function SaturdayReservation({
+  memberId,
+  quota,
+  tickets,
+}: {
+  memberId: string;
+  quota: 1 | 2;
+  tickets: number;
+}) {
   const [sessions, setSessions] = useState<ChadoSaturdaySession[]>([]);
   const [busy, setBusy] = useState<string | null>(null); // "date-slot" 処理中
   const [msg, setMsg] = useState<string | null>(null);
@@ -52,10 +60,10 @@ export default function SaturdayReservation({ memberId }: { memberId: string }) 
           : "予約をキャンセルしました。"
       );
     } catch (e) {
-      const code = (e as { code?: string })?.code;
+      const err = e as { code?: string; message?: string };
       setMsg(
-        code === "resource-exhausted"
-          ? "この枠はちょうど定員に達してしまいました。もう一方の枠をお試しください。"
+        err.code === "resource-exhausted" && err.message
+          ? err.message
           : "処理に失敗しました。時間をおいて再度お試しください。"
       );
     } finally {
@@ -65,7 +73,10 @@ export default function SaturdayReservation({ memberId }: { memberId: string }) 
 
   return (
     <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-3">講師名</h2>
+      <h2 className="text-sm text-muted mb-1">講師名</h2>
+      <p className="text-xs text-muted mb-3">
+        月の予約可能回数：月{quota}回　／　振替チケット：{tickets}枚
+      </p>
       {sessions.length === 0 && (
         <p className="text-xs text-muted">現在、予約可能な開催日はありません。本部にお問い合わせください。</p>
       )}
@@ -94,6 +105,7 @@ export default function SaturdayReservation({ memberId }: { memberId: string }) 
                   const capacity = isAm ? amCapacity : pmCapacity;
                   const teacher = isAm ? s.amTeacher : s.pmTeacher;
                   const disabled = busy === `${s.id}-${slot}` || (full && !mine);
+                  const myBooking = bookings.find((b) => b.memberId === memberId);
                   return (
                     <button
                       key={slot}
@@ -113,6 +125,9 @@ export default function SaturdayReservation({ memberId }: { memberId: string }) 
                         {bookings.length}/{capacity}名
                         {full && !mine ? "（満席）" : ""}
                       </div>
+                      {mine && myBooking?.usedTicket && (
+                        <div className="opacity-80">振替チケットを使用</div>
+                      )}
                       <div className="mt-1 underline">
                         {mine ? "キャンセルする" : full ? "満席" : "この枠を予約する"}
                       </div>

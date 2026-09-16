@@ -42,6 +42,8 @@ export interface Member {
   nextBillingDate?: string;
   rsvp?: Rsvp;
   chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日）
+  chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は2回として扱う）
+  chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
@@ -251,6 +253,8 @@ export interface ChadoSaturdayBooking {
   memberId: string;
   memberName: string;
   bookedAt: string;
+  usedTicket?: boolean; // この予約が振替チケットを消費して確保されたもの（月の通常予約可能回数を超えた分）かどうか
+  attended?: "出席" | "欠席"; // 本部が開催後に記録する出欠。「欠席」にすると振替チケットが1枚付与される
 }
 
 export interface ChadoSaturdaySession {

@@ -23,6 +23,7 @@ import {
   setDoc,
   deleteDoc,
   deleteField,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
@@ -615,6 +616,43 @@ export default function AdminPage() {
   async function deleteSaturdaySession(sessionId: string) {
     if (!confirm("この開催日を削除しますか？（予約状況もすべて削除されます）")) return;
     await deleteDoc(doc(db, "chadoSaturdaySessions", sessionId));
+  }
+
+  // 本部による事後の出欠記録。「欠席」にすると振替チケットを1枚付与し、
+  // 取り消す／「出席」に変えると付与したチケットを1枚戻す（トランザクションで整合性を保つ）。
+  async function setSaturdayBookingAttendance(
+    sessionId: string,
+    slot: "am" | "pm",
+    memberId: string,
+    value: "出席" | "欠席" | undefined
+  ) {
+    const sessionRef = doc(db, "chadoSaturdaySessions", sessionId);
+    const memberRef = doc(db, "members", memberId);
+    await runTransaction(db, async (tx) => {
+      const sessionSnap = await tx.get(sessionRef);
+      const memberSnap = await tx.get(memberRef);
+      if (!sessionSnap.exists() || !memberSnap.exists()) return;
+      const data = sessionSnap.data() as ChadoSaturdaySession;
+      const field = slot === "am" ? "amBookings" : "pmBookings";
+      const bookings = (slot === "am" ? data.amBookings : data.pmBookings) ?? [];
+      const idx = bookings.findIndex((b) => b.memberId === memberId);
+      if (idx === -1) return;
+      const prev = bookings[idx].attended;
+      const updated = bookings.slice();
+      updated[idx] = { ...updated[idx], attended: value };
+
+      let ticketDelta = 0;
+      if (prev !== "欠席" && value === "欠席") ticketDelta = 1;
+      if (prev === "欠席" && value !== "欠席") ticketDelta = -1;
+
+      tx.update(sessionRef, { [field]: updated });
+      if (ticketDelta !== 0) {
+        const currentTickets = (memberSnap.data() as Member).chadoMakeupTickets ?? 0;
+        tx.update(memberRef, {
+          chadoMakeupTickets: Math.max(0, currentTickets + ticketDelta),
+        });
+      }
+    });
   }
 
   function openMemberDetail(m: Member) {
@@ -1262,6 +1300,7 @@ export default function AdminPage() {
               <p className="text-xs text-muted mb-3">
                 開催日ごとに午前・午後の枠を管理します（各枠デフォルト定員3名）。担当講師は交代制のため、開催日ごとに入力してください。
                 予約の受付・キャンセルは会員本人がマイページから行います（ここでは開催日の追加・担当講師や定員の設定・予約の手動修正ができます）。
+                開催後、予約者の出欠を「出席／欠席」で記録してください。「欠席」にすると振替チケットが1枚自動的に付与され、翌月以降の追加予約に使えるようになります。
               </p>
               <div className="flex items-center gap-2 mb-4">
                 <input
@@ -1331,14 +1370,37 @@ export default function AdminPage() {
                             </p>
                             <ul className="space-y-1">
                               {bookings.map((b) => (
-                                <li key={b.memberId} className="flex items-center justify-between text-xs">
-                                  <span>{b.memberName}</span>
-                                  <button
-                                    className="text-hanko underline decoration-dotted underline-offset-2"
-                                    onClick={() => removeSaturdayBooking(s.id, slot, b.memberId)}
-                                  >
-                                    削除
-                                  </button>
+                                <li key={b.memberId} className="flex items-center justify-between text-xs gap-2">
+                                  <span>
+                                    {b.memberName}
+                                    {b.usedTicket && (
+                                      <span className="text-muted">（チケット使用）</span>
+                                    )}
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      className="border border-line rounded px-1 py-0.5 text-xs"
+                                      value={b.attended ?? ""}
+                                      onChange={(e) =>
+                                        setSaturdayBookingAttendance(
+                                          s.id,
+                                          slot,
+                                          b.memberId,
+                                          (e.target.value || undefined) as "出席" | "欠席" | undefined
+                                        )
+                                      }
+                                    >
+                                      <option value="">未確認</option>
+                                      <option value="出席">出席</option>
+                                      <option value="欠席">欠席</option>
+                                    </select>
+                                    <button
+                                      className="text-hanko underline decoration-dotted underline-offset-2"
+                                      onClick={() => removeSaturdayBooking(s.id, slot, b.memberId)}
+                                    >
+                                      削除
+                                    </button>
+                                  </div>
                                 </li>
                               ))}
                               {bookings.length === 0 && (
@@ -1668,6 +1730,39 @@ export default function AdminPage() {
                     ))}
                   </select>
                 </Field>
+              )}
+              {selectedMember.group === "茶道教室" && draft.chadoClass === "土曜日" && (
+                <>
+                  <Field label="月の予約可能回数">
+                    <select
+                      className="input"
+                      value={draft.chadoMonthlyQuota ?? 2}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          chadoMonthlyQuota: Number(e.target.value) as 1 | 2,
+                        })
+                      }
+                    >
+                      <option value={1}>月1回</option>
+                      <option value={2}>月2回</option>
+                    </select>
+                  </Field>
+                  <Field label="振替チケット残数">
+                    <input
+                      type="number"
+                      min={0}
+                      className="input"
+                      value={draft.chadoMakeupTickets ?? 0}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          chadoMakeupTickets: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                    />
+                  </Field>
+                </>
               )}
               <Field label="学年">
                 <input

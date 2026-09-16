@@ -141,7 +141,11 @@ export default function MyPage() {
 
       {member.groupCategory === "本部稽古" &&
         (member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
-          <SaturdayReservation memberId={member.id} />
+          <SaturdayReservation
+            memberId={member.id}
+            quota={member.chadoMonthlyQuota ?? 2}
+            tickets={member.chadoMakeupTickets ?? 0}
+          />
         ) : (
           <div className="bg-paper border border-line rounded-md p-6 mb-4">
             <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>

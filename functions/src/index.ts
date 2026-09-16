@@ -753,11 +753,24 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
 // 同時に複数人が予約しても「定員3名」を確実に守る（クライアントの直接書き込みだと
 // レースコンディションで定員超過しうるため、あえてCloud Functions経由にしている）。
 const CHADO_SATURDAY_DEFAULT_CAPACITY = 3;
+const CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA = 2; // 月の予約可能回数（会員ごとに設定されていない場合のデフォルト）
 
 interface ChadoSaturdayBookingDoc {
   memberId: string;
   memberName: string;
   bookedAt: string;
+  usedTicket?: boolean;
+  attended?: "出席" | "欠席";
+}
+
+// dateKey（YYYY-MM-DD）が属する月の範囲を [開始日, 翌月開始日) の形で返す（monthQueryのwhere条件に使う）。
+function monthBoundsForDate(dateKey: string): { start: string; endExclusive: string } {
+  const [y, m] = dateKey.split("-").map(Number);
+  const start = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+  const endExclusive = `${String(nextY).padStart(4, "0")}-${String(nextM).padStart(2, "0")}-01`;
+  return { start, endExclusive };
 }
 
 export const bookChadoSaturdaySlot = onCall<{
@@ -780,19 +793,37 @@ export const bookChadoSaturdaySlot = onCall<{
     throw new HttpsError("invalid-argument", "パラメータが不正です。");
   }
 
-  const memberSnap = await db.doc(`members/${memberId}`).get();
-  if (!memberSnap.exists) throw new HttpsError("not-found", "会員情報が見つかりません。");
-  const member = memberSnap.data() as { name?: string; group?: string; chadoClass?: string };
-  if (member.group !== "茶道教室" || member.chadoClass !== "土曜日") {
-    throw new HttpsError("permission-denied", "土曜日クラスの会員のみ予約できます。");
-  }
-
+  const memberRef = db.doc(`members/${memberId}`);
   const sessionRef = db.doc(`chadoSaturdaySessions/${date}`);
+  const { start, endExclusive } = monthBoundsForDate(date);
+  const monthQuery = db
+    .collection("chadoSaturdaySessions")
+    .where("date", ">=", start)
+    .where("date", "<", endExclusive);
 
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(sessionRef);
-    const data = snap.exists
-      ? (snap.data() as {
+    // Firestoreのトランザクションは、書き込みより前にすべての読み取りを終える必要があるため、
+    // 予約先セッション・会員情報・当月の全セッション（月の予約回数を数えるため）をまとめて先に読む。
+    const [memberSnap, sessionSnap, monthSnap] = await Promise.all([
+      tx.get(memberRef),
+      tx.get(sessionRef),
+      tx.get(monthQuery),
+    ]);
+
+    if (!memberSnap.exists) throw new HttpsError("not-found", "会員情報が見つかりません。");
+    const member = memberSnap.data() as {
+      name?: string;
+      group?: string;
+      chadoClass?: string;
+      chadoMonthlyQuota?: number;
+      chadoMakeupTickets?: number;
+    };
+    if (member.group !== "茶道教室" || member.chadoClass !== "土曜日") {
+      throw new HttpsError("permission-denied", "土曜日クラスの会員のみ予約できます。");
+    }
+
+    const sessionData = sessionSnap.exists
+      ? (sessionSnap.data() as {
           amCapacity?: number;
           pmCapacity?: number;
           amTeacher?: string;
@@ -802,26 +833,73 @@ export const bookChadoSaturdaySlot = onCall<{
         })
       : {};
 
-    const amCapacity = data.amCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
-    const pmCapacity = data.pmCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
-    const filteredAm = (data.amBookings ?? []).filter((b) => b.memberId !== memberId);
-    const filteredPm = (data.pmBookings ?? []).filter((b) => b.memberId !== memberId);
+    const amCapacity = sessionData.amCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+    const pmCapacity = sessionData.pmCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+    const existingAm = sessionData.amBookings ?? [];
+    const existingPm = sessionData.pmBookings ?? [];
+    const myExistingBooking =
+      existingAm.find((b) => b.memberId === memberId) ?? existingPm.find((b) => b.memberId === memberId);
+    const filteredAm = existingAm.filter((b) => b.memberId !== memberId);
+    const filteredPm = existingPm.filter((b) => b.memberId !== memberId);
+
+    // 今月、この会員が（このセッション以外で）すでに予約している開催日の数を数える
+    // （月の予約可能回数のチェックに使う。出欠が未確認・欠席のものも「予約を使った」ことに変わりないため含める）
+    let bookedElsewhereThisMonth = 0;
+    monthSnap.docs.forEach((docSnap) => {
+      if (docSnap.id === date) return; // 対象セッション自体は別途カウント
+      const d = docSnap.data() as {
+        amBookings?: ChadoSaturdayBookingDoc[];
+        pmBookings?: ChadoSaturdayBookingDoc[];
+      };
+      const has =
+        (d.amBookings ?? []).some((b) => b.memberId === memberId) ||
+        (d.pmBookings ?? []).some((b) => b.memberId === memberId);
+      if (has) bookedElsewhereThisMonth += 1;
+    });
 
     if (action === "cancel") {
+      // 振替チケットを使って確保した予約を取り消した場合は、チケットを1枚戻す
+      const ticketDelta = myExistingBooking?.usedTicket ? 1 : 0;
       tx.set(
         sessionRef,
         {
           date,
           amCapacity,
           pmCapacity,
-          amTeacher: data.amTeacher ?? "",
-          pmTeacher: data.pmTeacher ?? "",
+          amTeacher: sessionData.amTeacher ?? "",
+          pmTeacher: sessionData.pmTeacher ?? "",
           amBookings: filteredAm,
           pmBookings: filteredPm,
         },
         { merge: true }
       );
+      if (ticketDelta !== 0) {
+        tx.update(memberRef, {
+          chadoMakeupTickets: Math.max(0, (member.chadoMakeupTickets ?? 0) + ticketDelta),
+        });
+      }
       return { ok: true };
+    }
+
+    // action === "book"
+    // 同じ開催日内での午前⇔午後の変更（すでにその日を予約済み）は、月の予約回数を追加消費しない
+    const isSwitchingSameDate = !!myExistingBooking;
+    let usedTicket = myExistingBooking?.usedTicket ?? false;
+
+    if (!isSwitchingSameDate) {
+      const quota = member.chadoMonthlyQuota ?? CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA;
+      if (bookedElsewhereThisMonth >= quota) {
+        const tickets = member.chadoMakeupTickets ?? 0;
+        if (tickets <= 0) {
+          throw new HttpsError(
+            "resource-exhausted",
+            `今月の予約可能回数（月${quota}回）の上限に達しています。振替チケットもありません。`
+          );
+        }
+        usedTicket = true;
+      } else {
+        usedTicket = false;
+      }
     }
 
     const targetBookings = slot === "am" ? filteredAm : filteredPm;
@@ -833,6 +911,7 @@ export const bookChadoSaturdaySlot = onCall<{
       memberId,
       memberName: member.name ?? "",
       bookedAt: new Date().toISOString(),
+      usedTicket,
     });
 
     tx.set(
@@ -841,13 +920,21 @@ export const bookChadoSaturdaySlot = onCall<{
         date,
         amCapacity,
         pmCapacity,
-        amTeacher: data.amTeacher ?? "",
-        pmTeacher: data.pmTeacher ?? "",
+        amTeacher: sessionData.amTeacher ?? "",
+        pmTeacher: sessionData.pmTeacher ?? "",
         amBookings: slot === "am" ? targetBookings : filteredAm,
         pmBookings: slot === "pm" ? targetBookings : filteredPm,
       },
       { merge: true }
     );
+
+    // 新規に振替チケットを消費した場合のみ1枚減らす（同日内の枠変更では消費しない）
+    if (!isSwitchingSameDate && usedTicket) {
+      tx.update(memberRef, {
+        chadoMakeupTickets: Math.max(0, (member.chadoMakeupTickets ?? 0) - 1),
+      });
+    }
+
     return { ok: true };
   });
 });
