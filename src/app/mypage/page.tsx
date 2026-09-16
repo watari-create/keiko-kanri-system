@@ -137,27 +137,6 @@ export default function MyPage() {
         </div>
       </div>
 
-      <div className="bg-paper border border-line rounded-md p-6 mb-4">
-        <h2 className="text-sm text-muted mb-3">家元動画へのアクセス</h2>
-        <a
-          href="https://one-stream.io/login/WAFrlVXGvJeKz3PaYEwjUe1JjZJ3?redirectPath=%2Fuser%2FWAFrlVXGvJeKz3PaYEwjUe1JjZJ3&isInvoicePayment=false"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block text-center text-sm bg-matcha-deep text-white rounded-md py-2.5 mb-3"
-        >
-          家元動画を見る
-        </a>
-        <div className="text-xs text-muted bg-matcha-pale rounded-md p-3 space-y-1">
-          <p className="font-bold text-matcha-deep">初めてご登録の方へ</p>
-          <p>動画の料金はお稽古代に含まれております。</p>
-          <p>お支払い時に下記のクーポンコードを入力ください。</p>
-          <p>「クーポンをお持ちの方」を開き、下記のクーポンコードをご入力ください。</p>
-          <p className="text-center text-sm font-bold text-matcha-deep tracking-wide mt-2">
-            4bJIdgZJ
-          </p>
-        </div>
-      </div>
-
       {member.groupCategory === "本部稽古" && (
         <div className="bg-paper border border-line rounded-md p-6 mb-4">
           <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
@@ -183,6 +162,27 @@ export default function MyPage() {
           </div>
         </div>
       )}
+
+      <div className="bg-paper border border-line rounded-md p-6 mb-4">
+        <h2 className="text-sm text-muted mb-3">家元動画へのアクセス</h2>
+        <a
+          href="https://one-stream.io/login/WAFrlVXGvJeKz3PaYEwjUe1JjZJ3?redirectPath=%2Fuser%2FWAFrlVXGvJeKz3PaYEwjUe1JjZJ3&isInvoicePayment=false"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-center text-sm bg-matcha-deep text-white rounded-md py-2.5 mb-3"
+        >
+          家元動画を見る
+        </a>
+        <div className="text-xs text-muted bg-matcha-pale rounded-md p-3 space-y-1">
+          <p className="font-bold text-matcha-deep">初めてご登録の方へ</p>
+          <p>動画の料金はお稽古代に含まれております。</p>
+          <p>お支払い時に下記のクーポンコードを入力ください。</p>
+          <p>「クーポンをお持ちの方」を開き、下記のクーポンコードをご入力ください。</p>
+          <p className="text-center text-sm font-bold text-matcha-deep tracking-wide mt-2">
+            4bJIdgZJ
+          </p>
+        </div>
+      </div>
 
       <div className="bg-paper border border-line rounded-md p-6 mb-4">
         <h2 className="text-sm text-muted mb-3">連絡先情報の変更</h2>
