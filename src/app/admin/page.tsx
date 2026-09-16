@@ -1988,22 +1988,22 @@ export default function AdminPage() {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2 items-start">
+                <div className="space-y-2">
                   <input
                     type="date"
-                    className="input w-36 shrink-0"
+                    className="input w-40"
                     value={newNoteDate}
                     onChange={(e) => setNewNoteDate(e.target.value)}
                   />
                   <textarea
-                    className="input flex-1"
+                    className="input w-full"
                     rows={2}
                     placeholder="例：割稽古の柄杓の扱いを中心に。次回は総稽古から。"
                     value={newNoteBody}
                     onChange={(e) => setNewNoteBody(e.target.value)}
                   />
                   <button
-                    className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50 shrink-0"
+                    className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50"
                     onClick={addStudentNote}
                     disabled={savingNote || !newNoteBody.trim()}
                   >
