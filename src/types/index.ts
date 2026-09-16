@@ -42,7 +42,7 @@ export interface Member {
   nextBillingDate?: string;
   rsvp?: Rsvp;
   chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日）
-  chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は2回として扱う）
+  chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は1回として扱う）
   chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録

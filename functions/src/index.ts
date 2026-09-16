@@ -753,7 +753,7 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
 // 同時に複数人が予約しても「定員3名」を確実に守る（クライアントの直接書き込みだと
 // レースコンディションで定員超過しうるため、あえてCloud Functions経由にしている）。
 const CHADO_SATURDAY_DEFAULT_CAPACITY = 3;
-const CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA = 2; // 月の予約可能回数（会員ごとに設定されていない場合のデフォルト）
+const CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA = 1; // 月の予約可能回数（会員ごとに設定されていない場合のデフォルト）
 
 interface ChadoSaturdayBookingDoc {
   memberId: string;

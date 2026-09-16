@@ -143,7 +143,7 @@ export default function MyPage() {
         (member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
           <SaturdayReservation
             memberId={member.id}
-            quota={member.chadoMonthlyQuota ?? 2}
+            quota={member.chadoMonthlyQuota ?? 1}
             tickets={member.chadoMakeupTickets ?? 0}
           />
         ) : (

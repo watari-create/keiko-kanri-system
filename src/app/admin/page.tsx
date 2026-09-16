@@ -1736,7 +1736,7 @@ export default function AdminPage() {
                   <Field label="月の予約可能回数">
                     <select
                       className="input"
-                      value={draft.chadoMonthlyQuota ?? 2}
+                      value={draft.chadoMonthlyQuota ?? 1}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
