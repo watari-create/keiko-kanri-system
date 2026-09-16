@@ -73,7 +73,7 @@ export default function SaturdayReservation({
 
   return (
     <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-1">講師名</h2>
+      <h2 className="text-sm text-muted mb-1">土曜日クラスの予約</h2>
       <p className="text-xs text-muted mb-3">
         月の予約可能回数：月{quota}回　／　振替チケット：{tickets}枚
       </p>
