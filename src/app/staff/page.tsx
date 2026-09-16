@@ -30,7 +30,7 @@ import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
-import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote } from "@/types";
+import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession } from "@/types";
 
 export default function StaffPage() {
   const { role, staffId, loading } = useAuth();
@@ -50,6 +50,7 @@ export default function StaffPage() {
   const [newNoteDate, setNewNoteDate] = useState("");
   const [newNoteBody, setNewNoteBody] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
@@ -79,6 +80,23 @@ export default function StaffPage() {
     const q = query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
+    });
+  }, [group]);
+
+  // 茶道教室：土曜日クラスの開催日・予約状況（当日以降のみ）をリアルタイム購読
+  useEffect(() => {
+    if (group !== "茶道教室") {
+      setSaturdaySessions([]);
+      return;
+    }
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const q = query(
+      collection(db, "chadoSaturdaySessions"),
+      where("date", ">=", todayKey),
+      orderBy("date")
+    );
+    return onSnapshot(q, (snap) => {
+      setSaturdaySessions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoSaturdaySession)));
     });
   }, [group]);
 
@@ -195,14 +213,16 @@ export default function StaffPage() {
               お稽古ノート
             </Link>
           )}
-          <Link
-            href="/g1-shipping"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink"
-          >
-            G1発送物
-          </Link>
+          {group === "Gマダムの茶の湯講座" && (
+            <Link
+              href="/g1-shipping"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink"
+            >
+              G1発送物
+            </Link>
+          )}
           <button className="text-xs text-muted underline" onClick={logout}>
             ログアウト
           </button>
@@ -239,7 +259,7 @@ export default function StaffPage() {
               <th className="py-2 pr-3">会員番号</th>
               <th className="pr-3">氏名</th>
               <th className="pr-3">許状段階</th>
-              {isHonbuKeikoGroup(group) && <th className="pr-3">支払い方法</th>}
+              {isHonbuKeikoGroup(group) && group !== "茶道教室" && <th className="pr-3">支払い方法</th>}
               <th>ステータス</th>
             </tr>
           </thead>
@@ -257,7 +277,7 @@ export default function StaffPage() {
                   </button>
                 </td>
                 <td className="pr-3">{m.license ?? "—"}</td>
-                {isHonbuKeikoGroup(group) && (
+                {isHonbuKeikoGroup(group) && group !== "茶道教室" && (
                   <td className="pr-3">{m.paymentMethod ?? "—"}</td>
                 )}
                 <td>{m.status}</td>
@@ -266,6 +286,55 @@ export default function StaffPage() {
           </tbody>
         </table>
       </section>
+
+      {group === "茶道教室" && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6">
+          <h2 className="font-bold mb-1">土曜日クラスの予約状況</h2>
+          <p className="text-xs text-muted mb-3">当日以降の開催日と、午前・午後それぞれの予約者です</p>
+          <div className="space-y-3">
+            {saturdaySessions.map((s) => (
+              <div key={s.id} className="border border-line rounded p-3">
+                <p className="text-sm font-semibold mb-2">{s.date}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {(["am", "pm"] as const).map((slot) => {
+                    const teacher = slot === "am" ? s.amTeacher : s.pmTeacher;
+                    const capacity = slot === "am" ? s.amCapacity : s.pmCapacity;
+                    const bookings = slot === "am" ? s.amBookings : s.pmBookings;
+                    return (
+                      <div key={slot}>
+                        <p className="font-semibold mb-1">
+                          {slot === "am" ? "午前" : "午後"}
+                          {teacher && `　${teacher}`}　（{bookings.length}/{capacity}名）
+                        </p>
+                        {bookings.length === 0 ? (
+                          <p className="text-muted">予約なし</p>
+                        ) : (
+                          <ul className="space-y-0.5">
+                            {bookings.map((b) => (
+                              <li key={b.memberId}>
+                                {b.memberName}
+                                {b.usedTicket && (
+                                  <span className="text-muted">（振替チケット使用）</span>
+                                )}
+                                {b.attended && <span className="text-muted">・{b.attended}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {saturdaySessions.length === 0 && (
+              <p className="text-sm text-muted text-center py-4">
+                本日以降の開催日はまだ登録されていません
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       {isHonbuKeikoGroup(group) && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
