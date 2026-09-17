@@ -196,19 +196,41 @@ export default function MyPage() {
                 次回：{formatLessonDate(nextLesson.date)}
               </p>
             )}
-            <p className="text-xs text-muted mb-3">現在の回答：{member.rsvp ?? "未回答"}</p>
+            <div className="mb-3">
+              {member.rsvp === "出席" ? (
+                <span className="inline-block text-xs font-bold text-matcha-deep bg-matcha-pale rounded-full px-3 py-1">
+                  ✓ 出席で回答済み
+                </span>
+              ) : member.rsvp === "欠席" ? (
+                <span className="inline-block text-xs font-bold text-hanko bg-hanko-pale rounded-full px-3 py-1">
+                  ✓ 欠席で回答済み
+                </span>
+              ) : (
+                <span className="inline-block text-xs text-muted bg-bg border border-line rounded-full px-3 py-1">
+                  未回答
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
-                className="flex-1 bg-matcha-deep text-white rounded py-2 text-sm"
+                className={`flex-1 rounded py-2 text-sm transition ${
+                  member.rsvp === "出席"
+                    ? "bg-matcha-deep text-white ring-2 ring-matcha-deep ring-offset-1"
+                    : "border border-line text-muted"
+                }`}
                 onClick={() => updateRsvp("出席")}
               >
-                出席する
+                {member.rsvp === "出席" ? "✓ 出席する" : "出席する"}
               </button>
               <button
-                className="flex-1 border border-line text-muted rounded py-2 text-sm"
+                className={`flex-1 rounded py-2 text-sm transition ${
+                  member.rsvp === "欠席"
+                    ? "bg-hanko text-white ring-2 ring-hanko ring-offset-1"
+                    : "border border-line text-muted"
+                }`}
                 onClick={() => updateRsvp("欠席")}
               >
-                欠席する
+                {member.rsvp === "欠席" ? "✓ 欠席する" : "欠席する"}
               </button>
             </div>
           </div>
