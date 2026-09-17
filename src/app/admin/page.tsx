@@ -1685,20 +1685,24 @@ export default function AdminPage() {
                   onChange={(e) => setDraft({ ...draft, sotomei: e.target.value })}
                 />
               </Field>
-              <Field label="支部">
-                <input
-                  className="input"
-                  value={draft.branch ?? ""}
-                  onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
-                />
-              </Field>
-              <Field label="社中（代表）">
-                <input
-                  className="input"
-                  value={draft.shachu ?? ""}
-                  onChange={(e) => setDraft({ ...draft, shachu: e.target.value })}
-                />
-              </Field>
+              {showSohenDetails && (
+                <Field label="支部">
+                  <input
+                    className="input"
+                    value={draft.branch ?? ""}
+                    onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
+                  />
+                </Field>
+              )}
+              {showSohenDetails && (
+                <Field label="社中（代表）">
+                  <input
+                    className="input"
+                    value={draft.shachu ?? ""}
+                    onChange={(e) => setDraft({ ...draft, shachu: e.target.value })}
+                  />
+                </Field>
+              )}
               <Field label="年齢">
                 <input
                   type="number"
@@ -1712,20 +1716,22 @@ export default function AdminPage() {
                   }
                 />
               </Field>
-              <Field label="組（雪月花のみ）">
-                <select
-                  className="input"
-                  value={draft.subGroup ?? ""}
-                  onChange={(e) =>
-                    setDraft({ ...draft, subGroup: e.target.value || undefined })
-                  }
-                >
-                  <option value="">（未設定）</option>
-                  <option>雪組</option>
-                  <option>月組</option>
-                  <option>花組</option>
-                </select>
-              </Field>
+              {showSohenDetails && (
+                <Field label="組（雪月花のみ）">
+                  <select
+                    className="input"
+                    value={draft.subGroup ?? ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, subGroup: e.target.value || undefined })
+                    }
+                  >
+                    <option value="">（未設定）</option>
+                    <option>雪組</option>
+                    <option>月組</option>
+                    <option>花組</option>
+                  </select>
+                </Field>
+              )}
               <Field label="生年月日">
                 <input
                   type="date"
@@ -1813,13 +1819,15 @@ export default function AdminPage() {
                   </Field>
                 </>
               )}
-              <Field label="学年">
-                <input
-                  className="input"
-                  value={draft.grade ?? ""}
-                  onChange={(e) => setDraft({ ...draft, grade: e.target.value })}
-                />
-              </Field>
+              {selectedMember.group === "名月会" && (
+                <Field label="学年">
+                  <input
+                    className="input"
+                    value={draft.grade ?? ""}
+                    onChange={(e) => setDraft({ ...draft, grade: e.target.value })}
+                  />
+                </Field>
+              )}
               <Field label="許状段階">
                 <input
                   className="input"
