@@ -151,26 +151,28 @@ export default function MyPage() {
         </div>
       </div>
 
-      <div className="bg-paper border border-line rounded-md p-6 mb-4">
-        <h2 className="text-sm text-muted mb-3">公式LINEとの連携</h2>
-        {member.lineUserId ? (
-          <p className="text-sm text-matcha-deep">
-            連携済みです。お稽古前日にリマインドが届きます。
-          </p>
-        ) : (
-          <>
-            <p className="text-xs text-muted mb-3">
-              連携すると、お稽古前日の出欠・ご予約のリマインドが公式LINEに届くようになります。
+      {member.group === "茶道教室" && (
+        <div className="bg-paper border border-line rounded-md p-6 mb-4">
+          <h2 className="text-sm text-muted mb-3">公式LINEとの連携</h2>
+          {member.lineUserId ? (
+            <p className="text-sm text-matcha-deep">
+              連携済みです。お稽古前日にリマインドが届きます。
             </p>
-            <a
-              href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
-              className="block text-center w-full bg-matcha-deep text-white rounded py-2 text-sm"
-            >
-              LINEでログインして連携する
-            </a>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <p className="text-xs text-muted mb-3">
+                連携すると、お稽古前日の出欠・ご予約のリマインドが公式LINEに届くようになります。
+              </p>
+              <a
+                href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
+                className="block text-center w-full bg-matcha-deep text-white rounded py-2 text-sm"
+              >
+                LINEでログインして連携する
+              </a>
+            </>
+          )}
+        </div>
+      )}
 
       {member.groupCategory === "本部稽古" &&
         (member.group === "茶道教室" && member.chadoClass === "土曜日" ? (

@@ -511,6 +511,10 @@ export const onMemberCreated = onDocumentCreated(
     // 宗徧流稽古・UCIの新規登録（名簿のCSV一括取り込みを含む）ではSlack通知しない。
     if (data.groupCategory !== "本部稽古") return;
 
+    // インポート漏れの既存会員を後から追加するようなバックフィルは、新規入会ではないため
+    // Slack通知・入門セット在庫の自動減算の対象外とする（ドキュメントに skipEnrollmentNotice: true を立てて作成する）。
+    if (data.skipEnrollmentNotice === true) return;
+
     // 名月会の新規入門なら、年齢・性別に応じた入門セット在庫を自動的に減らす（Slack通知の有無に関わらず実行）。
     const lowStockItems =
       data.group === MEIGETSUKAI_GROUP
