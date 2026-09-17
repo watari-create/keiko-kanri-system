@@ -61,6 +61,8 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
         required: true,
       },
       { id: "grade", label: "学年", type: "text", placeholder: "小学3年生" },
+      { id: "school", label: "通っている学校", type: "text", placeholder: "◯◯小学校" },
+      { id: "workplace", label: "職場", type: "text" },
       { id: "otherLessons", label: "他のお稽古事", type: "text" },
       { id: "healthNotes", label: "アレルギーなど健康上の留意点", type: "text" },
       { id: "guardian", label: "保護者氏名", type: "text", required: true },

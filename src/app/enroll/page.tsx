@@ -80,6 +80,8 @@ export default function EnrollPage() {
           guardian: values.guardian ?? "",
           guardianKana: values.guardianKana ?? "",
           grade: values.grade ?? "",
+          school: values.school ?? "",
+          workplace: values.workplace ?? "",
           occupation: values.occupation ?? "",
           otherLessons: values.otherLessons ?? "",
           healthNotes: values.healthNotes ?? "",

@@ -25,6 +25,8 @@ export interface Member {
   gender?: "男性" | "女性"; // 性別（現在は名月会の入会フォームでのみ収集。入門セット在庫の自動減算に使う）
   grade?: string; // 学年（未成年会員のみ）
   occupation?: string; // ご職業
+  school?: string; // 通っている学校（名月会のみ）
+  workplace?: string; // 職場（名月会のみ）
   otherLessons?: string; // 他のお稽古事
   healthNotes?: string; // アレルギーなど健康上の留意点
   emergencyContact?: string;

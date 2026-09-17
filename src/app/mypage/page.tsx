@@ -23,6 +23,8 @@ export default function MyPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [school, setSchool] = useState("");
+  const [workplace, setWorkplace] = useState("");
   const [leaveType, setLeaveType] = useState<LeaveRequestType>("休会");
   const [reason, setReason] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -61,14 +63,21 @@ export default function MyPage() {
         setEmail(data.email ?? "");
         setPhone(data.phone ?? "");
         setAddress(data.address ?? "");
+        setSchool(data.school ?? "");
+        setWorkplace(data.workplace ?? "");
         setLeaveType(data.status === "休会" ? "復会" : "休会");
       }
     });
   }, [memberId]);
 
   async function saveContact() {
-    if (!memberId) return;
-    await updateDoc(doc(db, "members", memberId), { email, phone, address });
+    if (!memberId || !member) return;
+    const updates: Record<string, string> = { email, phone, address };
+    if (member.group === "名月会") {
+      updates.school = school;
+      updates.workplace = workplace;
+    }
+    await updateDoc(doc(db, "members", memberId), updates);
     setSavedMsg("連絡先情報を更新しました。");
   }
 
@@ -272,11 +281,29 @@ export default function MyPage() {
           placeholder="電話番号"
         />
         <input
-          className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
+          className={`w-full border border-line rounded px-3 py-2 text-sm ${
+            member.group === "名月会" ? "mb-2" : "mb-3"
+          }`}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="ご住所"
         />
+        {member.group === "名月会" && (
+          <>
+            <input
+              className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
+              value={school}
+              onChange={(e) => setSchool(e.target.value)}
+              placeholder="通っている学校"
+            />
+            <input
+              className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
+              value={workplace}
+              onChange={(e) => setWorkplace(e.target.value)}
+              placeholder="職場"
+            />
+          </>
+        )}
         <button
           className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm"
           onClick={saveContact}
