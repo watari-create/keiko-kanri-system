@@ -65,7 +65,7 @@ service cloud.firestore {
       // 出欠は、マイページの「出欠登録」ボタンが今月分の出席簿セルを直接更新するために必要。
       allow update: if isSelf(memberId)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['email', 'phone', 'address', 'rsvp', 'attendance', 'school', 'workplace']);
+             .hasOnly(['email', 'phone', 'address', 'rsvp', 'attendance', 'affiliation']);
 
       // 講師は自分の担当する会の会員の出席のみ編集可
       allow update: if isTeacherFor(resource.data.group)
