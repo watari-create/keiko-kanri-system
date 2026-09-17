@@ -364,14 +364,17 @@ export default function AdminPage() {
 
   // 経理タブ：都度払い会員の月謝グリッド対象（休会・退会中は対象外。アンジェラさんのように休会中の会員は掲載しない）
   const sessionPaymentMembers = useMemo(
-    () => members.filter((m) => m.paymentMethod === "都度払い" && m.status === "在籍"),
+    () =>
+      members.filter(
+        (m) => m.paymentMethod === "都度払い" && m.status === "在籍" && !m.isTestAccount
+      ),
     [members]
   );
 
   // 経理タブ：入会金の対象会員（名月会のみ）。入会金の徴収は吉井さんの入会から始まったため、
   // 吉井さんより前に入会した会員は対象外。吉井さん以降に入会した会員（今後の新規入会者を含む）のみ表示する
   const entryFeeMembers = useMemo(() => {
-    const meigetsukai = members.filter((m) => m.group === "名月会");
+    const meigetsukai = members.filter((m) => m.group === "名月会" && !m.isTestAccount);
     const yoshii = meigetsukai.find((m) => m.name.includes("吉井"));
     return yoshii ? meigetsukai.filter((m) => m.joinDate >= yoshii.joinDate) : meigetsukai;
   }, [members]);

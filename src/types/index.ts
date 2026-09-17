@@ -26,6 +26,7 @@ export interface Member {
   grade?: string; // 学年（未成年会員のみ）
   occupation?: string; // ご職業
   affiliation?: string; // 現在の所属（学校名・勤務先など、名月会のみ）
+  isTestAccount?: boolean; // テスト・確認用のダミー会員（経理タブの集計からは除外する）
   otherLessons?: string; // 他のお稽古事
   healthNotes?: string; // アレルギーなど健康上の留意点
   emergencyContact?: string;
