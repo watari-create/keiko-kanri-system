@@ -1008,11 +1008,9 @@ export const lineEvents = onRequest(
           continue;
         }
 
-        await replyLineMessage(
-          replyToken,
-          accessToken,
-          "「予約状況」と送ると、ご予約・出欠の状況を確認できます。\n初めての方は会員番号（数字）を送って連携してください。"
-        );
+        // 会員番号（連携）・「予約」「出欠」以外のメッセージには自動返信しない。
+        // 生徒から本部宛ての通常の会話（質問・お礼など）にまで案内文が自動送信されて
+        // しまうのを避けるため（2026-09-18、ゆちゃの指示）。
       } catch (err) {
         console.error("LINE Webhookの処理でエラーが発生しました", err);
       }
