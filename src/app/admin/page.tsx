@@ -25,6 +25,7 @@ import {
   deleteField,
   runTransaction,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
@@ -142,6 +143,12 @@ export default function AdminPage() {
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
+
+  // LINE一斉送信（本部稽古エリアのみ）
+  const [broadcastSelected, setBroadcastSelected] = useState<Set<string>>(new Set());
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
 
   // 通知バッジ用：グループを問わず、対応が必要な申請をすべて購読する
   const [allLicenseRequests, setAllLicenseRequests] = useState<LicenseRequest[]>([]);
@@ -339,7 +346,7 @@ export default function AdminPage() {
     5 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
-    (showBilling ? 2 : 0) +
+    (showBilling ? 3 : 0) +
     (showSohenDetails ? 3 : 0) +
     (showChadoClass ? 1 : 0);
 
@@ -1130,6 +1137,18 @@ export default function AdminPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-muted border-b border-line">
+                {showBilling && (
+                  <th className="py-2 pr-2">
+                    <input
+                      type="checkbox"
+                      checked={members.length > 0 && members.every((m) => broadcastSelected.has(m.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) setBroadcastSelected(new Set(members.map((m) => m.id)));
+                        else setBroadcastSelected(new Set());
+                      }}
+                    />
+                  </th>
+                )}
                 <th className="py-2 pr-3">会員番号</th>
                 {showAffiliation && <th className="pr-3">所属</th>}
                 {showSohenDetails && <th className="pr-3">支部</th>}
@@ -1161,6 +1180,22 @@ export default function AdminPage() {
                   )}
                   {section.members.map((m) => (
                 <tr key={m.id} className="border-b border-line">
+                  {showBilling && (
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={broadcastSelected.has(m.id)}
+                        onChange={(e) => {
+                          setBroadcastSelected((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(m.id);
+                            else next.delete(m.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                  )}
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
                   {showAffiliation && <td className="pr-3">{groupDisplayName(m.group)}</td>}
                   {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
@@ -1250,6 +1285,60 @@ export default function AdminPage() {
               )}
             </tbody>
           </table>
+
+          {showBilling && (
+            <div className="mt-4 pt-4 border-t border-line">
+              <h3 className="text-sm font-bold mb-2">LINE一斉送信</h3>
+              <p className="text-xs text-muted mb-2">
+                チェックした{broadcastSelected.size}名（LINE未連携の生徒には届きません）にメッセージを送ります。
+              </p>
+              <textarea
+                className="input w-full mb-2"
+                rows={3}
+                placeholder="例：来週のお稽古はお休みです。"
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="text-sm bg-matcha-deep text-white rounded px-3 py-2 disabled:opacity-50"
+                  disabled={sendingBroadcast || broadcastSelected.size === 0 || !broadcastMessage.trim()}
+                  onClick={async () => {
+                    setSendingBroadcast(true);
+                    setBroadcastResult(null);
+                    try {
+                      const send = httpsCallable<
+                        { memberIds: string[]; message: string },
+                        { sent: number; skipped: string[] }
+                      >(getFunctions(), "sendStaffLineBroadcast");
+                      const res = await send({
+                        memberIds: Array.from(broadcastSelected),
+                        message: broadcastMessage.trim(),
+                      });
+                      const { sent, skipped } = res.data;
+                      setBroadcastResult(
+                        skipped.length > 0
+                          ? `${sent}名に送信しました（LINE未連携などで${skipped.length}名には届きませんでした）`
+                          : `${sent}名に送信しました。`
+                      );
+                      setBroadcastMessage("");
+                      setBroadcastSelected(new Set());
+                    } catch (err) {
+                      setBroadcastResult(
+                        err instanceof Error ? `送信に失敗しました：${err.message}` : "送信に失敗しました。"
+                      );
+                    } finally {
+                      setSendingBroadcast(false);
+                    }
+                  }}
+                >
+                  {sendingBroadcast ? "送信中…" : "選択した生徒にLINE送信"}
+                </button>
+                {broadcastResult && <p className="text-xs text-muted">{broadcastResult}</p>}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
