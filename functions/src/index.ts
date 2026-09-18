@@ -166,6 +166,44 @@ export const linkFamilyOnEnroll = onCall<{
 });
 
 /**
+ * マイページの「ご家族を切り替える」機能。ログイン中の会員（親など）から、
+ * 連携済みのご家族（linkedMemberIdsに含まれる会員番号）へ、再ログインなしで
+ * 切り替えるためのカスタムトークンを発行する。
+ * 連携関係はログイン中の会員自身のドキュメントを見て確認する（クライアントから
+ * 送られてきた値は信用しない）ため、連携していない会員番号を指定しても発行されない。
+ */
+export const switchToLinkedMember = onCall<{ targetMemberId: string }>(async (request) => {
+  if (!request.auth || request.auth.token.role !== "member") {
+    throw new HttpsError("permission-denied", "マイページにログインしてからご利用ください。");
+  }
+  const currentMemberId = request.auth.token.memberId as string | undefined;
+  const { targetMemberId } = request.data;
+  if (!currentMemberId || !targetMemberId) {
+    throw new HttpsError("invalid-argument", "切り替え先の会員番号が指定されていません。");
+  }
+  if (targetMemberId === currentMemberId) {
+    throw new HttpsError("invalid-argument", "同じ会員番号には切り替えられません。");
+  }
+
+  const currentSnap = await db.collection("members").doc(currentMemberId).get();
+  const linkedIds = (currentSnap.data()?.linkedMemberIds as string[] | undefined) ?? [];
+  if (!linkedIds.includes(targetMemberId)) {
+    throw new HttpsError("permission-denied", "この会員へは切り替えられません。");
+  }
+
+  const targetSnap = await db.collection("members").doc(targetMemberId).get();
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "切り替え先の会員が見つかりませんでした。");
+  }
+
+  const token = await admin.auth().createCustomToken(`member_${targetMemberId}`, {
+    role: "member",
+    memberId: targetMemberId,
+  });
+  return { token };
+});
+
+/**
  * leaveRequests のステータスが pending → approved に変わったら、
  * members 側のステータスを自動的に反映し、通知ログに記録する。
  */

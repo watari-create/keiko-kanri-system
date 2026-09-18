@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { doc, getDoc, onSnapshot, updateDoc, collection, addDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { signInWithCustomToken } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
@@ -28,6 +30,11 @@ export default function MyPage() {
   const [reason, setReason] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
+
+  // ご家族の切り替え（linkedMemberIdsで連携済みの会員一覧・切り替え中の状態）
+  const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string; group: string }[]>([]);
+  const [switchingFamily, setSwitchingFamily] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && role !== "member") router.replace("/mypage/login");
@@ -67,6 +74,57 @@ export default function MyPage() {
       }
     });
   }, [memberId]);
+
+  // 連携済みのご家族（linkedMemberIds）の氏名・所属を取得する。
+  // firestore.rulesのisLinkedTo()により、連携済みの相手の会員ドキュメントは読み取りだけ許可されている。
+  useEffect(() => {
+    const ids = member?.linkedMemberIds ?? [];
+    if (ids.length === 0) {
+      setFamilyMembers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const snap = await getDoc(doc(db, "members", id));
+          if (!snap.exists()) return null;
+          const data = snap.data() as Member;
+          return { id, name: data.name, group: data.group };
+        })
+      );
+      if (!cancelled) {
+        setFamilyMembers(results.filter((r): r is { id: string; name: string; group: string } => r !== null));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [member?.linkedMemberIds]);
+
+  // ご家族への切り替え：Cloud Functions（switchToLinkedMember）に切り替え先の会員番号を渡し、
+  // 発行されたカスタムトークンでサインインし直す。ログアウト・再ログインは不要。
+  // 連携関係の確認はCloud Functions側でログイン中の会員の実データを見て行うため、
+  // ここでは切り替え先を指定するだけでよい。
+  async function switchToFamilyMember(targetId: string) {
+    setSwitchingFamily(true);
+    setSwitchError(null);
+    try {
+      const functions = getFunctions();
+      const switchFn = httpsCallable<{ targetMemberId: string }, { token: string }>(
+        functions,
+        "switchToLinkedMember"
+      );
+      const result = await switchFn({ targetMemberId: targetId });
+      await signInWithCustomToken(auth, result.data.token);
+      setSavedMsg(null);
+    } catch (err) {
+      console.error(err);
+      setSwitchError("切り替えに失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setSwitchingFamily(false);
+    }
+  }
 
   async function saveContact() {
     if (!memberId || !member) return;
@@ -132,6 +190,29 @@ export default function MyPage() {
       <button className="text-xs text-muted underline mb-4" onClick={logout}>
         ログアウト
       </button>
+
+      {familyMembers.length > 0 && (
+        <div className="bg-paper border border-line rounded-md p-3 mb-4">
+          <div className="text-xs text-muted mb-2">ご家族を切り替える</div>
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs bg-matcha-deep text-white rounded-full px-3 py-1">
+              {member.name}様（表示中）
+            </span>
+            {familyMembers.map((f) => (
+              <button
+                key={f.id}
+                className="text-xs border border-line text-matcha-deep rounded-full px-3 py-1 disabled:opacity-50"
+                onClick={() => switchToFamilyMember(f.id)}
+                disabled={switchingFamily}
+              >
+                {f.name}様（{groupDisplayName(f.group)}）
+              </button>
+            ))}
+          </div>
+          {switchingFamily && <p className="text-xs text-muted mt-2">切り替え中…</p>}
+          {switchError && <p className="text-hanko text-xs mt-2">{switchError}</p>}
+        </div>
+      )}
 
       {member.group === "茶道教室" && (
         <Link

@@ -47,11 +47,21 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.memberId == memberId;
     }
 
+    // ご家族として連携済みの会員かどうか（マイページの「家族を切り替える」機能用）。
+    // 自分自身の会員ドキュメントのlinkedMemberIdsに対象の会員番号が含まれていれば読み取りを許可する。
+    // 実際に切り替えて編集するにはswitchToLinkedMember（Cloud Functions）を経由してカスタム
+    // トークンを取り直す必要があるため、ここでの許可は読み取りのみ（書き込みはisSelfのみ）。
+    function isLinkedTo(memberId) {
+      return isSignedIn() && request.auth.token.role == 'member'
+        && memberId in get(/databases/$(database)/documents/members/$(request.auth.token.memberId)).data.get('linkedMemberIds', []);
+    }
+
     // ---- members（会員） ----
     match /members/{memberId} {
       allow read: if isHonbu()
         || isStaffFor(resource.data.group)
-        || isSelf(memberId);
+        || isSelf(memberId)
+        || isLinkedTo(memberId);
 
       // 本部は全項目を編集可
       allow write: if isHonbu();
