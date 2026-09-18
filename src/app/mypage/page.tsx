@@ -166,6 +166,10 @@ export default function MyPage() {
 
   async function submitLeave() {
     if (!memberId || !member) return;
+    if ((leaveType === "休会" || leaveType === "退会") && !reason.trim()) {
+      setSavedMsg("休会・退会の理由をご入力ください。");
+      return;
+    }
     await addDoc(collection(db, "leaveRequests"), {
       memberId,
       memberName: member.name,
@@ -407,7 +411,7 @@ export default function MyPage() {
           className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="理由（任意）"
+          placeholder={leaveType === "復会" ? "理由（任意）" : "理由（必須）"}
         />
         <button
           className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm"
