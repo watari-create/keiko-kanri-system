@@ -19,6 +19,7 @@ import {
   onSnapshot,
   doc,
   getDoc,
+  getDocs,
   updateDoc,
   setDoc,
   deleteDoc,
@@ -92,7 +93,9 @@ const STAFF_ROLE_LABEL: Record<StaffRole, string> = {
 };
 
 // 会員詳細モーダルで編集する項目。group / groupCategory / id は表示のみ（変更不可）。
-type MemberDraft = Omit<Member, "id" | "group" | "groupCategory">;
+// linkedMemberIds（ご家族との連携）は専用のボタンでその場で保存する独立した操作のため、
+// 他の項目とまとめて「この内容で保存する」を押したときに古い値で上書きしないよう除外している。
+type MemberDraft = Omit<Member, "id" | "group" | "groupCategory" | "linkedMemberIds">;
 
 function toDraft(m: Member): MemberDraft {
   const { id, group, groupCategory, ...rest } = m;
@@ -159,6 +162,19 @@ export default function AdminPage() {
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [draft, setDraft] = useState<MemberDraft | null>(null);
   const [savingDetail, setSavingDetail] = useState(false);
+
+  // ご家族との連携（会員詳細モーダル内）
+  const [familyDetails, setFamilyDetails] = useState<Record<string, Member>>({});
+  const [familyInput, setFamilyInput] = useState("");
+  const [linkingFamily, setLinkingFamily] = useState(false);
+  const [familyError, setFamilyError] = useState<string | null>(null);
+
+  // ご家族候補の自動検出（会員一覧トップの「ご家族候補を検出」ボタン）：
+  // 決済用メールアドレスが同じ会員をグループ化し、まだ連携していないグループだけを表示する。
+  const [showFamilyCandidates, setShowFamilyCandidates] = useState(false);
+  const [loadingFamilyCandidates, setLoadingFamilyCandidates] = useState(false);
+  const [familyCandidates, setFamilyCandidates] = useState<Member[][] | null>(null);
+  const [processingCandidateKey, setProcessingCandidateKey] = useState<string | null>(null);
 
   // スタッフ編集モーダル
   const [staffDraft, setStaffDraft] = useState<StaffDraft | null>(null);
@@ -239,6 +255,30 @@ export default function AdminPage() {
       setSaturdaySessions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoSaturdaySession)));
     });
   }, [area, group]);
+
+  // ご家族との連携：selectedMemberのlinkedMemberIdsのうち、まだ名前が分かっていない
+  // 会員番号があれば都度取得してfamilyDetailsに追加する（会員一覧はグループ絞り込みされて
+  // いるため、他グループのご家族の情報がここに含まれているとは限らない）。
+  useEffect(() => {
+    const ids = selectedMember?.linkedMemberIds ?? [];
+    const missing = ids.filter((id) => !familyDetails[id]);
+    if (missing.length === 0) return;
+    (async () => {
+      const entries = await Promise.all(
+        missing.map(async (id) => {
+          const snap = await getDoc(doc(db, "members", id));
+          return snap.exists() ? ([id, { ...(snap.data() as Member), id }] as const) : null;
+        })
+      );
+      setFamilyDetails((prev) => {
+        const next = { ...prev };
+        for (const e of entries) {
+          if (e) next[e[0]] = e[1];
+        }
+        return next;
+      });
+    })();
+  }, [selectedMember, familyDetails]);
 
   // 茶道教室：会員詳細モーダルで選択中の生徒の申し送りをリアルタイム購読
   useEffect(() => {
@@ -694,11 +734,126 @@ export default function AdminPage() {
     setDraft(toDraft(m));
     setNewNoteDate(new Date().toISOString().slice(0, 10));
     setNewNoteBody("");
+    setFamilyInput("");
+    setFamilyError(null);
   }
 
   function closeMemberDetail() {
     setSelectedMember(null);
     setDraft(null);
+    setFamilyInput("");
+    setFamilyError(null);
+  }
+
+  // ご家族との連携：本部は全会員に書き込み権限があるため、相手側の会員ドキュメントも
+  // 直接更新して双方向にlinkedMemberIdsを追加する（他の編集項目とは別に、その場で確定させる）。
+  async function linkFamilyMember() {
+    if (!selectedMember) return;
+    const otherId = familyInput.trim();
+    setFamilyError(null);
+    if (!otherId) return;
+    if (otherId === selectedMember.id) {
+      setFamilyError("本人と同じ会員番号は連携できません。");
+      return;
+    }
+    if ((selectedMember.linkedMemberIds ?? []).includes(otherId)) {
+      setFamilyError("すでに連携済みです。");
+      return;
+    }
+    setLinkingFamily(true);
+    try {
+      const otherRef = doc(db, "members", otherId);
+      const otherSnap = await getDoc(otherRef);
+      if (!otherSnap.exists()) {
+        setFamilyError("その会員番号の会員が見つかりませんでした。");
+        return;
+      }
+      const otherData = { ...(otherSnap.data() as Member), id: otherId };
+      const selfLinked = Array.from(new Set([...(selectedMember.linkedMemberIds ?? []), otherId]));
+      const otherLinked = Array.from(new Set([...(otherData.linkedMemberIds ?? []), selectedMember.id]));
+      await updateDoc(doc(db, "members", selectedMember.id), { linkedMemberIds: selfLinked });
+      await updateDoc(otherRef, { linkedMemberIds: otherLinked });
+      setFamilyDetails((prev) => ({ ...prev, [otherId]: otherData }));
+      setSelectedMember({ ...selectedMember, linkedMemberIds: selfLinked });
+      setFamilyInput("");
+    } finally {
+      setLinkingFamily(false);
+    }
+  }
+
+  // ご家族候補の自動検出：全会員（グループを問わず）を一度だけ取得し、決済用メールアドレスが
+  // 同じ会員同士をグループ化する。会員一覧はグループごとに絞り込まれて購読しているため、
+  // ここだけ横断的に一度取得する。すでに全員が相互連携済みのグループは表示しない。
+  async function findFamilyCandidates() {
+    setLoadingFamilyCandidates(true);
+    try {
+      const snap = await getDocs(collection(db, "members"));
+      const byEmail: Record<string, Member[]> = {};
+      snap.forEach((d) => {
+        const data = { ...(d.data() as Member), id: d.id };
+        if (data.isTestAccount) return;
+        const email = (data.email || "").trim().toLowerCase();
+        if (!email) return;
+        (byEmail[email] ??= []).push(data);
+      });
+      const unresolved = Object.values(byEmail)
+        .filter((g) => g.length >= 2)
+        .filter((g) =>
+          g.some((m) =>
+            g.some((other) => other.id !== m.id && !(m.linkedMemberIds ?? []).includes(other.id))
+          )
+        )
+        .sort((a, b) => a[0].name.localeCompare(b[0].name, "ja"));
+      setFamilyCandidates(unresolved);
+      setShowFamilyCandidates(true);
+    } finally {
+      setLoadingFamilyCandidates(false);
+    }
+  }
+
+  // 候補グループのメンバー全員を相互に連携する（3人以上の場合も全ペアを連携）。
+  async function linkFamilyCandidateGroup(group: Member[]) {
+    const key = group.map((m) => m.id).join(",");
+    setProcessingCandidateKey(key);
+    try {
+      for (const m of group) {
+        const others = group.filter((o) => o.id !== m.id).map((o) => o.id);
+        const merged = Array.from(new Set([...(m.linkedMemberIds ?? []), ...others]));
+        await updateDoc(doc(db, "members", m.id), { linkedMemberIds: merged });
+      }
+      setFamilyCandidates((prev) => (prev ? prev.filter((g) => g !== group) : prev));
+      // 開いている会員詳細モーダルがこのグループに含まれていれば、表示も更新する
+      if (selectedMember && group.some((m) => m.id === selectedMember.id)) {
+        const self = group.find((m) => m.id === selectedMember.id)!;
+        const others = group.filter((o) => o.id !== selectedMember.id).map((o) => o.id);
+        setSelectedMember({
+          ...selectedMember,
+          linkedMemberIds: Array.from(new Set([...(self.linkedMemberIds ?? []), ...others])),
+        });
+      }
+    } finally {
+      setProcessingCandidateKey(null);
+    }
+  }
+
+  async function unlinkFamilyMember(otherId: string) {
+    if (!selectedMember) return;
+    setLinkingFamily(true);
+    try {
+      const selfLinked = (selectedMember.linkedMemberIds ?? []).filter((id) => id !== otherId);
+      await updateDoc(doc(db, "members", selectedMember.id), { linkedMemberIds: selfLinked });
+      const otherRef = doc(db, "members", otherId);
+      const otherSnap = await getDoc(otherRef);
+      if (otherSnap.exists()) {
+        const otherLinked = ((otherSnap.data() as Member).linkedMemberIds ?? []).filter(
+          (id) => id !== selectedMember.id
+        );
+        await updateDoc(otherRef, { linkedMemberIds: otherLinked });
+      }
+      setSelectedMember({ ...selectedMember, linkedMemberIds: selfLinked });
+    } finally {
+      setLinkingFamily(false);
+    }
   }
 
   async function addStudentNote() {
@@ -1124,14 +1279,23 @@ export default function AdminPage() {
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
-            {area === "宗徧流稽古" && (
+            <div className="flex gap-2">
               <button
-                className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5"
-                onClick={() => setShowCsvImport(true)}
+                className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5 disabled:opacity-50"
+                onClick={findFamilyCandidates}
+                disabled={loadingFamilyCandidates}
               >
-                CSVから名簿を更新
+                {loadingFamilyCandidates ? "検出中…" : "ご家族候補を検出"}
               </button>
-            )}
+              {area === "宗徧流稽古" && (
+                <button
+                  className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5"
+                  onClick={() => setShowCsvImport(true)}
+                >
+                  CSVから名簿を更新
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted mb-3">氏名をクリックすると詳細の閲覧・編集ができます</p>
           <table className="w-full text-sm whitespace-nowrap">
@@ -1755,6 +1919,54 @@ export default function AdminPage() {
               </button>
             </div>
 
+            <div className="border border-line rounded p-3 mb-4 bg-[#FCFBF8]">
+              <h4 className="text-sm font-bold mb-1">ご家族との連携</h4>
+              <p className="text-xs text-muted mb-2">
+                同じご家族（保護者・兄弟姉妹など）の会員番号を連携すると、マイページで家族の切り替えが
+                できるようになります。
+              </p>
+              {(selectedMember.linkedMemberIds ?? []).length > 0 && (
+                <ul className="space-y-1 mb-2">
+                  {(selectedMember.linkedMemberIds ?? []).map((id) => {
+                    const m = familyDetails[id];
+                    return (
+                      <li
+                        key={id}
+                        className="flex items-center justify-between text-xs border border-line rounded px-2 py-1 bg-white"
+                      >
+                        <span>
+                          {m ? `${m.name}（${groupDisplayName(m.group)}）` : "読み込み中…"}　会員番号：{id}
+                        </span>
+                        <button
+                          className="text-muted hover:text-red-700"
+                          disabled={linkingFamily}
+                          onClick={() => unlinkFamilyMember(id)}
+                        >
+                          連携解除
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="ご家族の会員番号を入力"
+                  value={familyInput}
+                  onChange={(e) => setFamilyInput(e.target.value)}
+                />
+                <button
+                  className="text-xs bg-matcha-deep text-white rounded px-3 disabled:opacity-50 whitespace-nowrap"
+                  onClick={linkFamilyMember}
+                  disabled={linkingFamily || !familyInput.trim()}
+                >
+                  {linkingFamily ? "処理中…" : "連携する"}
+                </button>
+              </div>
+              {familyError && <p className="text-hanko text-xs mt-1">{familyError}</p>}
+            </div>
+
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Field label="氏名">
                 <input
@@ -2210,6 +2422,68 @@ export default function AdminPage() {
               >
                 {savingStaff ? "保存中…" : "この内容で保存する"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFamilyCandidates && (
+        <div
+          className="fixed inset-0 bg-ink/40 flex items-center justify-center z-30 p-4"
+          onClick={() => setShowFamilyCandidates(false)}
+        >
+          <div
+            className="bg-paper rounded-md max-w-2xl w-full max-h-[85vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-matcha-deep">ご家族候補</h3>
+                <p className="text-xs text-muted mt-1">
+                  ご登録の（決済用）メールアドレスが同じ会員をグループにしています。全会員（グループ問わず）が対象です。
+                  内容を確認のうえ「このグループを連携する」を押してください（誤って表示された場合は連携しなくてかまいません）。
+                </p>
+              </div>
+              <button
+                className="text-muted text-sm"
+                onClick={() => setShowFamilyCandidates(false)}
+              >
+                閉じる ✕
+              </button>
+            </div>
+
+            {familyCandidates && familyCandidates.length === 0 && (
+              <p className="text-sm text-muted">
+                同じメールアドレスを使っていて未連携の会員は見つかりませんでした。
+              </p>
+            )}
+
+            <div className="space-y-3">
+              {familyCandidates?.map((group) => {
+                const key = group.map((m) => m.id).join(",");
+                return (
+                  <div key={key} className="border border-line rounded p-3">
+                    <ul className="space-y-1 mb-2">
+                      {group.map((m) => (
+                        <li key={m.id} className="text-sm flex justify-between">
+                          <span>
+                            {m.name}（{groupDisplayName(m.group)}）
+                          </span>
+                          <span className="text-xs text-muted">会員番号：{m.id}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-muted mb-2">共通メール：{group[0].email}</p>
+                    <button
+                      className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
+                      onClick={() => linkFamilyCandidateGroup(group)}
+                      disabled={processingCandidateKey === key}
+                    >
+                      {processingCandidateKey === key ? "連携中…" : "このグループを連携する"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

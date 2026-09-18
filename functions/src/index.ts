@@ -114,6 +114,58 @@ export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(asy
 });
 
 /**
+ * 入会申し込み（/enroll、未ログイン）から、既存のご家族（兄弟姉妹・保護者など）の会員番号と
+ * 登録メールアドレスを入力してもらい、一致すれば新規会員と既存会員を相互に
+ * linkedMemberIds で連携する。verifyMemberLogin と同じ「会員番号＋登録メールアドレス」の
+ * 組み合わせを本人確認代わりに使う（第三者が無関係の会員番号を無断で連携できないようにするため）。
+ * マイページの「家族を切り替える」機能はこのリストを参照する想定。
+ */
+export const linkFamilyOnEnroll = onCall<{
+  newMemberId: string;
+  existingMemberNo: string;
+  existingEmail: string;
+}>(async (request) => {
+  const { newMemberId, existingMemberNo, existingEmail } = request.data;
+  if (!newMemberId || !existingMemberNo || !existingEmail) {
+    throw new HttpsError("invalid-argument", "会員番号とメールアドレスを入力してください。");
+  }
+  if (newMemberId === existingMemberNo) {
+    throw new HttpsError("invalid-argument", "同じ会員番号は連携できません。");
+  }
+  const normalizedEmail = existingEmail.trim().toLowerCase();
+
+  const newRef = db.collection("members").doc(newMemberId);
+  const existingRef = db.collection("members").doc(existingMemberNo);
+
+  return db.runTransaction(async (tx) => {
+    const [newSnap, existingSnap] = await Promise.all([tx.get(newRef), tx.get(existingRef)]);
+    if (!newSnap.exists) {
+      throw new HttpsError("not-found", "新しく発行された会員番号が見つかりませんでした。");
+    }
+    if (!existingSnap.exists) {
+      throw new HttpsError("not-found", "会員番号とメールアドレスの組み合わせが確認できませんでした。");
+    }
+    const existingData = existingSnap.data() as admin.firestore.DocumentData;
+    if (((existingData.email as string) || "").trim().toLowerCase() !== normalizedEmail) {
+      throw new HttpsError("not-found", "会員番号とメールアドレスの組み合わせが確認できませんでした。");
+    }
+    const newData = newSnap.data() as admin.firestore.DocumentData;
+
+    const newLinked: string[] = Array.from(
+      new Set([...(((newData.linkedMemberIds as string[]) ?? [])), existingMemberNo])
+    );
+    const existingLinked: string[] = Array.from(
+      new Set([...(((existingData.linkedMemberIds as string[]) ?? [])), newMemberId])
+    );
+
+    tx.update(newRef, { linkedMemberIds: newLinked });
+    tx.update(existingRef, { linkedMemberIds: existingLinked });
+
+    return { linked: true, existingMemberName: (existingData.name as string) ?? "" };
+  });
+});
+
+/**
  * leaveRequests のステータスが pending → approved に変わったら、
  * members 側のステータスを自動的に反映し、通知ログに記録する。
  */

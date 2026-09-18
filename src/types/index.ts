@@ -58,6 +58,10 @@ export interface Member {
   phone?: string;
   address?: string;
   authUid?: string; // Firebase AuthのUIDと紐づけ（ログイン後に設定）
+  // ご家族の会員番号（双方向）。本部が管理画面で既存会員同士を連携するか、
+  // 入会申し込み時に既存の家族会員の会員番号・メールアドレスが一致した場合に自動で設定される。
+  // マイページの「家族を切り替える」機能はこのリストを参照する。
+  linkedMemberIds?: string[];
 }
 
 export type StaffRole = "sewanin" | "teacher";

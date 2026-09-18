@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
 import type { PaymentMethod } from "@/types";
@@ -25,6 +26,13 @@ export default function EnrollPage() {
   const [payInfo, setPayInfo] = useState<{ label: string; amount: string; link: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ご家族との連携（任意）：すでに登録済みのご家族の会員番号・登録メールアドレスが
+  // 一致すれば、新規会員と相互に連携する（マイページで家族を切り替えられるようになる）。
+  const [showFamilyLink, setShowFamilyLink] = useState(false);
+  const [familyMemberNo, setFamilyMemberNo] = useState("");
+  const [familyEmail, setFamilyEmail] = useState("");
+  const [familyLinkStatus, setFamilyLinkStatus] = useState<"idle" | "success" | "error">("idle");
 
   const group = ENROLL_GROUPS[groupKey];
 
@@ -103,6 +111,26 @@ export default function EnrollPage() {
       });
 
       setIssuedNo(issued);
+
+      if (showFamilyLink && familyMemberNo.trim()) {
+        try {
+          const functions = getFunctions();
+          const linkFamily = httpsCallable<
+            { newMemberId: string; existingMemberNo: string; existingEmail: string },
+            { linked: boolean; existingMemberName: string }
+          >(functions, "linkFamilyOnEnroll");
+          await linkFamily({
+            newMemberId: issued,
+            existingMemberNo: familyMemberNo.trim(),
+            existingEmail: (familyEmail || values.email || "").trim(),
+          });
+          setFamilyLinkStatus("success");
+        } catch (err) {
+          console.error(err);
+          setFamilyLinkStatus("error");
+        }
+      }
+
       setPayInfo({
         label: isOneTime ? "お支払い（都度払い・今回分）" : "お支払い（月謝・自動払い）",
         amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
@@ -195,6 +223,45 @@ export default function EnrollPage() {
               </div>
             ))}
 
+            <div className="border-t border-line pt-4">
+              <label className="flex items-start gap-2 text-xs text-muted mb-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={showFamilyLink}
+                  onChange={(e) => setShowFamilyLink(e.target.checked)}
+                />
+                <span>
+                  ご家族がすでに会員登録済みです（連携すると、マイページでご家族の情報を切り替えて確認できるようになります）
+                </span>
+              </label>
+              {showFamilyLink && (
+                <div className="space-y-3 mt-2">
+                  <div>
+                    <label className="block text-xs text-muted mb-1">ご家族の会員番号</label>
+                    <input
+                      className="w-full border border-line rounded px-3 py-2 text-sm"
+                      value={familyMemberNo}
+                      onChange={(e) => setFamilyMemberNo(e.target.value)}
+                      placeholder="例：30000001"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted mb-1">
+                      そのご家族のご登録メールアドレス（上の「メールアドレス」と同じ場合は未入力でかまいません）
+                    </label>
+                    <input
+                      type="email"
+                      className="w-full border border-line rounded px-3 py-2 text-sm"
+                      value={familyEmail}
+                      onChange={(e) => setFamilyEmail(e.target.value)}
+                      placeholder={values.email || "example@example.com"}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {error && <p className="text-hanko text-xs">{error}</p>}
 
             <button
@@ -239,6 +306,14 @@ export default function EnrollPage() {
                   Squareでお支払いへ進む
                 </a>
               </div>
+            )}
+
+            {showFamilyLink && familyMemberNo.trim() && (
+              <p className="text-xs text-center mt-4">
+                {familyLinkStatus === "success" && "ご家族との連携が完了しました。"}
+                {familyLinkStatus === "error" &&
+                  "ご家族との連携が確認できませんでした。会員番号・メールアドレスをご確認のうえ、本部までお問い合わせください。"}
+              </p>
             )}
 
             <p className="text-[11px] text-muted text-center mt-4">
