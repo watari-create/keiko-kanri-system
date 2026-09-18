@@ -144,7 +144,7 @@ export default function AdminPage() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
 
-  // LINE一斉送信（本部稽古エリアのみ）
+  // LINE一斉送信（本部稽古・茶道教室のみ）
   const [broadcastSelected, setBroadcastSelected] = useState<Set<string>>(new Set());
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
@@ -346,9 +346,9 @@ export default function AdminPage() {
     5 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
-    (showBilling ? 3 : 0) +
+    (showBilling ? 2 : 0) +
     (showSohenDetails ? 3 : 0) +
-    (showChadoClass ? 1 : 0);
+    (showChadoClass ? 2 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
   const memberSections = useMemo(() => {
@@ -1137,7 +1137,7 @@ export default function AdminPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-muted border-b border-line">
-                {showBilling && (
+                {showChadoClass && (
                   <th className="py-2 pr-2">
                     <input
                       type="checkbox"
@@ -1180,7 +1180,7 @@ export default function AdminPage() {
                   )}
                   {section.members.map((m) => (
                 <tr key={m.id} className="border-b border-line">
-                  {showBilling && (
+                  {showChadoClass && (
                     <td className="py-2 pr-2">
                       <input
                         type="checkbox"
@@ -1286,7 +1286,7 @@ export default function AdminPage() {
             </tbody>
           </table>
 
-          {showBilling && (
+          {showChadoClass && (
             <div className="mt-4 pt-4 border-t border-line">
               <h3 className="text-sm font-bold mb-2">LINE一斉送信</h3>
               <p className="text-xs text-muted mb-2">

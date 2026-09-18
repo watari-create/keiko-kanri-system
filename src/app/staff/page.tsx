@@ -267,16 +267,18 @@ export default function StaffPage() {
         <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="text-left text-muted border-b border-line">
-              <th className="py-2 pr-2">
-                <input
-                  type="checkbox"
-                  checked={members.length > 0 && members.every((m) => broadcastSelected.has(m.id))}
-                  onChange={(e) => {
-                    if (e.target.checked) setBroadcastSelected(new Set(members.map((m) => m.id)));
-                    else setBroadcastSelected(new Set());
-                  }}
-                />
-              </th>
+              {group === "茶道教室" && (
+                <th className="py-2 pr-2">
+                  <input
+                    type="checkbox"
+                    checked={members.length > 0 && members.every((m) => broadcastSelected.has(m.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) setBroadcastSelected(new Set(members.map((m) => m.id)));
+                      else setBroadcastSelected(new Set());
+                    }}
+                  />
+                </th>
+              )}
               <th className="py-2 pr-3">会員番号</th>
               <th className="pr-3">氏名</th>
               <th className="pr-3">許状段階</th>
@@ -287,20 +289,22 @@ export default function StaffPage() {
           <tbody>
             {members.map((m) => (
               <tr key={m.id} className="border-b border-line">
-                <td className="py-2 pr-2">
-                  <input
-                    type="checkbox"
-                    checked={broadcastSelected.has(m.id)}
-                    onChange={(e) => {
-                      setBroadcastSelected((prev) => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(m.id);
-                        else next.delete(m.id);
-                        return next;
-                      });
-                    }}
-                  />
-                </td>
+                {group === "茶道教室" && (
+                  <td className="py-2 pr-2">
+                    <input
+                      type="checkbox"
+                      checked={broadcastSelected.has(m.id)}
+                      onChange={(e) => {
+                        setBroadcastSelected((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(m.id);
+                          else next.delete(m.id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
+                )}
                 <td className="py-2 pr-3">{m.id}</td>
                 <td className="pr-3">
                   <button
@@ -321,6 +325,7 @@ export default function StaffPage() {
           </tbody>
         </table>
 
+        {group === "茶道教室" && (
         <div className="mt-4 pt-4 border-t border-line">
           <h3 className="text-sm font-bold mb-2">LINE一斉送信</h3>
           <p className="text-xs text-muted mb-2">
@@ -372,6 +377,7 @@ export default function StaffPage() {
             {broadcastResult && <p className="text-xs text-muted">{broadcastResult}</p>}
           </div>
         </div>
+        )}
       </section>
 
       {group === "茶道教室" && (
