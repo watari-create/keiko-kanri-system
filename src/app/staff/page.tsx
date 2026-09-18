@@ -31,7 +31,7 @@ import AttendanceGrid from "@/components/AttendanceGrid";
 import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
-import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession } from "@/types";
+import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession, LineMessageLog } from "@/types";
 
 export default function StaffPage() {
   const { role, staffId, loading } = useAuth();
@@ -56,6 +56,7 @@ export default function StaffPage() {
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
+  const [lineMessageLogs, setLineMessageLogs] = useState<LineMessageLog[]>([]);
 
   useEffect(() => {
     if (!loading && role !== "staff") router.replace("/staff/login");
@@ -91,6 +92,19 @@ export default function StaffPage() {
     const q = query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
+    });
+  }, [group]);
+
+  // LINE送信履歴（プッシュ・マルチキャスト分。Cloud Functionsが送信のたびに記録している）
+  useEffect(() => {
+    if (!group) return;
+    const q = query(
+      collection(db, "lineMessageLogs"),
+      where("group", "==", group),
+      orderBy("sentAt", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      setLineMessageLogs(snap.docs.slice(0, 30).map((d) => ({ id: d.id, ...d.data() } as LineMessageLog)));
     });
   }, [group]);
 
@@ -377,6 +391,32 @@ export default function StaffPage() {
             {broadcastResult && <p className="text-xs text-muted">{broadcastResult}</p>}
           </div>
         </div>
+        )}
+      </section>
+
+      <section className="bg-paper border border-line rounded-md p-5 mb-6">
+        <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
+        <p className="text-xs text-muted mb-3">
+          自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
+          チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。
+        </p>
+        {lineMessageLogs.length === 0 ? (
+          <p className="text-xs text-muted">まだ送信履歴がありません。</p>
+        ) : (
+          <ul className="space-y-2">
+            {lineMessageLogs.map((log) => (
+              <li key={log.id} className="border border-line rounded p-3 text-sm">
+                <div className="flex justify-between text-xs text-muted mb-1">
+                  <span>
+                    {new Date(log.sentAt).toLocaleString("ja-JP")}　宛先：{log.memberName}
+                    　種別：{log.kind}
+                    {log.sentBy && `　送信者：${log.sentBy}`}
+                  </span>
+                </div>
+                <p className="whitespace-pre-wrap">{log.message}</p>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 

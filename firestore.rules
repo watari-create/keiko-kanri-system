@@ -152,6 +152,14 @@ service cloud.firestore {
       allow update: if isHonbu();
     }
 
+    // ---- lineMessageLogs（LINE公式アカウントから送信したメッセージの履歴。
+    //      Messaging APIのプッシュ・マルチキャスト送信はLINE Official Account Manager側の
+    //      チャット履歴に残らないため、Cloud Functions（Admin SDK）が送信のたびに記録する） ----
+    match /lineMessageLogs/{logId} {
+      allow read: if isHonbu() || isStaffFor(resource.data.group);
+      allow write: if false; // Cloud Functionsからのみ
+    }
+
     // ---- notifications（通知ログ） ----
     match /notifications/{notifId} {
       allow read: if isHonbu();

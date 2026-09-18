@@ -64,6 +64,20 @@ export interface Member {
   linkedMemberIds?: string[];
 }
 
+// LINE公式アカウントからの送信履歴（プッシュ・マルチキャストのみ。応答メッセージは対象外）。
+// LINE Official Account ManagerのチャットBoxには、応答モード「Bot」時はAPI経由の送信内容が
+// 表示されないため、こちら側で記録して後から確認できるようにしている。
+export interface LineMessageLog {
+  id: string;
+  memberId: string;
+  memberName: string;
+  group: string;
+  message: string;
+  kind: "予約リマインド" | "出欠リマインド" | "一斉送信";
+  sentBy?: string; // 一斉送信のときの送信者（スタッフ名／本部のメールアドレス）。リマインドは未設定
+  sentAt: string; // ISO日時
+}
+
 export type StaffRole = "sewanin" | "teacher";
 
 export interface StaffAccount {

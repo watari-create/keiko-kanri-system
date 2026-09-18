@@ -831,6 +831,30 @@ async function multicastLineMessage(userIds: string[], accessToken: string, text
   }
 }
 
+/**
+ * 送信したLINEメッセージをFirestore（lineMessageLogs）に記録する。
+ * LINE Official Account ManagerのチャットBoxには、Messaging API経由（プッシュ・マルチキャスト）で
+ * 送ったメッセージが表示されない（応答モード「Bot」時、API送信分は履歴に残らない仕様）ため、
+ * こちら側で記録しないと送信内容を後から確認できない。
+ */
+async function logLineMessage(entry: {
+  memberId: string;
+  memberName: string;
+  group: string;
+  message: string;
+  kind: "予約リマインド" | "出欠リマインド" | "一斉送信";
+  sentBy?: string;
+}): Promise<void> {
+  try {
+    await db.collection("lineMessageLogs").add({
+      ...entry,
+      sentAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("LINE送信履歴の記録に失敗しました", err);
+  }
+}
+
 function formatDateJp(dateStr: string): string {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
@@ -1155,12 +1179,16 @@ export const sendLineReminders = onSchedule(
           const member = memberSnap.data();
           if (!member || !member.lineUserId) continue;
           const teacherText = slot.teacher ? `担当:${slot.teacher}` : "";
-          await pushLineMessage(
-            member.lineUserId,
-            accessToken,
-            `${member.name}様
-明日${formatDateJp(tomorrowKey)}(${slot.label})のお稽古のご予約があります。${teacherText}`
-          );
+          const reservationText = `${member.name}様
+明日${formatDateJp(tomorrowKey)}(${slot.label})のお稽古のご予約があります。${teacherText}`;
+          await pushLineMessage(member.lineUserId, accessToken, reservationText);
+          await logLineMessage({
+            memberId: booking.memberId,
+            memberName: member.name ?? "",
+            group: member.group ?? "",
+            message: reservationText,
+            kind: "予約リマインド",
+          });
         }
       }
     }
@@ -1178,12 +1206,16 @@ export const sendLineReminders = onSchedule(
           if (member.group === "茶道教室" && member.chadoClass === "土曜日") continue;
           if (!member.lineUserId) continue;
           if ((member.rsvp ?? "未回答") !== "未回答") continue;
-          await pushLineMessage(
-            member.lineUserId,
-            accessToken,
-            `${member.name}様
-明日${formatDateJp(tomorrowKey)}のお稽古の出欠がまだ未回答です。マイページからご回答をお願いします。`
-          );
+          const attendanceText = `${member.name}様
+明日${formatDateJp(tomorrowKey)}のお稽古の出欠がまだ未回答です。マイページからご回答をお願いします。`;
+          await pushLineMessage(member.lineUserId, accessToken, attendanceText);
+          await logLineMessage({
+            memberId: memberDoc.id,
+            memberName: member.name ?? "",
+            group: member.group ?? "",
+            message: attendanceText,
+            kind: "出欠リマインド",
+          });
         }
       }
     }
@@ -1213,6 +1245,7 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
     }
 
     let allowedGroups: string[] | null = null;
+    let sentBy = "本部";
     if (role === "staff") {
       const staffId = request.auth?.token?.staffId as string | undefined;
       if (!staffId) {
@@ -1220,11 +1253,14 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
       }
       const staffSnap = await db.collection("staff").doc(staffId).get();
       allowedGroups = (staffSnap.data()?.groups as string[] | undefined) ?? [];
+      sentBy = (staffSnap.data()?.name as string | undefined) ?? "スタッフ";
+    } else {
+      sentBy = (request.auth?.token?.email as string | undefined) ?? "本部";
     }
 
     const memberSnaps = await Promise.all(memberIds.map((id) => db.collection("members").doc(id).get()));
 
-    const targetUserIds: string[] = [];
+    const targets: { memberId: string; memberName: string; group: string; lineUserId: string }[] = [];
     const skipped: string[] = [];
     for (const snap of memberSnaps) {
       const data = snap.data();
@@ -1236,18 +1272,31 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
         throw new HttpsError("permission-denied", `担当外の会員が含まれています(${data.name})。`);
       }
       if (data.lineUserId) {
-        targetUserIds.push(data.lineUserId);
+        targets.push({ memberId: snap.id, memberName: data.name ?? "", group: data.group ?? "", lineUserId: data.lineUserId });
       } else {
         skipped.push(data.name ?? snap.id);
       }
     }
 
-    if (targetUserIds.length > 0) {
+    if (targets.length > 0) {
       const accessToken = lineChannelAccessToken.value();
-      await multicastLineMessage(targetUserIds, accessToken, message.trim());
+      const trimmedMessage = message.trim();
+      await multicastLineMessage(targets.map((t) => t.lineUserId), accessToken, trimmedMessage);
+      await Promise.all(
+        targets.map((t) =>
+          logLineMessage({
+            memberId: t.memberId,
+            memberName: t.memberName,
+            group: t.group,
+            message: trimmedMessage,
+            kind: "一斉送信",
+            sentBy,
+          })
+        )
+      );
     }
 
-    return { sent: targetUserIds.length, skipped };
+    return { sent: targets.length, skipped };
   }
 );
 
