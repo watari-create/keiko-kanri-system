@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 // 同じ関数はスタッフの組み合わせも確認できるため、万一スタッフの情報が入力された場合は
 // /staff に振り分ける。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signInWithCustomToken } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -19,6 +19,15 @@ export default function MemberLoginPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lineNotice, setLineNotice] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("lineNotLinked") === "1") {
+      setLineNotice(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -54,6 +63,11 @@ export default function MemberLoginPage() {
           <h1 className="text-xl font-bold text-matcha-deep">お稽古マイページ</h1>
         </div>
         <p className="text-sm text-muted text-center mb-6">会員番号とメールアドレスでログインします</p>
+        {lineNotice && (
+          <p className="text-xs text-matcha-deep bg-matcha-pale rounded-md p-3 mb-4">
+            LINEでの自動ログインには、一度こちらからログインした上で、マイページの「公式LINEとの連携」から連携してください。次回からはLINEのメニューからすぐに開けるようになります。
+          </p>
+        )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>

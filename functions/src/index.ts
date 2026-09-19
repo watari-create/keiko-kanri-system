@@ -1059,6 +1059,56 @@ export const linkLineViaLiff = onCall<{ idToken: string }>(async (request) => {
   return { ok: true };
 });
 
+/**
+ * LINE公式アカウントのリッチメニュー「マイページ」ボタンから開かれるLIFFページ
+ * （/mypage/line-link）が、未ログイン状態のときに呼び出す。
+ * LIFFのID Tokenを検証し、そのLINEユーザーIDが既にmembers.lineUserIdとして
+ * 連携済みであれば、その会員としてログインするためのカスタムトークンを発行する。
+ * まだ連携されていない場合は linked: false を返し、フロント側は通常の
+ * 会員番号＋メールアドレスのログイン画面に案内する（ログイン後、マイページの
+ * 「公式LINEとの連携」から連携すれば、次回以降はこのボタンで自動ログインできるようになる）。
+ */
+export const loginViaLine = onCall<{ idToken: string }>(async (request) => {
+  const { idToken } = request.data ?? ({} as { idToken?: string });
+  if (typeof idToken !== "string" || !idToken) {
+    throw new HttpsError("invalid-argument", "IDトークンが指定されていません。");
+  }
+
+  const verifyRes = await fetch("https://api.line.me/oauth2/v2.1/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      id_token: idToken,
+      client_id: liffChannelId.value(),
+    }),
+  });
+  if (!verifyRes.ok) {
+    console.error(`LINEログインのID Token検証に失敗しました: ${verifyRes.status} ${await verifyRes.text()}`);
+    throw new HttpsError("unauthenticated", "LINEの認証確認に失敗しました。もう一度お試しください。");
+  }
+  const verifyData = (await verifyRes.json()) as { sub?: string };
+  if (!verifyData.sub) {
+    throw new HttpsError("internal", "LINEのユーザー情報を取得できませんでした。");
+  }
+
+  const memberSnap = await db
+    .collection("members")
+    .where("lineUserId", "==", verifyData.sub)
+    .limit(1)
+    .get();
+  if (memberSnap.empty) {
+    return { linked: false as const };
+  }
+
+  const memberId = memberSnap.docs[0].id;
+  const uid = `member_${memberId}`;
+  const token = await admin.auth().createCustomToken(uid, {
+    role: "member",
+    memberId,
+  });
+  return { linked: true as const, token, role: "member" as const };
+});
+
 // 「次回のお稽古」表示の対象となる会。イベントのタイトルにこの文字列が
 // 含まれているかどうかで、どの会のお稽古かを判定する（例："名月会お稽古"）。
 const LESSON_GROUPS = ["名月会", "Gマダムの茶の湯講座", "茶道教室"];
