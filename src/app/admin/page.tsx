@@ -48,6 +48,7 @@ import type {
   NyumonSetInventory,
   ChadoSaturdaySession,
   ChadoStudentNote,
+  LineMessageLog,
 } from "@/types";
 
 type Area = "宗徧流稽古" | "本部稽古" | "経理" | "スタッフ管理";
@@ -152,6 +153,7 @@ export default function AdminPage() {
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
+  const [lineMessageLogs, setLineMessageLogs] = useState<LineMessageLog[]>([]);
 
   // 通知バッジ用：グループを問わず、対応が必要な申請をすべて購読する
   const [allLicenseRequests, setAllLicenseRequests] = useState<LicenseRequest[]>([]);
@@ -382,6 +384,22 @@ export default function AdminPage() {
   const showSohenDetails = area === "宗徧流稽古";
   const showGuardian = !showSohenDetails && groupHasGuardianField(group); // 宗徧流稽古・茶道教室・Gマダムの茶の湯講座は保護者欄を使わない
   const showChadoClass = area === "本部稽古" && group === "茶道教室"; // 茶道教室のみ、曜日クラス列を表示
+
+  // LINE送信履歴（プッシュ・マルチキャスト分。Cloud Functionsが送信のたびに記録している。茶道教室のみ）
+  useEffect(() => {
+    if (!showChadoClass) {
+      setLineMessageLogs([]);
+      return;
+    }
+    const q = query(
+      collection(db, "lineMessageLogs"),
+      where("group", "==", "茶道教室"),
+      orderBy("sentAt", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      setLineMessageLogs(snap.docs.slice(0, 30).map((d) => ({ id: d.id, ...d.data() } as LineMessageLog)));
+    });
+  }, [showChadoClass]);
   const colCount =
     5 +
     (showGuardian ? 1 : 0) +
@@ -434,13 +452,37 @@ export default function AdminPage() {
     await updateDoc(doc(db, "members", memberId), { [field]: value });
   }
 
+  // 出席簿（月次マトリクス）での出欠記録。茶道教室・土曜日クラスの会員については、
+  // 専用の予約管理画面（setSaturdayBookingAttendance）を使わずここで「欠席」にした場合も
+  // 振替チケットの付与漏れが起きないよう、同じ付与・取消ロジックをここにも適用する
+  // （土曜日クラスの振替チケットは、どちらの画面で欠席が記録されても連動する）。
   async function setAttendance(
     memberId: string,
     monthKey: string,
     value: "出席" | "欠席" | undefined
   ) {
-    await updateDoc(doc(db, "members", memberId), {
-      [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
+    const memberRef = doc(db, "members", memberId);
+    await runTransaction(db, async (tx) => {
+      const memberSnap = await tx.get(memberRef);
+      if (!memberSnap.exists()) return;
+      const data = memberSnap.data() as Member;
+      const prev = data.attendance?.[monthKey];
+
+      const updates: Record<string, unknown> = {
+        [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
+      };
+
+      if (data.group === "茶道教室" && data.chadoClass === "土曜日") {
+        let ticketDelta = 0;
+        if (prev !== "欠席" && value === "欠席") ticketDelta = 1;
+        if (prev === "欠席" && value !== "欠席") ticketDelta = -1;
+        if (ticketDelta !== 0) {
+          const currentTickets = data.chadoMakeupTickets ?? 0;
+          updates.chadoMakeupTickets = Math.max(0, currentTickets + ticketDelta);
+        }
+      }
+
+      tx.update(memberRef, updates);
     });
   }
 
@@ -1502,6 +1544,34 @@ export default function AdminPage() {
                 {broadcastResult && <p className="text-xs text-muted">{broadcastResult}</p>}
               </div>
             </div>
+          )}
+        </section>
+      )}
+
+      {showChadoClass && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6">
+          <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
+          <p className="text-xs text-muted mb-3">
+            自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
+            チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。
+          </p>
+          {lineMessageLogs.length === 0 ? (
+            <p className="text-xs text-muted">まだ送信履歴がありません。</p>
+          ) : (
+            <ul className="space-y-2">
+              {lineMessageLogs.map((log) => (
+                <li key={log.id} className="border border-line rounded p-3 text-sm">
+                  <div className="flex justify-between text-xs text-muted mb-1">
+                    <span>
+                      {new Date(log.sentAt).toLocaleString("ja-JP")}　宛先：{log.memberName}
+                      　種別：{log.kind}
+                      {log.sentBy && `　送信者：${log.sentBy}`}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap">{log.message}</p>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       )}
