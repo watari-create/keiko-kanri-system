@@ -901,7 +901,7 @@ ${formatDateJp(data.date)}（午後）にご予約があります。${
 
   const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
   const dates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
-  const next = dates?.[member.group];
+  const next = dates?.[nextLessonKey(member.group, member.chadoClass)];
   const rsvp = member.rsvp ?? "未回答";
   if (next) {
     return `${member.name}様
@@ -1156,14 +1156,52 @@ async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
   const items = data.items ?? [];
 
   const result: Record<string, NextLessonInfo> = {};
-  for (const group of LESSON_GROUPS) {
-    const match = items.find((ev) => (ev.summary ?? "").includes(group));
-    const date = match?.start?.dateTime ?? match?.start?.date;
-    if (match && date) {
-      result[group] = { date, title: match.summary ?? "" };
+  for (const ev of items) {
+    const title = ev.summary ?? "";
+    const date = ev.start?.dateTime ?? ev.start?.date;
+    if (!date) continue;
+    const group = LESSON_GROUPS.find((g) => title.includes(g));
+    if (!group) continue;
+    // 茶道教室は木曜日・日曜日クラスで別々のお稽古日を持つので、クラスごとのキーに分けて保存する
+    // （土曜日クラスは予約制で chadoSaturdaySessions を使うため対象外）
+    let key: string = group;
+    if (group === "茶道教室") {
+      const chadoClass = chadoClassOfEvent(title, date);
+      if (!chadoClass) continue;
+      key = nextLessonKey(group, chadoClass);
     }
+    // itemsは開始日時順なので、最初に見つかったものが一番近い予定
+    if (!result[key]) result[key] = { date, title };
   }
   return result;
+}
+
+// 茶道教室のうち、出欠ボタンで管理する（次回のお稽古日を表示する）曜日クラス
+const CHADO_RSVP_CLASSES = ["木曜日", "日曜日"] as const;
+
+/**
+ * meta/nextLessonDates.dates のキー。茶道教室だけはクラスごとに
+ * 「茶道教室・木曜日」「茶道教室・日曜日」のように分ける（src/lib/nextLesson.ts と同じ規則）。
+ */
+function nextLessonKey(group: string, chadoClass?: string): string {
+  return group === "茶道教室" && chadoClass ? `${group}・${chadoClass}` : group;
+}
+
+/**
+ * 茶道教室の予定がどの曜日クラスのものかを判定する。
+ * タイトルに「木曜」「日曜」が含まれていればそれを優先し、なければ開催日（日本時間）の曜日で判定する。
+ */
+function chadoClassOfEvent(title: string, date: string): (typeof CHADO_RSVP_CLASSES)[number] | null {
+  if (title.includes("木曜")) return "木曜日";
+  if (title.includes("日曜")) return "日曜日";
+  if (title.includes("土曜")) return null;
+  const t = Date.parse(date);
+  if (Number.isNaN(t)) return null;
+  // 終日予定（YYYY-MM-DD）はUTC0時として解釈されるが、+9時間しても同じ日付のままなので問題ない
+  const weekday = new Date(t + 9 * 60 * 60 * 1000).getUTCDay();
+  if (weekday === 4) return "木曜日";
+  if (weekday === 0) return "日曜日";
+  return null;
 }
 
 /**
@@ -1246,12 +1284,14 @@ export const sendLineReminders = onSchedule(
     const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
     const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
     if (nextDates) {
-      for (const [group, info] of Object.entries(nextDates)) {
-        if (info.date !== tomorrowKey) continue;
+      for (const [key, info] of Object.entries(nextDates)) {
+        if (info.date.slice(0, 10) !== tomorrowKey) continue;
+        const group = key.split("・")[0];
         const membersSnap = await db.collection("members").where("group", "==", group).get();
         for (const memberDoc of membersSnap.docs) {
           const member = memberDoc.data();
-          if (member.group === "茶道教室" && member.chadoClass === "土曜日") continue;
+          // 茶道教室は該当クラス（キーと一致するクラス）の会員だけに送る
+          if (nextLessonKey(member.group, member.chadoClass) !== key) continue;
           if (!member.lineUserId) continue;
           if ((member.rsvp ?? "未回答") !== "未回答") continue;
           const attendanceText = `${member.name}様

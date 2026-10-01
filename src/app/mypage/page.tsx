@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
 import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
-import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
 import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME } from "@/lib/chadoClasses";
 import SaturdayReservation from "@/components/SaturdayReservation";
 import type { Member, LeaveRequestType } from "@/types";
@@ -56,9 +56,9 @@ export default function MyPage() {
     if (!member?.group) return;
     return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
       const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
-      setNextLesson(dates?.[member.group] ?? null);
+      setNextLesson(dates?.[nextLessonKey(member.group, member.chadoClass)] ?? null);
     });
-  }, [member?.group]);
+  }, [member?.group, member?.chadoClass]);
 
   useEffect(() => {
     if (!memberId) return;

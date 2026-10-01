@@ -28,7 +28,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
-import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession, LineMessageLog } from "@/types";
@@ -45,7 +45,7 @@ export default function StaffPage() {
   const [applyIssueMonth, setApplyIssueMonth] = useState(currentMonthKey());
   const [showLicenseHistory, setShowLicenseHistory] = useState(false);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
-  const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
+  const [nextLessons, setNextLessons] = useState<{ label: string; info: NextLessonInfo }[]>([]);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [studentNotes, setStudentNotes] = useState<ChadoStudentNote[]>([]);
   const [newNoteDate, setNewNoteDate] = useState("");
@@ -72,7 +72,7 @@ export default function StaffPage() {
     if (!group) return;
     return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
       const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
-      setNextLesson(dates?.[group] ?? null);
+      setNextLessons(nextLessonsForGroup(dates, group));
     });
   }, [group]);
 
@@ -258,7 +258,9 @@ export default function StaffPage() {
         {account.name}さんとしてログイン中（担当：{account.groups.map(groupDisplayName).join("・")}）
       </div>
       <div className="text-sm text-matcha-deep mb-4">
-        {nextLesson ? `${groupDisplayName(group)} 次回のお稽古：${formatLessonDate(nextLesson.date)}` : "\u00A0"}
+        {nextLessons.length > 0
+          ? `${groupDisplayName(group)} 次回のお稽古：${formatNextLessons(nextLessons)}`
+          : "\u00A0"}
       </div>
 
       {account.groups.length > 1 && (

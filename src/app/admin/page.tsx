@@ -30,7 +30,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
-import { formatLessonDate, type NextLessonInfo } from "@/lib/nextLesson";
+import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
@@ -186,7 +186,7 @@ export default function AdminPage() {
   const [showCsvImport, setShowCsvImport] = useState(false);
 
   // 次回のお稽古（Googleカレンダー同期）
-  const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
+  const [nextLessons, setNextLessons] = useState<{ label: string; info: NextLessonInfo }[]>([]);
 
   // 名月会 入門セット在庫（本部稽古エリアのみ購読）
   const [inventory, setInventory] = useState<NyumonSetInventory | null>(null);
@@ -226,12 +226,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (area !== "本部稽古") {
-      setNextLesson(null);
+      setNextLessons([]);
       return;
     }
     return onSnapshot(doc(db, "meta", "nextLessonDates"), (snap) => {
       const dates = snap.data()?.dates as Record<string, NextLessonInfo> | undefined;
-      setNextLesson(dates?.[group] ?? null);
+      setNextLessons(nextLessonsForGroup(dates, group));
     });
   }, [area, group]);
 
@@ -1132,9 +1132,9 @@ export default function AdminPage() {
               </option>
             ))}
           </select>
-          {nextLesson && (
+          {nextLessons.length > 0 && (
             <span className="text-sm text-matcha-deep">
-              次回のお稽古：{formatLessonDate(nextLesson.date)}
+              次回のお稽古：{formatNextLessons(nextLessons)}
             </span>
           )}
         </div>
