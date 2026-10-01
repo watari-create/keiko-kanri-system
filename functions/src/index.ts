@@ -256,7 +256,7 @@ export const onLicenseIssued = onDocumentUpdated(
         const text =
           mentionPrefix +
           `許状が発行されました\n` +
-          `会員：${after.memberName}様\n` +
+          `会員：${after.memberName}様（${groupDisplayName(after.group)}）\n` +
           `許状：${after.licenseName}\n` +
           `生徒様にお渡しできたら、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
         try {
@@ -389,7 +389,7 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     const text =
       mentionPrefix +
       `請求書発行のご依頼です\n` +
-      `会員：${after.memberName}様\n` +
+      `会員：${after.memberName}様（${groupDisplayName(after.group)}）\n` +
       `許状：${after.licenseName}\n` +
       `合計：¥${after.fee?.toLocaleString?.() ?? after.fee}\n` +
       `発行できたら、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
@@ -1190,18 +1190,25 @@ function nextLessonKey(group: string, chadoClass?: string): string {
 
 /**
  * 茶道教室の予定がどの曜日クラスのものかを判定する。
- * タイトルに「木曜」「日曜」が含まれていればそれを優先し、なければ開催日（日本時間）の曜日で判定する。
+ * 開催日（日本時間）の曜日を最優先する（木曜→木曜日クラス、日曜→日曜日クラス）。
+ * タイトルに「木曜」「日曜」「土曜」などが含まれていても、実際の開催日が木曜・日曜であればそちらに従う
+ * （例：「茶道教室（木曜・日曜クラス）」のような合同タイトルや、土曜の予定に「木曜」の文字が入っている場合に
+ *  別の曜日の予定が「次回」として表示されてしまうのを防ぐ）。
+ * 開催日が木曜・日曜以外の場合のみ、振替などのためにタイトルで判定する（土曜を含むものは土曜日クラス扱いで対象外）。
  */
 function chadoClassOfEvent(title: string, date: string): (typeof CHADO_RSVP_CLASSES)[number] | null {
-  if (title.includes("木曜")) return "木曜日";
-  if (title.includes("日曜")) return "日曜日";
-  if (title.includes("土曜")) return null;
-  const t = Date.parse(date);
-  if (Number.isNaN(t)) return null;
   // 終日予定（YYYY-MM-DD）はUTC0時として解釈されるが、+9時間しても同じ日付のままなので問題ない
-  const weekday = new Date(t + 9 * 60 * 60 * 1000).getUTCDay();
-  if (weekday === 4) return "木曜日";
-  if (weekday === 0) return "日曜日";
+  const t = Date.parse(date);
+  if (!Number.isNaN(t)) {
+    const weekday = new Date(t + 9 * 60 * 60 * 1000).getUTCDay();
+    if (weekday === 4) return "木曜日";
+    if (weekday === 0) return "日曜日";
+  }
+  if (title.includes("土曜")) return null;
+  const hasThu = title.includes("木曜");
+  const hasSun = title.includes("日曜");
+  if (hasThu && !hasSun) return "木曜日";
+  if (hasSun && !hasThu) return "日曜日";
   return null;
 }
 
