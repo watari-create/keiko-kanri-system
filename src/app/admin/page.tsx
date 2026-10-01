@@ -391,14 +391,19 @@ export default function AdminPage() {
       setLineMessageLogs([]);
       return;
     }
-    const q = query(
-      collection(db, "lineMessageLogs"),
-      where("group", "==", "茶道教室"),
-      orderBy("sentAt", "desc")
+    // group＋sentAtの並べ替えは複合インデックスが必要になるため、groupのみで取得してクライアント側で新しい順に並べる
+    const q = query(collection(db, "lineMessageLogs"), where("group", "==", "茶道教室"));
+    return onSnapshot(
+      q,
+      (snap) => {
+        const logs = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as LineMessageLog))
+          .sort((a, b) => (b.sentAt ?? "").localeCompare(a.sentAt ?? ""))
+          .slice(0, 30);
+        setLineMessageLogs(logs);
+      },
+      (err) => console.error("LINE送信履歴の取得に失敗しました", err)
     );
-    return onSnapshot(q, (snap) => {
-      setLineMessageLogs(snap.docs.slice(0, 30).map((d) => ({ id: d.id, ...d.data() } as LineMessageLog)));
-    });
   }, [showChadoClass]);
   const colCount =
     5 +
