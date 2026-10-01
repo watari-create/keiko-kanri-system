@@ -1160,18 +1160,19 @@ async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
     const title = ev.summary ?? "";
     const date = ev.start?.dateTime ?? ev.start?.date;
     if (!date) continue;
-    const group = LESSON_GROUPS.find((g) => title.includes(g));
-    if (!group) continue;
-    // 茶道教室は木曜日・日曜日クラスで別々のお稽古日を持つので、クラスごとのキーに分けて保存する
-    // （土曜日クラスは予約制で chadoSaturdaySessions を使うため対象外）
-    let key: string = group;
-    if (group === "茶道教室") {
-      const chadoClass = chadoClassOfEvent(title, date);
-      if (!chadoClass) continue;
-      key = nextLessonKey(group, chadoClass);
+    // 「名月会/茶道教室」のような合同の予定は、タイトルに含まれるすべての会の予定として扱う
+    for (const group of LESSON_GROUPS.filter((g) => title.includes(g))) {
+      // 茶道教室は木曜日・日曜日クラスで別々のお稽古日を持つので、クラスごとのキーに分けて保存する
+      // （土曜日クラスは予約制で chadoSaturdaySessions を使うため対象外）
+      let key: string = group;
+      if (group === "茶道教室") {
+        const chadoClass = chadoClassOfEvent(title, date);
+        if (!chadoClass) continue;
+        key = nextLessonKey(group, chadoClass);
+      }
+      // itemsは開始日時順なので、最初に見つかったものが一番近い予定
+      if (!result[key]) result[key] = { date, title };
     }
-    // itemsは開始日時順なので、最初に見つかったものが一番近い予定
-    if (!result[key]) result[key] = { date, title };
   }
   return result;
 }
