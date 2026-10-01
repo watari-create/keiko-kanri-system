@@ -28,6 +28,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
@@ -106,7 +107,7 @@ export default function StaffPage() {
         const logs = snap.docs
           .map((d) => ({ id: d.id, ...d.data() } as LineMessageLog))
           .sort((a, b) => (b.sentAt ?? "").localeCompare(a.sentAt ?? ""))
-          .slice(0, 30);
+          .slice(0, 300); // 一斉送信は宛先ごとに記録されるため多めに取得し、表示側で1回の送信ごとにまとめて30件に絞る
         setLineMessageLogs(logs);
       },
       (err) => console.error("LINE送信履歴の取得に失敗しました", err)
@@ -405,26 +406,9 @@ export default function StaffPage() {
         <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
         <p className="text-xs text-muted mb-3">
           自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
-          チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。
+          チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。行をクリックすると全文を表示します。
         </p>
-        {lineMessageLogs.length === 0 ? (
-          <p className="text-xs text-muted">まだ送信履歴がありません。</p>
-        ) : (
-          <ul className="space-y-2">
-            {lineMessageLogs.map((log) => (
-              <li key={log.id} className="border border-line rounded p-3 text-sm">
-                <div className="flex justify-between text-xs text-muted mb-1">
-                  <span>
-                    {new Date(log.sentAt).toLocaleString("ja-JP")}　宛先：{log.memberName}
-                    　種別：{log.kind}
-                    {log.sentBy && `　送信者：${log.sentBy}`}
-                  </span>
-                </div>
-                <p className="whitespace-pre-wrap">{log.message}</p>
-              </li>
-            ))}
-          </ul>
-        )}
+        <LineMessageLogList logs={lineMessageLogs} />
       </section>
 
       {group === "茶道教室" && (
