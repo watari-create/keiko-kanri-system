@@ -2005,7 +2005,7 @@ async function fetchChadoLessonDatesInMonth(monthKey: string): Promise<string[]>
 /**
  * 毎朝9:00（JST）に実行。茶道教室のみ対象。
  * 今日から10日後が「その月の最初のお稽古日」（全クラス合わせて最も早い日）であれば、
- * 本部稽古チャンネルに「お菓子の発注をしてください」とリマインダーを送る。
+ * 本部稽古boチャンネルに「お菓子の発注をしてください」とリマインダーを送る。
  * 同じ月について二重送信しないよう、meta/chadoSweetsOrderReminder に送信済みの月を記録する。
  */
 export const remindChadoSweetsOrder = onSchedule(
@@ -2022,9 +2022,9 @@ export const remindChadoSweetsOrder = onSchedule(
     if (lessonDates[0] !== targetDateKey) return; // 10日後が月の最初のお稽古ではない
 
     const token = slackBotToken.value();
-    const channel = slackChadoChannelId.value();
+    const channel = slackHqChannel.value(); // 本部稽古bo
     if (!token || !channel) {
-      console.warn("SLACK_BOT_TOKEN または SLACK_CHADO_CHANNEL_ID が未設定のため、Slack通知をスキップしました。");
+      console.warn("SLACK_BOT_TOKEN または SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
       return;
     }
 
