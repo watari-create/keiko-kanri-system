@@ -1938,3 +1938,110 @@ export const notifyChadoParticipants = onSchedule(
     await noticeRef.set({ sentKeys: sentKeys.slice(-50), updatedAt: new Date().toISOString() });
   }
 );
+
+// お菓子発注リマインダー：月の最初のお稽古の何日前に送るか
+const CHADO_SWEETS_ORDER_DAYS_BEFORE = 10;
+
+/** カレンダーの start（終日 YYYY-MM-DD／時刻指定 ISO）を日本時間の YYYY-MM-DD に変換する */
+function eventDateKeyJST(date: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const t = Date.parse(date);
+  if (Number.isNaN(t)) return null;
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * 指定した月（YYYY-MM）の茶道教室のお稽古日（全クラス）を昇順で返す。
+ * ・木曜日／日曜日クラスなど：本部の共有Googleカレンダーで、タイトルに「茶道教室」を含む予定
+ * ・土曜日クラス：chadoSaturdaySessions の開催日
+ */
+async function fetchChadoLessonDatesInMonth(monthKey: string): Promise<string[]> {
+  const [y, m] = monthKey.split("-").map(Number);
+  const firstDay = `${monthKey}-01`;
+  const nextMonthFirst = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const dates = new Set<string>();
+
+  // 1. Googleカレンダー（月初〜月末、日本時間）
+  const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/calendar.readonly"] });
+  const client = await auth.getClient();
+  const accessToken = await client.getAccessToken();
+  if (!accessToken.token) {
+    throw new Error("Googleカレンダーへのアクセストークンを取得できませんでした。");
+  }
+  const timeMin = new Date(`${firstDay}T00:00:00+09:00`).toISOString();
+  const timeMax = new Date(`${nextMonthFirst}T00:00:00+09:00`).toISOString();
+  const url =
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(hqCalendarId.value())}/events` +
+    `?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}` +
+    `&singleEvents=true&orderBy=startTime&maxResults=250`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken.token}` } });
+  if (!res.ok) {
+    throw new Error(`Googleカレンダーの取得に失敗しました：${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    items?: { summary?: string; start?: { date?: string; dateTime?: string } }[];
+  };
+  for (const ev of data.items ?? []) {
+    if (!(ev.summary ?? "").includes("茶道教室")) continue;
+    const raw = ev.start?.dateTime ?? ev.start?.date;
+    const key = raw ? eventDateKeyJST(raw) : null;
+    if (key && key.startsWith(monthKey)) dates.add(key);
+  }
+
+  // 2. 土曜日クラス
+  const satSnap = await db
+    .collection("chadoSaturdaySessions")
+    .where("date", ">=", firstDay)
+    .where("date", "<", nextMonthFirst)
+    .get();
+  for (const doc of satSnap.docs) {
+    const d = doc.data().date as string | undefined;
+    if (d) dates.add(d);
+  }
+
+  return [...dates].sort();
+}
+
+/**
+ * 毎朝9:00（JST）に実行。茶道教室のみ対象。
+ * 今日から10日後が「その月の最初のお稽古日」（全クラス合わせて最も早い日）であれば、
+ * 本部稽古チャンネルに「お菓子の発注をしてください」とリマインダーを送る。
+ * 同じ月について二重送信しないよう、meta/chadoSweetsOrderReminder に送信済みの月を記録する。
+ */
+export const remindChadoSweetsOrder = onSchedule(
+  { schedule: "0 9 * * *", timeZone: "Asia/Tokyo", secrets: [slackBotToken] },
+  async () => {
+    const targetDateKey = addDaysToDateKey(todayKeyJST(), CHADO_SWEETS_ORDER_DAYS_BEFORE);
+    const monthKey = targetDateKey.slice(0, 7);
+
+    const reminderRef = db.doc("meta/chadoSweetsOrderReminder");
+    const sentMonths = ((await reminderRef.get()).data()?.sentMonths as string[] | undefined) ?? [];
+    if (sentMonths.includes(monthKey)) return; // 送信済み
+
+    const lessonDates = await fetchChadoLessonDatesInMonth(monthKey);
+    if (lessonDates[0] !== targetDateKey) return; // 10日後が月の最初のお稽古ではない
+
+    const token = slackBotToken.value();
+    const channel = slackChadoChannelId.value();
+    if (!token || !channel) {
+      console.warn("SLACK_BOT_TOKEN または SLACK_CHADO_CHANNEL_ID が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const [, month] = monthKey.split("-").map(Number);
+    const text =
+      `【茶道教室】お菓子発注のリマインダー\n` +
+      `${month}月の最初のお稽古（${formatDateJp(targetDateKey)}）まで${CHADO_SWEETS_ORDER_DAYS_BEFORE}日です。お菓子の発注をしてください。\n` +
+      `${month}月のお稽古日：${lessonDates.map((d) => formatDateJp(d)).join("、")}`;
+
+    try {
+      const posted = await postSlackMessage(token, channel, text);
+      if (!posted) return;
+      sentMonths.push(monthKey);
+      await reminderRef.set({ sentMonths: sentMonths.slice(-24), updatedAt: new Date().toISOString() });
+      console.log(`茶道教室のお菓子発注リマインダーを送信しました month=${monthKey} firstLesson=${targetDateKey}`);
+    } catch (err) {
+      console.error("Slack通知の送信に失敗しました", err);
+    }
+  }
+);
