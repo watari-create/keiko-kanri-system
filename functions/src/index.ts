@@ -1731,3 +1731,49 @@ export const backupKeikoNoteEntries = onSchedule(
     console.log(`keikoNoteEntriesのバックアップを作成しました snapshotId=${snapshotId} count=${entriesSnap.size}`);
   }
 );
+
+/**
+ * 茶道教室・土曜日クラスの振替チケット自動付与（出席簿経由）。
+ *
+ * 講師画面・世話人画面の出席簿（members.attendance の月別セル）で「欠席」にした場合、
+ * Firestoreルール上、講師は chadoMakeupTickets を書き換えられないため、これまでチケットが付与されていなかった。
+ * 会員ドキュメントの attendance の変化を監視し、サーバー側でチケットを増減する。
+ *   ・ある月が「欠席」になった → +1
+ *   ・ある月が「欠席」から別の値（出席／未記録）になった → -1（下限0）
+ *
+ * 管理画面の出席簿（setAttendance）は同じ書き込みの中でチケットも更新しているため、
+ * 同一更新内で chadoMakeupTickets がすでに変化している場合は二重付与を避けるため何もしない。
+ * この関数自身はチケットのみ更新し attendance は変えないので、再トリガーされても無限ループにならない。
+ */
+export const onChadoSaturdayAttendanceChanged = onDocumentUpdated(
+  "members/{memberId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (after.group !== "茶道教室" || after.chadoClass !== "土曜日") return;
+    if ((before.chadoMakeupTickets ?? 0) !== (after.chadoMakeupTickets ?? 0)) return;
+
+    const prevAtt: Record<string, string> = before.attendance ?? {};
+    const nextAtt: Record<string, string> = after.attendance ?? {};
+    const months = new Set([...Object.keys(prevAtt), ...Object.keys(nextAtt)]);
+    let delta = 0;
+    months.forEach((mk) => {
+      const p = prevAtt[mk];
+      const n = nextAtt[mk];
+      if (p !== "欠席" && n === "欠席") delta += 1;
+      if (p === "欠席" && n !== "欠席") delta -= 1;
+    });
+    if (delta === 0) return;
+
+    const ref = event.data!.after.ref;
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const current = (snap.data()?.chadoMakeupTickets as number | undefined) ?? 0;
+      tx.update(ref, { chadoMakeupTickets: Math.max(0, current + delta) });
+    });
+    console.log(
+      `振替チケットを自動調整しました memberId=${event.params.memberId} delta=${delta}`
+    );
+  }
+);

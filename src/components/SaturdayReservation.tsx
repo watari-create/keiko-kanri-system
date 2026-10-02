@@ -73,9 +73,16 @@ export default function SaturdayReservation({
 
   return (
     <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-1">土曜日クラスの予約</h2>
+      <h2 className="text-sm text-muted mb-3">土曜日クラスの予約</h2>
+      <div className="flex items-center justify-between bg-matcha-pale rounded-md px-4 py-3 mb-2">
+        <span className="text-sm text-matcha-deep">振替チケット</span>
+        <span className="text-matcha-deep">
+          <span className="text-2xl font-bold">{tickets}</span>
+          <span className="text-sm ml-1">枚</span>
+        </span>
+      </div>
       <p className="text-xs text-muted mb-3">
-        月の予約可能回数：月{quota}回　／　振替チケット：{tickets}枚
+        欠席された回数分の振替チケットが付与されます。月{quota}回の予約枠を使い切った後も、チケット1枚につき1回追加で予約できます。
       </p>
       {sessions.length === 0 && (
         <p className="text-xs text-muted">現在、予約可能な開催日はありません。本部にお問い合わせください。</p>

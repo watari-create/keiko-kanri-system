@@ -30,6 +30,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
@@ -1666,6 +1667,7 @@ export default function AdminPage() {
                 予約の受付・キャンセルは会員本人がマイページから行います（ここでは開催日の追加・担当講師や定員の設定・予約の手動修正ができます）。
                 開催後、予約者の出欠を「出席／欠席」で記録してください。「欠席」にすると振替チケットが1枚自動的に付与され、翌月以降の追加予約に使えるようになります。
               </p>
+              <MakeupTicketList members={members} onSelect={openMemberDetail} />
               <div className="flex items-center gap-2 mb-4">
                 <input
                   type="date"

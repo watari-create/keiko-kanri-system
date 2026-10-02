@@ -28,6 +28,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
@@ -415,6 +416,7 @@ export default function StaffPage() {
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
           <h2 className="font-bold mb-1">土曜日クラスの予約状況</h2>
           <p className="text-xs text-muted mb-3">当日以降の開催日と、午前・午後それぞれの予約者です</p>
+          <MakeupTicketList members={members} />
           <div className="space-y-3">
             {saturdaySessions.map((s) => (
               <div key={s.id} className="border border-line rounded p-3">
