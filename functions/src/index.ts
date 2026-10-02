@@ -67,6 +67,10 @@ const slackLicenseIssuedMentionUserId = defineString("SLACK_LICENSE_ISSUED_MENTI
 // 未設定でもエラーにはならず、メンションなしで通知するだけになる。
 const slackEntryFeeMentionUserId = defineString("SLACK_ENTRY_FEE_MENTION_USER_ID", { default: "" });
 
+// 茶道教室のお稽古3日前に参加者一覧を通知するSlackチャンネル（本部稽古）のID。
+// Botをこのチャンネルに /invite しておくこと。値は .env.sohenryu-okeiko-management に保存してある。
+const slackChadoChannelId = defineString("SLACK_CHADO_CHANNEL_ID");
+
 // 本部の共有GoogleカレンダーのカレンダーID（カレンダー設定の「カレンダーの統合」欄にある）。
 // デプロイ時にCLIから入力を求められる（.env.sohenryu-okeiko-management に保存される）。
 const hqCalendarId = defineString("HQ_CALENDAR_ID");
@@ -1775,5 +1779,162 @@ export const onChadoSaturdayAttendanceChanged = onDocumentUpdated(
     console.log(
       `振替チケットを自動調整しました memberId=${event.params.memberId} delta=${delta}`
     );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────
+// 茶道教室：お稽古3日前の参加者一覧をSlackへ通知
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 講師名とSlackユーザーIDの対応表（講師を追加するときはここに1行足すだけでよい）。
+ * keyword：土曜日クラスの担当講師名（管理画面で手入力）にこの文字列が含まれていれば、その講師とみなす。
+ * name：木曜日・日曜日クラスの固定講師名（CHADO_FIXED_TEACHERS）と一致させる。
+ */
+const CHADO_TEACHER_SLACK_MENTIONS: { name: string; keyword: string; slackUserIds: string[] }[] = [
+  { name: "阿部宗亜先生", keyword: "阿部", slackUserIds: ["U054136CZ28"] },
+  { name: "郷田家元教授", keyword: "郷田", slackUserIds: ["UFYCQMG1L", "U05NTNNSHE1"] },
+];
+
+// 木曜日・日曜日クラスの固定の時間帯・担当講師（src/lib/chadoClasses.ts の
+// CHADO_CLASS_TIME / CHADO_FIXED_TEACHERS と同じ値。functionsは別パッケージで
+// src/ を import できないため、変更するときは両方を揃えること）。
+const CHADO_RSVP_CLASS_INFO: Record<(typeof CHADO_RSVP_CLASSES)[number], { time: string; teacher: string }> = {
+  "木曜日": { time: "15:00〜17:00", teacher: "阿部宗亜先生" },
+  "日曜日": { time: "10:00〜12:00", teacher: "郷田家元教授" },
+};
+
+// 何日前に通知するか
+const CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE = 3;
+
+/**
+ * 講師名（複数可）から、メンションするSlackユーザーIDを重複なしで集める。
+ * 名前が未入力・対応表にない場合は何も追加しない（メンションなしで送る）。
+ */
+function chadoTeacherMentionIds(teacherNames: (string | undefined)[]): string[] {
+  const ids: string[] = [];
+  for (const teacherName of teacherNames) {
+    if (!teacherName) continue;
+    for (const t of CHADO_TEACHER_SLACK_MENTIONS) {
+      if (teacherName.includes(t.keyword) || teacherName === t.name) {
+        for (const id of t.slackUserIds) if (!ids.includes(id)) ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
+function joinNames(names: string[]): string {
+  return names.length > 0 ? names.join("、") : "なし";
+}
+
+/**
+ * 毎朝9:00（JST）に実行。今日（JST）から3日後が茶道教室の開催日であれば、
+ * 参加者一覧を本部稽古チャンネルにSlack通知する（開催日がなければ何も送らない）。
+ * ・土曜日クラス：chadoSaturdaySessions の予約状況（午前・午後）
+ * ・木曜日／日曜日クラス：meta/nextLessonDates の次回日が3日後と一致する場合のみ、members の rsvp
+ * 同じ開催日・クラスについて二重送信しないよう、meta/chadoParticipantNotice に送信済みを記録する。
+ */
+export const notifyChadoParticipants = onSchedule(
+  { schedule: "0 9 * * *", timeZone: "Asia/Tokyo", secrets: [slackBotToken] },
+  async () => {
+    const targetDateKey = addDaysToDateKey(todayKeyJST(), CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE);
+    const dateLabel = formatDateJp(targetDateKey);
+    const header = `【茶道教室】${dateLabel} お稽古の参加者（${CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE}日前のお知らせ）`;
+
+    const messages: { key: string; text: string }[] = [];
+
+    // 1. 土曜日クラス
+    const sessionSnap = await db.collection("chadoSaturdaySessions").where("date", "==", targetDateKey).get();
+    for (const sessionDoc of sessionSnap.docs) {
+      const data = sessionDoc.data() as {
+        amTeacher?: string;
+        pmTeacher?: string;
+        amCapacity?: number;
+        pmCapacity?: number;
+        amBookings?: ChadoSaturdayBookingDoc[];
+        pmBookings?: ChadoSaturdayBookingDoc[];
+      };
+      const slots = [
+        { label: "午前", teacher: data.amTeacher, capacity: data.amCapacity, bookings: data.amBookings ?? [] },
+        { label: "午後", teacher: data.pmTeacher, capacity: data.pmCapacity, bookings: data.pmBookings ?? [] },
+      ];
+      const mentionIds = chadoTeacherMentionIds(slots.map((s) => s.teacher));
+      const lines: string[] = [];
+      if (mentionIds.length > 0) lines.push(mentionIds.map((id) => `<@${id}>`).join(" "));
+      lines.push(header, "土曜日クラス");
+      for (const slot of slots) {
+        const capacity = slot.capacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
+        const teacher = slot.teacher?.trim() || "未定";
+        const names = slot.bookings.map((b) => b.memberName).filter(Boolean);
+        lines.push(
+          `■${slot.label}／担当：${teacher}`,
+          `予約（${slot.bookings.length}/${capacity}名）：${names.length > 0 ? names.join("、") : "予約なし"}`
+        );
+      }
+      messages.push({ key: `${targetDateKey}_土曜日_${sessionDoc.id}`, text: lines.join("\n") });
+    }
+
+    // 2. 木曜日・日曜日クラス（日程変更があるため曜日ではなく meta/nextLessonDates の次回日で判定）
+    const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
+    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+    const targetClasses = CHADO_RSVP_CLASSES.filter(
+      (c) => nextDates?.[nextLessonKey("茶道教室", c)]?.date?.slice(0, 10) === targetDateKey
+    );
+    if (targetClasses.length > 0) {
+      const membersSnap = await db.collection("members").where("group", "==", "茶道教室").get();
+      for (const chadoClass of targetClasses) {
+        const info = CHADO_RSVP_CLASS_INFO[chadoClass];
+        const attend: string[] = [];
+        const absent: string[] = [];
+        const unanswered: string[] = [];
+        for (const memberDoc of membersSnap.docs) {
+          const m = memberDoc.data();
+          if (m.chadoClass !== chadoClass) continue;
+          if ((m.status ?? "在籍") !== "在籍") continue;
+          const name = (m.name as string | undefined) ?? "（氏名未登録）";
+          const rsvp = m.rsvp ?? "未回答";
+          if (rsvp === "出席") attend.push(name);
+          else if (rsvp === "欠席") absent.push(name);
+          else unanswered.push(name);
+        }
+        const mentionIds = chadoTeacherMentionIds([info.teacher]);
+        const lines: string[] = [];
+        if (mentionIds.length > 0) lines.push(mentionIds.map((id) => `<@${id}>`).join(" "));
+        lines.push(
+          header,
+          `${chadoClass}クラス ${info.time}／担当：${info.teacher}`,
+          `出席（${attend.length}名）：${joinNames(attend)}`,
+          `欠席（${absent.length}名）：${joinNames(absent)}`,
+          `未回答（${unanswered.length}名）：${joinNames(unanswered)}`
+        );
+        messages.push({ key: `${targetDateKey}_${chadoClass}`, text: lines.join("\n") });
+      }
+    }
+
+    if (messages.length === 0) return; // 3日後に開催日なし
+
+    const token = slackBotToken.value();
+    const channel = slackChadoChannelId.value();
+    if (!token || !channel) {
+      console.warn("SLACK_BOT_TOKEN または SLACK_CHADO_CHANNEL_ID が未設定のため、Slack通知をスキップしました。");
+      return;
+    }
+
+    const noticeRef = db.doc("meta/chadoParticipantNotice");
+    const sentKeys = ((await noticeRef.get()).data()?.sentKeys as string[] | undefined) ?? [];
+    for (const msg of messages) {
+      if (sentKeys.includes(msg.key)) continue; // 送信済み
+      try {
+        const posted = await postSlackMessage(token, channel, msg.text);
+        if (!posted) continue;
+        sentKeys.push(msg.key);
+        console.log(`茶道教室の参加者一覧を送信しました key=${msg.key}`);
+      } catch (err) {
+        console.error("Slack通知の送信に失敗しました", err);
+      }
+    }
+    // 記録が増え続けないよう直近50件だけ残す
+    await noticeRef.set({ sentKeys: sentKeys.slice(-50), updatedAt: new Date().toISOString() });
   }
 );
