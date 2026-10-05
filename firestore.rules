@@ -91,15 +91,21 @@ service cloud.firestore {
         && request.resource.data.license == '入門'
         && request.resource.data.paymentStatus == '未納'
         && request.resource.data.rsvp == '未回答'
-        && request.resource.data.group in ['名月会', 'Gマダムの茶の湯講座']
+        && request.resource.data.group in ['名月会', 'Gマダムの茶の湯講座', '茶道教室']
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.email is string && request.resource.data.email.size() > 0
         && request.resource.data.keys().hasOnly([
              'id', 'name', 'nameKana', 'birthDate', 'guardian', 'guardianKana', 'grade',
              'occupation', 'otherLessons', 'healthNotes', 'emergencyContact', 'expectations',
              'group', 'groupCategory', 'license', 'joinDate', 'status', 'paymentMethod',
-             'paymentStatus', 'rsvp', 'email', 'phone', 'address', 'createdAt'
-           ]);
+             'paymentStatus', 'rsvp', 'email', 'phone', 'address', 'createdAt',
+             'gender', 'affiliation', 'chadoClass', 'chadoMonthlyQuota'
+           ])
+        // 茶道教室の曜日クラス・予約可能回数は、決められた値のみ許可
+        && (!('chadoClass' in request.resource.data)
+             || request.resource.data.chadoClass in ['土曜日', '木曜日', '日曜日'])
+        && (!('chadoMonthlyQuota' in request.resource.data)
+             || request.resource.data.chadoMonthlyQuota in [1, 2]);
     }
 
     // ---- counters（会員番号の自動採番。/enroll から更新される） ----

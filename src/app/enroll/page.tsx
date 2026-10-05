@@ -36,6 +36,20 @@ export default function EnrollPage() {
 
   const group = ENROLL_GROUPS[groupKey];
 
+  // showIf の条件を満たす項目だけを表示・必須チェックする（例：茶道教室のプランは土曜日クラスのみ）
+  const visibleFields = group.fields.filter(
+    (f) => !f.showIf || values[f.showIf.field] === f.showIf.equals
+  );
+
+  // プラン制の会（茶道教室）で、現在選ばれているプラン
+  const selectedPlan = group.plans
+    ? group.plans.options[
+        visibleFields.some((f) => f.id === group.plans!.fieldId) && values[group.plans.fieldId]
+          ? values[group.plans.fieldId]
+          : group.plans.defaultKey
+      ] ?? group.plans.options[group.plans.defaultKey]
+    : null;
+
   // URLに ?group=meigetsu のように付けてアクセスした場合、その会をあらかじめ選択しておく。
   // 会ごとの募集チラシ・SNS等から、案内文つきのページへ直接誘導するのに使う。
   useEffect(() => {
@@ -57,7 +71,7 @@ export default function EnrollPage() {
     e.preventDefault();
     setError(null);
 
-    for (const f of group.fields) {
+    for (const f of visibleFields) {
       if (f.required && !values[f.id]?.trim()) {
         setError(`「${f.label}」を入力してください。`);
         return;
@@ -66,7 +80,15 @@ export default function EnrollPage() {
 
     setSubmitting(true);
     try {
-      const isOneTime = values.paymentMethod === "都度払い";
+      const isOneTime = !group.plans && values.paymentMethod === "都度払い";
+      // 茶道教室のみ：曜日クラスと月の予約可能回数（土曜日クラスのみ）を保存する
+      const chadoFields: Record<string, unknown> = {};
+      if (group.title === "茶道教室" && values.chadoClass) {
+        chadoFields.chadoClass = values.chadoClass;
+        if (values.chadoClass === "土曜日" && selectedPlan?.monthlyQuota) {
+          chadoFields.chadoMonthlyQuota = selectedPlan.monthlyQuota;
+        }
+      }
       const paymentMethod: PaymentMethod = isOneTime ? "都度払い" : "月謝";
       const counterRef = doc(db, "counters", "members");
 
@@ -105,6 +127,7 @@ export default function EnrollPage() {
           email: values.email ?? "",
           phone: values.phone ?? "",
           address: values.address ?? "",
+          ...chadoFields,
           createdAt: serverTimestamp(),
         });
         return memberId;
@@ -131,11 +154,19 @@ export default function EnrollPage() {
         }
       }
 
-      setPayInfo({
-        label: isOneTime ? "お支払い（都度払い・今回分）" : "お支払い（月謝・自動払い）",
-        amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
-        link: isOneTime ? group.links.onetime : group.links.subscription,
-      });
+      setPayInfo(
+        selectedPlan
+          ? {
+              label: `お支払い（月謝・自動払い）　${selectedPlan.label}`,
+              amount: selectedPlan.amount,
+              link: selectedPlan.link,
+            }
+          : {
+              label: isOneTime ? "お支払い（都度払い・今回分）" : "お支払い（月謝・自動払い）",
+              amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
+              link: isOneTime ? group.links.onetime : group.links.subscription,
+            }
+      );
       setStep("confirm");
     } catch (err) {
       console.error(err);
@@ -190,7 +221,7 @@ export default function EnrollPage() {
               </select>
             </div>
 
-            {group.fields.map((f) => (
+            {visibleFields.map((f) => (
               <div key={f.id}>
                 <label className="block text-xs text-muted mb-1">
                   {f.label}
@@ -207,7 +238,7 @@ export default function EnrollPage() {
                     </option>
                     {f.options?.map((o) => (
                       <option key={o} value={o}>
-                        {o}
+                        {f.optionLabels?.[o] ?? o}
                       </option>
                     ))}
                   </select>
@@ -297,14 +328,28 @@ export default function EnrollPage() {
                     <span className="text-[11px] text-muted font-normal"> / 月</span>
                   )}
                 </div>
-                <a
-                  href={payInfo.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-center bg-white border border-hanko text-hanko rounded py-3 text-sm font-semibold"
-                >
-                  Squareでお支払いへ進む
-                </a>
+                {payInfo.link ? (
+                  <a
+                    href={payInfo.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-center bg-white border border-hanko text-hanko rounded py-3 text-sm font-semibold"
+                  >
+                    Squareでお支払いへ進む
+                  </a>
+                ) : (
+                  <p className="text-xs text-muted leading-relaxed">
+                    お支払い方法は、本部より別途ご案内いたします。
+                  </p>
+                )}
+              </div>
+            )}
+
+            {group.extraFeeNote && (
+              <div className="border border-line rounded p-4 mt-3 bg-[#FCFBF8]">
+                <div className="text-xs text-muted mb-1">{group.extraFeeNote.label}</div>
+                <div className="text-lg font-bold mb-2">{group.extraFeeNote.amount}</div>
+                <p className="text-xs text-muted leading-relaxed">{group.extraFeeNote.body}</p>
               </div>
             )}
 
