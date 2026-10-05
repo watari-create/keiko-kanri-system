@@ -154,8 +154,8 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
         "この度は茶道教室にご興味をお持ちいただきありがとうございます。\n" +
         "下記の入会申込フォームより、入会手続きを行っていただきますようお願いいたします。\n" +
         "入会の前に、下記より「入会の手引き（ご入会ハンドブック）」をご覧ください。",
-      guideUrl:
-        "/guides/chado-nyukai-handbook.pdf" // public/guides/ に置いたハンドブックPDF。更新時はこのファイルを差し替える,
+      // public/guides/ に置いたハンドブックPDF。更新時はこのファイルを差し替える
+      guideUrl: "/guides/chado-nyukai-handbook.pdf",
       guideLabel: "入会の手引き（ご入会ハンドブック）を見る",
     },
     fields: [
