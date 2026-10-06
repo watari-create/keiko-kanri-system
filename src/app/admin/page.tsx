@@ -472,7 +472,37 @@ export default function AdminPage() {
     (showChadoClass ? 3 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
+  // 茶道教室は、クラス（期）ごとに期の古い順で区切って表示する（募集クラスは開始日順で後ろに、曜日クラス未設定は最後）
   const memberSections = useMemo(() => {
+    if (group === "茶道教室") {
+      const keyed: { key: string; order: string; label: string; members: Member[] }[] = [
+        ...CHADO_CLASSES.map((c) => ({
+          key: `class:${c}`,
+          order: CHADO_LEDGER_DEFAULTS[c].startMonth || "9999",
+          label: `${chadoKiLabel(CHADO_LEDGER_DEFAULTS[c].startMonth)}・${CHADO_CLASS_LABEL[c]}クラス`,
+          members: [] as Member[],
+        })),
+        ...recruitClasses.map((rc) => ({
+          key: `cohort:${rc.id}`,
+          order: (rc.startDate || "9999").slice(0, 7),
+          label: `${rc.name}（募集クラス）`,
+          members: [] as Member[],
+        })),
+      ];
+      const unassigned: Member[] = [];
+      members.forEach((m) => {
+        const k = m.chadoCohortId ? `cohort:${m.chadoCohortId}` : m.chadoClass ? `class:${m.chadoClass}` : "";
+        const sec = keyed.find((x) => x.key === k);
+        if (sec) sec.members.push(m);
+        else unassigned.push(m);
+      });
+      const sections = keyed
+        .filter((x) => x.members.length > 0)
+        .sort((a, b) => a.order.localeCompare(b.order))
+        .map((x) => ({ label: x.label as string | null, members: x.members }));
+      if (unassigned.length > 0) sections.push({ label: "クラス未設定", members: unassigned });
+      return sections;
+    }
     if (group !== "雪月花") return [{ label: null as string | null, members }];
     const bySub = new Map<string, Member[]>();
     SOHEN_SUBGROUPS.forEach((s) => bySub.set(s, []));
@@ -488,7 +518,7 @@ export default function AdminPage() {
     })).filter((sec) => sec.members.length > 0);
     if (others.length > 0) sections.push({ label: "組未設定", members: others });
     return sections;
-  }, [group, members]);
+  }, [group, members, recruitClasses]);
 
   // 経理タブ：都度払い会員の月謝グリッド対象（休会・退会中は対象外。アンジェラさんのように休会中の会員は掲載しない）
   const sessionPaymentMembers = useMemo(
