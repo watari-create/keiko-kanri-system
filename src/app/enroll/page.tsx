@@ -10,11 +10,12 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDocs, runTransaction, serverTimestamp } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
-import type { PaymentMethod } from "@/types";
+import type { ChadoClassLedgerEntry, PaymentMethod } from "@/types";
+import { chadoEnrollOptionLabel, mergeChadoLedger } from "@/lib/chadoClassLedger";
 
 type Step = "form" | "confirm";
 
@@ -34,7 +35,40 @@ export default function EnrollPage() {
   const [familyEmail, setFamilyEmail] = useState("");
   const [familyLinkStatus, setFamilyLinkStatus] = useState<"idle" | "success" | "error">("idle");
 
-  const group = ENROLL_GROUPS[groupKey];
+  // 茶道教室：クラス台帳（chadoClassLedger）で「入会受付」がオンのクラスだけを選択肢にする。
+  // null = 読み込み中。台帳に定員が設定されていても在籍数は公開ページから読めないため、満席判定は管理画面側で受付をオフにして行う。
+  const [chadoOpenClasses, setChadoOpenClasses] = useState<ChadoClassLedgerEntry[] | null>(null);
+  useEffect(() => {
+    getDocs(collection(db, "chadoClassLedger"))
+      .then((snap) => {
+        const docs: Record<string, Partial<ChadoClassLedgerEntry>> = {};
+        snap.docs.forEach((d) => (docs[d.id] = d.data() as Partial<ChadoClassLedgerEntry>));
+        setChadoOpenClasses(mergeChadoLedger(docs).filter((e) => e.accepting));
+      })
+      .catch(() => setChadoOpenClasses([]));
+  }, []);
+
+  const baseGroup = ENROLL_GROUPS[groupKey];
+  const group =
+    baseGroup.title === "茶道教室"
+      ? {
+          ...baseGroup,
+          fields: baseGroup.fields.map((f) =>
+            f.id === "chadoClass"
+              ? {
+                  ...f,
+                  options: (chadoOpenClasses ?? []).map((e) => e.id),
+                  optionLabels: Object.fromEntries(
+                    (chadoOpenClasses ?? []).map((e) => [e.id, chadoEnrollOptionLabel(e.id)])
+                  ),
+                }
+              : f
+          ),
+        }
+      : baseGroup;
+  // 茶道教室で受付中のクラスが1つも無いときは、フォームの代わりに案内を表示する
+  const chadoClosed = baseGroup.title === "茶道教室" && chadoOpenClasses !== null && chadoOpenClasses.length === 0;
+  const chadoLoading = baseGroup.title === "茶道教室" && chadoOpenClasses === null;
 
   // showIf の条件を満たす項目だけを表示・必須チェックする（例：茶道教室のプランは土曜日クラスのみ）
   const visibleFields = group.fields.filter(
@@ -70,6 +104,7 @@ export default function EnrollPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (chadoClosed || chadoLoading) return;
 
     for (const f of visibleFields) {
       if (f.required && !values[f.id]?.trim()) {
@@ -221,7 +256,16 @@ export default function EnrollPage() {
               </select>
             </div>
 
-            {visibleFields.map((f) => (
+            {chadoClosed && (
+              <div className="bg-matcha-pale border border-line rounded p-4 text-sm leading-relaxed">
+                現在、茶道教室は新規のご入会を受け付けておりません。
+                <br />
+                次回の募集は公式LINE・ホームページでご案内いたします。
+              </div>
+            )}
+            {chadoLoading && <p className="text-xs text-muted">受付中のクラスを確認しています…</p>}
+
+            {!chadoClosed && !chadoLoading && visibleFields.map((f) => (
               <div key={f.id}>
                 <label className="block text-xs text-muted mb-1">
                   {f.label}
@@ -296,7 +340,7 @@ export default function EnrollPage() {
             {error && <p className="text-hanko text-xs">{error}</p>}
 
             <button
-              disabled={submitting}
+              disabled={submitting || chadoClosed || chadoLoading}
               className="w-full bg-matcha-deep text-white rounded py-3 text-sm disabled:opacity-50"
             >
               {submitting ? "送信中…" : "申し込む"}

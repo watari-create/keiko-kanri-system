@@ -11,6 +11,16 @@ export type GroupCategory = "宗徧流稽古" | "本部稽古" | "UCI";
 // 「日曜日」は日曜日の午前クラス（10:00〜12:00、既存データ互換のため値は据え置き）、「日曜日午後」は13:00〜15:00
 export type ChadoKyoshitsuClass = "土曜日" | "木曜日" | "日曜日" | "日曜日午後";
 
+// 茶道教室のクラス台帳（chadoClassLedger コレクション、doc id = 曜日クラス）。lib/chadoClassLedger.ts を参照
+export type ChadoStage = "入門" | "風炉薄茶点前";
+export interface ChadoClassLedgerEntry {
+  id: ChadoKyoshitsuClass;
+  startMonth: string; // 期の開始月（"YYYY-MM"、未設定は ""）
+  stage: ChadoStage; // 期として現在取り組んでいる段階
+  capacity: number | null; // 定員（null = 上限なし。土曜日は開催日ごとの枠定員とは別の、クラス全体の目安）
+  accepting: boolean; // 入会受付中か（オンのクラスだけが /enroll の「ご希望のクラス」に表示される）
+}
+
 export interface Member {
   id: string; // Firestore document ID = 会員番号
   name: string;

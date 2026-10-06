@@ -40,6 +40,7 @@ import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import OperationRules from "@/components/OperationRules";
+import ChadoClassLedger from "@/components/ChadoClassLedger";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
@@ -1642,6 +1643,8 @@ export default function AdminPage() {
               </div>
             )}
           </section>
+
+          {group === "茶道教室" && <ChadoClassLedger members={members} onSelect={openMemberDetail} />}
 
           {group === "茶道教室" && (
             <section className="bg-paper border border-line rounded-md p-5 mb-6">
