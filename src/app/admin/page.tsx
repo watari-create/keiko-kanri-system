@@ -41,6 +41,7 @@ import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import OperationRules from "@/components/OperationRules";
 import ChadoClassLedger from "@/components/ChadoClassLedger";
+import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
@@ -221,6 +222,14 @@ export default function AdminPage() {
     } catch {}
   }
   const [newSessionDate, setNewSessionDate] = useState("");
+  // 茶道教室「開催日・予約状況」：クラスと月のタブ（月は今月・来月）
+  const [sessionClass, setSessionClass] = useState<"土曜日" | "木曜日" | "日曜日">("土曜日");
+  const sessionMonths = useMemo(() => {
+    const d = new Date();
+    const fmt = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`;
+    return [fmt(d), fmt(new Date(d.getFullYear(), d.getMonth() + 1, 1))];
+  }, []);
+  const [sessionMonth, setSessionMonth] = useState(sessionMonths[0]);
 
   // 茶道教室：生徒ごとの進捗申し送り（会員詳細モーダルを開いている間のみ購読）
   const [studentNotes, setStudentNotes] = useState<ChadoStudentNote[]>([]);
@@ -1607,11 +1616,56 @@ export default function AdminPage() {
 
           {group === "茶道教室" && (
             <section className="bg-paper border border-line rounded-md p-5 mb-6">
-              <h2 className="font-bold mb-1">土曜日クラスの開催日・予約状況</h2>
+              <h2 className="font-bold mb-3">開催日・予約状況</h2>
+              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line mb-4">
+                <div className="flex gap-1" role="tablist" aria-label="クラス">
+                  {(["土曜日", "木曜日", "日曜日"] as const).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      role="tab"
+                      aria-selected={sessionClass === c}
+                      onClick={() => setSessionClass(c)}
+                      className={`text-sm px-4 pb-2 -mb-px border-b-2 ${
+                        sessionClass === c ? "border-matcha-deep text-matcha-deep font-bold" : "border-transparent text-muted"
+                      }`}
+                    >
+                      {c}クラス
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1 pb-2" role="tablist" aria-label="月">
+                  {sessionMonths.map((mk) => (
+                    <button
+                      key={mk}
+                      type="button"
+                      role="tab"
+                      aria-selected={sessionMonth === mk}
+                      onClick={() => setSessionMonth(mk)}
+                      className={`text-xs rounded-full px-3 py-1.5 border ${
+                        sessionMonth === mk
+                          ? "bg-matcha-deep border-matcha-deep text-white font-bold"
+                          : "bg-white border-line text-ink"
+                      }`}
+                    >
+                      {Number(mk.slice(5))}月
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {sessionClass !== "土曜日" ? (
+                <ChadoWeeklySessions
+                  chadoClass={sessionClass}
+                  month={sessionMonth}
+                  members={members}
+                  onSelect={openMemberDetail}
+                />
+              ) : (
+              <>
               <p className="text-xs text-muted mb-3">
-                開催日ごとに午前・午後の枠を管理します（各枠デフォルト定員3名）。担当講師は交代制のため、開催日ごとに入力してください。
-                予約の受付・キャンセルは会員本人がマイページから行います（ここでは開催日の追加・担当講師や定員の設定・予約の手動修正ができます）。
-                開催後、予約者の出欠を「出席／欠席」で記録してください。「欠席」にすると振替チケットが1枚自動的に付与され、翌月以降の追加予約に使えるようになります。
+                開催日ごとに午前・午後の枠を管理します（各枠デフォルト定員3名）。予約は会員本人がマイページから行います。
+                開催後に出欠を記録し、「欠席」にすると振替チケットが1枚自動で付与されます。
               </p>
               <MakeupTicketList members={members} onSelect={openMemberDetail} />
               <div className="flex items-center gap-2 mb-4">
@@ -1630,7 +1684,7 @@ export default function AdminPage() {
                 </button>
               </div>
               <div className="space-y-4">
-                {saturdaySessions.map((s) => (
+                {saturdaySessions.filter((s) => s.date.startsWith(sessionMonth)).map((s) => (
                   <div key={s.id} className="border border-line rounded-md p-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-semibold">{s.date}</span>
@@ -1725,10 +1779,12 @@ export default function AdminPage() {
                     </div>
                   </div>
                 ))}
-                {saturdaySessions.length === 0 && (
-                  <p className="text-xs text-muted text-center py-4">開催日はまだ登録されていません</p>
+                {saturdaySessions.filter((s) => s.date.startsWith(sessionMonth)).length === 0 && (
+                  <p className="text-xs text-muted text-center py-4">この月の開催日はまだ登録されていません</p>
                 )}
               </div>
+              </>
+              )}
             </section>
           )}
 

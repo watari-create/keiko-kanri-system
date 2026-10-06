@@ -3,7 +3,7 @@
 import type { Member } from "@/types";
 
 // 茶道教室・土曜日クラスの在籍会員ごとの振替チケット保有枚数一覧（管理画面・講師画面で共用）。
-// 保有枚数の多い順に並べ、0枚の会員も含めて全員を表示する。
+// 振替チケットを1枚以上持っている会員だけを、保有枚数の多い順に表示する。
 export default function MakeupTicketList({
   members,
   onSelect,
@@ -12,7 +12,13 @@ export default function MakeupTicketList({
   onSelect?: (m: Member) => void;
 }) {
   const rows = members
-    .filter((m) => m.group === "茶道教室" && m.chadoClass === "土曜日" && m.status === "在籍")
+    .filter(
+      (m) =>
+        m.group === "茶道教室" &&
+        m.chadoClass === "土曜日" &&
+        m.status === "在籍" &&
+        (m.chadoMakeupTickets ?? 0) > 0
+    )
     .sort(
       (a, b) =>
         (b.chadoMakeupTickets ?? 0) - (a.chadoMakeupTickets ?? 0) || a.id.localeCompare(b.id)
@@ -28,7 +34,7 @@ export default function MakeupTicketList({
         </span>
       </p>
       {rows.length === 0 ? (
-        <p className="text-xs text-muted">土曜日クラスの在籍会員はいません</p>
+        <p className="text-xs text-muted">振替チケットを持っている会員はいません</p>
       ) : (
         <table className="w-full text-xs">
           <thead>
