@@ -20,9 +20,15 @@ const SOHENRYU_MONTHLY_FEES: Record<string, number> = {
 };
 
 // 入会金。名月会は経理タブの「入会金」と同じ一律額、茶道教室は入会フォームの案内額。
+// 宗徧流稽古の会（萌芽会は未設定）はここで直接設定する。
 const ENTRY_FEES: Record<string, number> = {
   "名月会": 33000,
   "茶道教室": 15000,
+  "雪月花": 250000,
+  "不識会": 250000,
+  "星組": 150000,
+  "一喝会": 150000,
+  "紅月会": 30000,
 };
 
 export interface MemberFee {
