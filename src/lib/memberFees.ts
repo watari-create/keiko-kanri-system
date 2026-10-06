@@ -9,6 +9,16 @@ import type { Member } from "@/types";
 // enrollGroups.ts ではコメントアウトされている。金額が変わった場合はここも合わせて更新すること。
 const CHADO_TWICE_MONTHLY_FEE = 28000;
 
+// 宗徧流稽古の会の標準のお月謝（月額）。入会フォームの対象外のため、ここで直接設定する。
+const SOHENRYU_MONTHLY_FEES: Record<string, number> = {
+  "萌芽会": 15000,
+  "雪月花": 35000,
+  "不識会": 35000,
+  "星組": 35000,
+  "一喝会": 35000,
+  "紅月会": 20000,
+};
+
 // 入会金。名月会は経理タブの「入会金」と同じ一律額、茶道教室は入会フォームの案内額。
 const ENTRY_FEES: Record<string, number> = {
   "名月会": 33000,
@@ -52,6 +62,10 @@ export function memberFee(
       label: twice ? "月謝（月2回プラン）" : "月謝（月1回プラン）",
       custom: false,
     };
+  }
+
+  if (m.group in SOHENRYU_MONTHLY_FEES) {
+    return { amount: SOHENRYU_MONTHLY_FEES[m.group], unit: "月", label: "月謝", custom: false };
   }
 
   const config = Object.values(ENROLL_GROUPS).find((g) => g.title === m.group);
