@@ -207,6 +207,19 @@ export default function AdminPage() {
 
   // 茶道教室：土曜日クラスの開催日・予約状況（本部稽古エリア／茶道教室グループのみ購読）
   const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
+  // 出席簿の表示／非表示（ブラウザごとに記憶。初期は非表示）
+  const [showAttendance, setShowAttendance] = useState(false);
+  useEffect(() => {
+    try {
+      setShowAttendance(localStorage.getItem("admin.showAttendance") === "1");
+    } catch {}
+  }, []);
+  function toggleAttendance(v: boolean) {
+    setShowAttendance(v);
+    try {
+      localStorage.setItem("admin.showAttendance", v ? "1" : "0");
+    } catch {}
+  }
   const [newSessionDate, setNewSessionDate] = useState("");
 
   // 茶道教室：生徒ごとの進捗申し送り（会員詳細モーダルを開いている間のみ購読）
@@ -1551,14 +1564,40 @@ export default function AdminPage() {
       )}
 
       {(area === "宗徧流稽古" || area === "本部稽古" || area === "UCI") && (
-        <section className="bg-paper border border-line rounded-md p-5 mb-6">
-          <h2 className="font-bold mb-2">出席簿</h2>
-          <AttendanceGrid
-            sections={memberSections}
-            editable
-            isRowEditable={(m) => !isChadoSaturdayMember(m)}
-            onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
-          />
+        <section className="bg-paper border border-line rounded-md mb-6">
+          <div className="flex items-center gap-1 px-5 pt-4 border-b border-line" role="tablist" aria-label="出席簿の表示">
+            <h2 className="font-bold mr-4 pb-3">出席簿</h2>
+            {([
+              ["show", "表示"],
+              ["hide", "非表示"],
+            ] as const).map(([key, label]) => {
+              const on = (key === "show") === showAttendance;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => toggleAttendance(key === "show")}
+                  className={`text-sm px-4 pb-3 -mb-px border-b-2 ${
+                    on ? "border-matcha-deep text-matcha-deep font-bold" : "border-transparent text-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          {showAttendance && (
+            <div className="p-5">
+              <AttendanceGrid
+                sections={memberSections}
+                editable
+                isRowEditable={(m) => !isChadoSaturdayMember(m)}
+                onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
+              />
+            </div>
+          )}
         </section>
       )}
 

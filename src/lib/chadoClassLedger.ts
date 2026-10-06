@@ -11,7 +11,7 @@ export const CHADO_STAGES: ChadoStage[] = ["入門", "風炉薄茶点前"];
 export const CHADO_LEDGER_DEFAULTS: Record<ChadoKyoshitsuClass, Omit<ChadoClassLedgerEntry, "id">> = {
   "土曜日": { startMonth: "2026-04", stage: "風炉薄茶点前", capacity: null, accepting: false },
   "木曜日": { startMonth: "2026-09", stage: "入門", capacity: null, accepting: false },
-  "日曜日": { startMonth: "", stage: "入門", capacity: null, accepting: false },
+  "日曜日": { startMonth: "2026-08", stage: "入門", capacity: null, accepting: false },
   "日曜日午後": { startMonth: "2026-08", stage: "入門", capacity: null, accepting: false },
 };
 

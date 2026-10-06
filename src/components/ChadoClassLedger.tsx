@@ -140,13 +140,19 @@ export default function ChadoClassLedger({
                     <div className="text-sm font-bold">{e.stage}</div>
                   </div>
 
-                  <div className="w-24">
+                  <div className="w-28">
                     <div className="text-xs text-muted">在籍</div>
                     <div className="text-sm">
                       <span className="text-lg font-bold">{list.length}</span>
                       {e.capacity != null && <span className="text-muted"> / {e.capacity}</span>}
                       {full && <span className="ml-1 text-xs font-bold">満席</span>}
                     </div>
+                    {e.id === "土曜日" && list.length > 0 && (
+                      <div className="text-[11px] text-muted">
+                        月2回 {list.filter((m) => m.chadoMonthlyQuota === 2).length}・月1回{" "}
+                        {list.filter((m) => m.chadoMonthlyQuota !== 2).length}
+                      </div>
+                    )}
                   </div>
 
                   <div className="w-20">
@@ -241,6 +247,9 @@ export default function ChadoClassLedger({
                       className="text-xs border border-line rounded px-2.5 py-1.5 bg-white hover:border-matcha-deep"
                     >
                       {m.name}
+                      {sel.e.id === "土曜日" && (
+                        <span className="ml-1 text-muted">（月{m.chadoMonthlyQuota === 2 ? 2 : 1}回）</span>
+                      )}
                     </button>
                   </li>
                 ))}
