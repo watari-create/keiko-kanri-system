@@ -40,10 +40,10 @@ import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import OperationRules from "@/components/OperationRules";
-import ChadoClassLedger from "@/components/ChadoClassLedger";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
+import { CHADO_LEDGER_DEFAULTS, chadoKiLabel } from "@/lib/chadoClassLedger";
 import type {
   Member,
   LicenseRequest,
@@ -451,7 +451,7 @@ export default function AdminPage() {
     (showAffiliation ? 1 : 0) +
     (showBilling ? 2 : 0) +
     (showSohenDetails ? 3 : 0) +
-    (showChadoClass ? 2 : 0);
+    (showChadoClass ? 3 : 0);
 
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
   const memberSections = useMemo(() => {
@@ -1376,6 +1376,7 @@ export default function AdminPage() {
                 {showSohenDetails && <th className="pr-3">年齢</th>}
                 {showSohenDetails && <th className="pr-3">社中</th>}
                 {showChadoClass && <th className="pr-3">曜日クラス</th>}
+                {showChadoClass && <th className="pr-3">参加期</th>}
                 <th className="pr-3">許状段階</th>
                 <th className="pr-3">入会日</th>
                 {showBilling && (
@@ -1449,6 +1450,11 @@ export default function AdminPage() {
                           </option>
                         ))}
                       </select>
+                    </td>
+                  )}
+                  {showChadoClass && (
+                    <td className="pr-3 whitespace-nowrap text-xs">
+                      {m.chadoClass ? chadoKiLabel(CHADO_LEDGER_DEFAULTS[m.chadoClass].startMonth) : "—"}
                     </td>
                   )}
                   <td className="pr-3">{m.license ?? "—"}</td>
@@ -1612,8 +1618,6 @@ export default function AdminPage() {
 
       {area === "本部稽古" && (
         <>
-          {group === "茶道教室" && <ChadoClassLedger members={members} onSelect={openMemberDetail} />}
-
           {group === "茶道教室" && (
             <section className="bg-paper border border-line rounded-md p-5 mb-6">
               <h2 className="font-bold mb-3">開催日・予約状況</h2>

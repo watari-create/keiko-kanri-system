@@ -3,15 +3,14 @@
 // 茶道教室：木曜日・日曜日クラスの開催日・出欠状況（管理画面）。
 // 土曜日クラス（予約制・chadoSaturdaySessions）と同じ見た目で、開催日ごとに担当講師と出欠を管理する。
 // 木曜日・日曜日は予約制ではないため、そのクラスの在籍会員全員を並べ、
-// 次回のお稽古日（Googleカレンダー連携）と一致する開催日には、会員がマイページで回答した出欠（rsvp）を表示する。
-// 開催日ごとの出欠を記録すると、出席簿（members.attendance の月）にも反映する。
+// 各枠は、マイページからの出欠回答を「出席者／欠席者／未回答」に分けて表示する
+// （次回のお稽古日はrsvp、それ以外の日はその月の出欠＝members.attendance）。出欠の修正は出席簿で行う。
 // データ：chadoClassSessions コレクション（doc id = "YYYY-MM-DD_木曜日" など）
 
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   deleteDoc,
-  deleteField,
   doc,
   onSnapshot,
   query,
@@ -116,25 +115,6 @@ export default function ChadoWeeklySessions({
     await deleteDoc(doc(db, "chadoClassSessions", s.id));
   }
 
-  // 開催日ごとの出欠を記録し、出席簿（月）にも反映する。
-  // 同じ月に他の開催日の「出席」がある場合は、出席簿の「出席」を優先して残す。
-  async function setMark(s: WeeklySession, m: Member, value: Mark | "") {
-    const monthKey = s.date.slice(0, 7);
-    await updateDoc(doc(db, "chadoClassSessions", s.id), {
-      [`attendance.${m.id}`]: value === "" ? deleteField() : value,
-    });
-    const others = sessions
-      .filter((o) => o.id !== s.id && o.date.startsWith(monthKey))
-      .map((o) => o.attendance?.[m.id])
-      .filter(Boolean) as Mark[];
-    let monthValue: Mark | undefined;
-    if (value === "出席" || others.includes("出席")) monthValue = "出席";
-    else if (value === "欠席" || others.includes("欠席")) monthValue = "欠席";
-    await updateDoc(doc(db, "members", m.id), {
-      [`attendance.${monthKey}`]: monthValue ?? deleteField(),
-    });
-  }
-
   const dateWarn =
     newDate && new Date(`${newDate}T00:00:00`).getDay() !== WEEKDAY_INDEX[chadoClass]
       ? `${chadoClass}ではない日付です`
@@ -173,12 +153,15 @@ export default function ChadoWeeklySessions({
                 const teacherField = sl.key === "am" ? "amTeacher" : "pmTeacher";
                 const next = nextDates[nextLessonKey("茶道教室", sl.cls)]?.date?.slice(0, 10);
                 const isNext = next === s.date;
-                const marks = s.attendance ?? {};
-                const present = roster.filter((m) => marks[m.id] === "出席").length;
+                // 次回のお稽古日はマイページの回答（rsvp）、それ以外の日はその月の出欠（マイページ回答時に記録される）
+                const monthKey = s.date.slice(0, 7);
+                const answerOf = (m: Member): "出席" | "欠席" | "未回答" =>
+                  isNext ? m.rsvp ?? "未回答" : m.attendance?.[monthKey] ?? "未回答";
                 return (
                   <div key={sl.key}>
                     <p className="text-xs font-bold text-matcha-deep mb-1">
                       {CHADO_CLASS_LABEL[sl.cls]}クラス　{sl.label}
+                      {isNext && <span className="ml-2 text-[11px] font-normal text-muted">次回のお稽古</span>}
                     </p>
                     <input
                       key={`${s.id}-${teacherField}-${s[teacherField] ?? ""}`}
@@ -190,41 +173,40 @@ export default function ChadoWeeklySessions({
                         updateDoc(doc(db, "chadoClassSessions", s.id), { [teacherField]: e.target.value })
                       }
                     />
-                    <p className="text-xs text-muted mb-1">
-                      在籍 {roster.length}名・出席 {present}名
-                      {isNext && "（次回のお稽古：マイページの回答を表示）"}
+                    <p className="text-xs text-muted mb-2">
+                      マイページの出欠回答（在籍 {roster.length}名）
                     </p>
-                    <ul className="space-y-1">
-                      {roster.map((m) => (
-                        <li key={m.id} className="flex items-center justify-between text-xs gap-2">
-                          <span>
-                            {onSelect ? (
-                              <button
-                                className="text-left hover:underline underline-offset-2"
-                                onClick={() => onSelect(m)}
-                              >
-                                {m.name}
-                              </button>
-                            ) : (
-                              m.name
-                            )}
-                            {isNext && (
-                              <span className="text-muted ml-1">（回答：{m.rsvp ?? "未回答"}）</span>
-                            )}
-                          </span>
-                          <select
-                            className="border border-line rounded px-1 py-0.5 text-xs"
-                            value={marks[m.id] ?? ""}
-                            onChange={(e) => setMark(s, m, e.target.value as Mark | "")}
-                          >
-                            <option value="">未確認</option>
-                            <option value="出席">出席</option>
-                            <option value="欠席">欠席</option>
-                          </select>
-                        </li>
-                      ))}
-                      {roster.length === 0 && <li className="text-xs text-muted">在籍会員なし</li>}
-                    </ul>
+                    {([
+                      ["出席", "出席者", "text-matcha-deep"],
+                      ["欠席", "欠席者", "text-hanko"],
+                      ["未回答", "未回答", "text-muted"],
+                    ] as const).map(([key, label, color]) => {
+                      const list = roster.filter((m) => answerOf(m) === key);
+                      return (
+                        <div key={key} className="mb-2">
+                          <p className={`text-xs font-bold ${color}`}>
+                            {label} {list.length}名
+                          </p>
+                          {list.length === 0 ? (
+                            <p className="text-xs text-muted">—</p>
+                          ) : (
+                            <ul className="flex flex-wrap gap-1.5 mt-1">
+                              {list.map((m) => (
+                                <li key={m.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelect?.(m)}
+                                    className="text-xs border border-line rounded px-2 py-1 bg-white hover:border-matcha-deep"
+                                  >
+                                    {m.name}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
