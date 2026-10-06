@@ -10,11 +10,12 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, runTransaction, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
-import type { ChadoClassLedgerEntry, PaymentMethod } from "@/types";
+import type { ChadoClassLedgerEntry, ChadoRecruitClass, PaymentMethod } from "@/types";
+import { formatYenNum, recruitTimeLabel } from "@/lib/chadoRecruit";
 import { chadoEnrollOptionLabel, mergeChadoLedger } from "@/lib/chadoClassLedger";
 
 type Step = "form" | "confirm";
@@ -46,7 +47,18 @@ export default function EnrollPage() {
         setChadoOpenClasses(mergeChadoLedger(docs).filter((e) => e.accepting));
       })
       .catch(() => setChadoOpenClasses([]));
+    // 新規募集クラス（管理画面の「＋ 新規クラスを作成して募集」で作成、受付中のもの）
+    getDocs(query(collection(db, "chadoRecruitClasses"), where("accepting", "==", true)))
+      .then((snap) =>
+        setRecruitClasses(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as ChadoRecruitClass))
+            .sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? ""))
+        )
+      )
+      .catch(() => setRecruitClasses([]));
   }, []);
+  const [recruitClasses, setRecruitClasses] = useState<ChadoRecruitClass[] | null>(null);
 
   const baseGroup = ENROLL_GROUPS[groupKey];
   const group =
@@ -57,18 +69,32 @@ export default function EnrollPage() {
             f.id === "chadoClass"
               ? {
                   ...f,
-                  options: (chadoOpenClasses ?? []).map((e) => e.id),
-                  optionLabels: Object.fromEntries(
-                    (chadoOpenClasses ?? []).map((e) => [e.id, chadoEnrollOptionLabel(e.id)])
-                  ),
+                  options: [
+                    ...(recruitClasses ?? []).map((c) => `cohort:${c.id}`),
+                    ...(chadoOpenClasses ?? []).map((e) => e.id),
+                  ],
+                  optionLabels: Object.fromEntries([
+                    ...(recruitClasses ?? []).map((c) => [`cohort:${c.id}`, `${c.name}（${recruitTimeLabel(c)}）`]),
+                    ...(chadoOpenClasses ?? []).map((e) => [e.id, chadoEnrollOptionLabel(e.id)]),
+                  ]),
                 }
               : f
           ),
         }
       : baseGroup;
   // 茶道教室で受付中のクラスが1つも無いときは、フォームの代わりに案内を表示する
-  const chadoClosed = baseGroup.title === "茶道教室" && chadoOpenClasses !== null && chadoOpenClasses.length === 0;
-  const chadoLoading = baseGroup.title === "茶道教室" && chadoOpenClasses === null;
+  const chadoClosed =
+    baseGroup.title === "茶道教室" &&
+    chadoOpenClasses !== null &&
+    recruitClasses !== null &&
+    chadoOpenClasses.length === 0 &&
+    recruitClasses.length === 0;
+  const chadoLoading = baseGroup.title === "茶道教室" && (chadoOpenClasses === null || recruitClasses === null);
+  // 選択中の新規募集クラス
+  const selectedRecruit =
+    baseGroup.title === "茶道教室" && values.chadoClass?.startsWith("cohort:")
+      ? (recruitClasses ?? []).find((c) => `cohort:${c.id}` === values.chadoClass) ?? null
+      : null;
 
   // showIf の条件を満たす項目だけを表示・必須チェックする（例：茶道教室のプランは土曜日クラスのみ）
   const visibleFields = group.fields.filter(
@@ -118,7 +144,9 @@ export default function EnrollPage() {
       const isOneTime = !group.plans && values.paymentMethod === "都度払い";
       // 茶道教室のみ：曜日クラスと月の予約可能回数（土曜日クラスのみ）を保存する
       const chadoFields: Record<string, unknown> = {};
-      if (group.title === "茶道教室" && values.chadoClass) {
+      if (group.title === "茶道教室" && selectedRecruit) {
+        chadoFields.chadoCohortId = selectedRecruit.id;
+      } else if (group.title === "茶道教室" && values.chadoClass) {
         chadoFields.chadoClass = values.chadoClass;
         if (values.chadoClass === "土曜日" && selectedPlan?.monthlyQuota) {
           chadoFields.chadoMonthlyQuota = selectedPlan.monthlyQuota;
@@ -190,7 +218,13 @@ export default function EnrollPage() {
       }
 
       setPayInfo(
-        selectedPlan
+        selectedRecruit
+          ? {
+              label: `お支払い（月謝・自動払い）　${selectedRecruit.name}`,
+              amount: formatYenNum(selectedRecruit.monthlyFee),
+              link: selectedRecruit.paymentLink ?? "",
+            }
+          : selectedPlan
           ? {
               label: `お支払い（月謝・自動払い）　${selectedPlan.label}`,
               amount: selectedPlan.amount,
@@ -294,6 +328,16 @@ export default function EnrollPage() {
                     value={values[f.id] ?? ""}
                     onChange={(e) => setField(f.id, e.target.value)}
                   />
+                )}
+                {f.id === "chadoClass" && selectedRecruit && (
+                  <div className="mt-2 bg-matcha-pale border border-line rounded p-3 text-xs leading-relaxed">
+                    <div className="font-bold text-sm mb-1">{selectedRecruit.name}</div>
+                    <div>{recruitTimeLabel(selectedRecruit)}　講師：{selectedRecruit.teacher}</div>
+                    <div>開始日：{selectedRecruit.startDate}</div>
+                    {selectedRecruit.schedule && <div>日程：{selectedRecruit.schedule}</div>}
+                    <div>月謝：{formatYenNum(selectedRecruit.monthlyFee)}</div>
+                    {selectedRecruit.note && <p className="whitespace-pre-line mt-1">{selectedRecruit.note}</p>}
+                  </div>
                 )}
               </div>
             ))}

@@ -99,8 +99,13 @@ service cloud.firestore {
              'occupation', 'otherLessons', 'healthNotes', 'emergencyContact', 'expectations',
              'group', 'groupCategory', 'license', 'joinDate', 'status', 'paymentMethod',
              'paymentStatus', 'rsvp', 'email', 'phone', 'address', 'createdAt',
-             'gender', 'affiliation', 'chadoClass', 'chadoMonthlyQuota'
+             'gender', 'affiliation', 'chadoClass', 'chadoMonthlyQuota', 'chadoCohortId'
            ])
+        // 新規募集クラスからの入会は、受付中のクラスのみ許可
+        && (!('chadoCohortId' in request.resource.data)
+             || (request.resource.data.chadoCohortId is string
+                 && exists(/databases/$(database)/documents/chadoRecruitClasses/$(request.resource.data.chadoCohortId))
+                 && get(/databases/$(database)/documents/chadoRecruitClasses/$(request.resource.data.chadoCohortId)).data.accepting == true))
         // 茶道教室の曜日クラス・予約可能回数は、決められた値のみ許可
         && (!('chadoClass' in request.resource.data)
              || request.resource.data.chadoClass in ['土曜日', '木曜日', '日曜日'])
@@ -205,6 +210,12 @@ service cloud.firestore {
     // ---- chadoClassLedger（茶道教室：クラス台帳。期・段階・定員・入会受付の可否） ----
     // 入会フォーム（/enroll、未ログイン）が受付中のクラスを表示するため、読み取りは公開。
     match /chadoClassLedger/{classId} {
+      allow read: if true;
+      allow write: if isHonbu() || isStaffFor('茶道教室');
+    }
+
+    // ---- chadoRecruitClasses（茶道教室：新規募集クラス。管理画面で作成、入会フォームが受付中のクラスを表示） ----
+    match /chadoRecruitClasses/{classId} {
       allow read: if true;
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }

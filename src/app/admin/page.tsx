@@ -41,6 +41,7 @@ import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import OperationRules from "@/components/OperationRules";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
+import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { CHADO_LEDGER_DEFAULTS, chadoKiLabel } from "@/lib/chadoClassLedger";
@@ -56,6 +57,7 @@ import type {
   ChadoSaturdaySession,
   ChadoStudentNote,
   LineMessageLog,
+  ChadoRecruitClass,
 } from "@/types";
 
 type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "運用ルール";
@@ -208,6 +210,8 @@ export default function AdminPage() {
 
   // 茶道教室：土曜日クラスの開催日・予約状況（本部稽古エリア／茶道教室グループのみ購読）
   const [saturdaySessions, setSaturdaySessions] = useState<ChadoSaturdaySession[]>([]);
+  // 茶道教室：新規募集クラス（本部稽古エリア／茶道教室グループのみ購読）
+  const [recruitClasses, setRecruitClasses] = useState<ChadoRecruitClass[]>([]);
   // 出席簿の表示／非表示（ブラウザごとに記憶。初期は非表示）
   const [showAttendance, setShowAttendance] = useState(false);
   useEffect(() => {
@@ -289,6 +293,20 @@ export default function AdminPage() {
     const q = query(collection(db, "chadoSaturdaySessions"), orderBy("date"));
     return onSnapshot(q, (snap) => {
       setSaturdaySessions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoSaturdaySession)));
+    });
+  }, [area, group]);
+
+  useEffect(() => {
+    if (area !== "本部稽古" || group !== "茶道教室") {
+      setRecruitClasses([]);
+      return;
+    }
+    return onSnapshot(collection(db, "chadoRecruitClasses"), (snap) => {
+      setRecruitClasses(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as ChadoRecruitClass))
+          .sort((a, b) => (b.startDate ?? "").localeCompare(a.startDate ?? ""))
+      );
     });
   }, [area, group]);
 
@@ -1454,7 +1472,11 @@ export default function AdminPage() {
                   )}
                   {showChadoClass && (
                     <td className="pr-3 whitespace-nowrap text-xs">
-                      {m.chadoClass ? chadoKiLabel(CHADO_LEDGER_DEFAULTS[m.chadoClass].startMonth) : "—"}
+                      {m.chadoCohortId
+                        ? recruitClasses.find((c) => c.id === m.chadoCohortId)?.name ?? "募集クラス"
+                        : m.chadoClass
+                          ? chadoKiLabel(CHADO_LEDGER_DEFAULTS[m.chadoClass].startMonth)
+                          : "—"}
                     </td>
                   )}
                   <td className="pr-3">{m.license ?? "—"}</td>
@@ -1618,6 +1640,10 @@ export default function AdminPage() {
 
       {area === "本部稽古" && (
         <>
+          {group === "茶道教室" && (
+            <ChadoRecruitClasses classes={recruitClasses} members={members} onSelect={openMemberDetail} />
+          )}
+
           {group === "茶道教室" && (
             <section className="bg-paper border border-line rounded-md p-5 mb-6">
               <h2 className="font-bold mb-3">開催日・予約状況</h2>

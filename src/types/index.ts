@@ -13,6 +13,25 @@ export type ChadoKyoshitsuClass = "土曜日" | "木曜日" | "日曜日" | "日
 
 // 茶道教室のクラス台帳（chadoClassLedger コレクション、doc id = 曜日クラス）。lib/chadoClassLedger.ts を参照
 export type ChadoStage = "入門" | "風炉薄茶点前";
+// 茶道教室の新規募集クラス（chadoRecruitClasses コレクション）。管理画面の「＋ 新規クラスを作成して募集」で作成し、
+// 受付中（accepting）のクラスだけが入会フォーム（/enroll）の「ご希望のクラス」に表示される。
+export interface ChadoRecruitClass {
+  id: string;
+  name: string; // クラス名（例：2027年1月期 土曜日クラス）
+  weekday: string; // 曜日（例：土曜日）
+  timeStart: string; // "HH:MM"
+  timeEnd: string; // "HH:MM"
+  teacher: string; // 講師
+  startDate: string; // 開始日 "YYYY-MM-DD"
+  schedule: string; // 日程（自由記述。例：1/10, 2/14, 3/14 …）
+  capacity: number | null; // 定員（null = 上限なし）
+  monthlyFee: number; // 月謝（円）
+  paymentLink: string; // 月謝のSquare決済リンク（空なら「本部よりご案内」）
+  note: string; // 入会フォームに表示する案内（任意）
+  accepting: boolean; // 受付中
+  createdAt?: unknown;
+}
+
 export interface ChadoClassLedgerEntry {
   id: ChadoKyoshitsuClass;
   startMonth: string; // 期の開始月（"YYYY-MM"、未設定は ""）
@@ -60,6 +79,7 @@ export interface Member {
   chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日〈午前〉／日曜日午後）
   chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は1回として扱う）
   chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
+  chadoCohortId?: string; // 茶道教室のみ。新規募集クラス（chadoRecruitClasses のdoc id）から入会した場合の所属クラス
   lineUserId?: string; // 公式LINEアカウントと連携した際のLINEユーザーID（Cloud Functions経由で設定）
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
