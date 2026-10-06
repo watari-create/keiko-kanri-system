@@ -1911,10 +1911,6 @@ export default function AdminPage() {
             </div>
           </section>
 
-          {group === "茶道教室" && (
-            <ChadoRecruitClasses classes={recruitClasses} members={members} onSelect={openMemberDetail} />
-          )}
-
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">
               退会・休会・復会申請（
@@ -1959,6 +1955,10 @@ export default function AdminPage() {
               )}
             </div>
           </section>
+
+          {group === "茶道教室" && (
+            <ChadoRecruitClasses classes={recruitClasses} members={members} onSelect={openMemberDetail} />
+          )}
 
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <div className="flex items-center justify-between mb-1">
