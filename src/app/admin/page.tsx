@@ -989,7 +989,7 @@ export default function AdminPage() {
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-bold text-matcha-deep">稽古管理システム</h1>
+          <h1 className="text-xl font-bold text-matcha-deep">顧客会員管理システム</h1>
           <p className="text-xs text-muted">会員・出席・入金・許状の一元管理</p>
         </div>
 
