@@ -233,7 +233,7 @@ export default function OperationRules() {
               <li>UCIなどで山田長光名義の許状を出す場合は、点前の許状とは別の体系</li>
               <li>名簿の作り方・出席管理・経理は会ごとに決める</li>
             </ul>
-            <p className="text-xs text-muted mt-3">対象：侘び数寄道・鎌倉教室</p>
+            <p className="text-xs text-muted mt-3">対象：侘び数寄道</p>
           </div>
         </div>
         <p className="text-sm mt-4">
