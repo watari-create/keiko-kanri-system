@@ -39,6 +39,7 @@ import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
+import OperationRules from "@/components/OperationRules";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
@@ -55,8 +56,8 @@ import type {
   LineMessageLog,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理"];
+type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "運用ルール";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "運用ルール"];
 
 // 経理タブの対象グループ（名月会・Gマダムの茶の湯講座のみ）
 const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座"];
@@ -81,6 +82,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "経理": "名月会・G1マダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
   "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
+  "運用ルール": "お稽古の形態整理と新規開講ルール、記入用テンプレート、現行の各会の登録シート（担当者・料金・運営ルール）を確認できます。",
 };
 
 const LICENSE_STAGES: LicenseStatus[] = [
@@ -317,7 +319,7 @@ export default function AdminPage() {
   // 会員一覧をリアルタイム購読
   useEffect(() => {
     // 会員名簿タブはMemberRosterコンポーネント側で全会員を購読する
-    if (area === "スタッフ管理" || area === "会員名簿") {
+    if (area === "スタッフ管理" || area === "会員名簿" || area === "運用ルール") {
       setMembers([]);
       return;
     }
@@ -1305,7 +1307,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && (
+      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "運用ルール" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
@@ -1883,6 +1885,8 @@ export default function AdminPage() {
       )}
 
       {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} />}
+
+      {area === "運用ルール" && <OperationRules />}
 
       {area === "スタッフ管理" && (
         <section className="bg-paper border border-line rounded-md p-5">
