@@ -34,6 +34,40 @@ import type {
 
 const G1_GROUP = "Gマダムの茶の湯講座";
 const CHECKLIST_SECTION_ID = "page3-checklist";
+const ADDRESS_SECTION_ID = "addresses";
+
+// 発送先・関係先の住所録。Firestore にまだ無い場合はこの初期値を表示し、
+// 「編集する」→「保存する」で meta/g1ShippingDoc に保存される（以後は保存内容を表示）。
+// 区分に「発送先」を含む行は、発送記録（記入・印刷画面）の上部にも宛先として表示する。
+const DEFAULT_ADDRESS_SECTION: G1ShippingSection = {
+  id: ADDRESS_SECTION_ID,
+  title: "発送先・住所",
+  headers: ["区分", "宛名", "ご担当", "郵便番号", "住所", "電話番号"],
+  rows: [
+    {
+      cells: [
+        "G1マダム 発送先",
+        "東邦レオ株式会社 九段ハウス",
+        "長島あかり様",
+        "〒102-0073",
+        "東京都千代田区九段北1-15-9",
+        "070-2279-6093",
+      ],
+    },
+    {
+      cells: ["水戸幸商会", "水戸幸商会", "", "〒106-0031", "東京都港区西麻布3-17-4", "03-3470-4378"],
+    },
+  ],
+};
+
+// 住所セクションが無ければ、発送チェックリストの直後（無ければ先頭）に初期値を差し込む。
+function withAddressSection(sections: G1ShippingSection[]): G1ShippingSection[] {
+  if (sections.some((s) => s.id === ADDRESS_SECTION_ID)) return sections;
+  const next = [...sections];
+  const ci = next.findIndex((s) => s.id === CHECKLIST_SECTION_ID);
+  next.splice(ci + 1, 0, cloneSections([DEFAULT_ADDRESS_SECTION])[0]);
+  return next;
+}
 
 interface LogDraft {
   id: string | null; // null = まだ保存されていない新規記録
@@ -98,7 +132,7 @@ export default function G1ShippingPage() {
   useEffect(() => {
     return onSnapshot(doc(db, "meta", "g1ShippingDoc"), (snap) => {
       const data = snap.data() as G1ShippingDoc | undefined;
-      setSections(data?.sections ?? []);
+      setSections(withAddressSection(data?.sections ?? []));
       setUpdatedAt(data?.updatedAt ?? null);
       setUpdatedBy(data?.updatedBy ?? null);
     });
@@ -300,6 +334,9 @@ export default function G1ShippingPage() {
 
   // ---- 発送記録の記入・閲覧画面（一覧とは別画面として表示） ----
   if (logDraft) {
+    const destinations = (sections.find((s) => s.id === ADDRESS_SECTION_ID)?.rows ?? []).filter((r) =>
+      (r.cells[0] ?? "").includes("発送先")
+    );
     return (
       <div className="max-w-5xl mx-auto p-6 print:p-0 print:max-w-none">
         {!printingLog && (
@@ -362,6 +399,18 @@ export default function G1ShippingPage() {
               )}
             </label>
           </div>
+
+          {destinations.map((r, di) => (
+            <div key={di} className="border border-line rounded px-4 py-3 mb-4 text-sm leading-relaxed">
+              <div className="text-xs text-muted mb-1">{r.cells[0]}</div>
+              <div>{r.cells[3]}　{r.cells[4]}</div>
+              <div className="font-bold">
+                {r.cells[1]}
+                {r.cells[2] ? "　" + r.cells[2] : ""}
+              </div>
+              {r.cells[5] && <div>TEL：{r.cells[5]}</div>}
+            </div>
+          ))}
 
           <table className="w-full text-sm min-w-[640px]">
             <thead>
