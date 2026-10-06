@@ -1603,86 +1603,6 @@ export default function AdminPage() {
 
       {area === "本部稽古" && (
         <>
-          <section className="bg-paper border border-line rounded-md p-5 mb-6">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="font-bold">名月会 入門セット在庫</h2>
-              {!inventoryDraft && (
-                <button
-                  className="text-xs bg-paper border border-line rounded px-3 py-1.5"
-                  onClick={startInventoryEdit}
-                >
-                  編集する
-                </button>
-              )}
-            </div>
-            <p className="text-xs text-muted mb-3">
-              名月会で新規入門があるたびに、下の品目がすべて自動的に1つ減ります（0未満にはなりません）。
-              {inventory?.updatedAt &&
-                `　最終更新：${new Date(inventory.updatedAt).toLocaleString("ja-JP")}`}
-            </p>
-            {inventoryDraft ? (
-              <div className="space-y-2">
-                {inventoryDraft.map((row, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <input
-                      className="border border-line rounded px-2 py-1 text-sm flex-1"
-                      placeholder="品名（例：扇子）"
-                      value={row.name}
-                      onChange={(e) => updateInventoryRowName(i, e.target.value)}
-                    />
-                    <input
-                      className="border border-line rounded px-2 py-1 text-sm w-24"
-                      type="number"
-                      min={0}
-                      value={row.qty}
-                      onChange={(e) => updateInventoryRowQty(i, e.target.value)}
-                    />
-                    <button
-                      className="text-xs text-hanko"
-                      onClick={() => removeInventoryRow(i)}
-                    >
-                      削除
-                    </button>
-                  </div>
-                ))}
-                <div className="flex items-center gap-3 pt-2">
-                  <button
-                    className="text-xs bg-paper border border-line rounded px-3 py-1.5"
-                    onClick={addInventoryRow}
-                  >
-                    ＋ 品目を追加
-                  </button>
-                  <div className="flex-1" />
-                  <button
-                    className="text-xs border border-line text-muted rounded px-3 py-1.5"
-                    onClick={cancelInventoryEdit}
-                  >
-                    キャンセル
-                  </button>
-                  <button
-                    className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
-                    disabled={savingInventory}
-                    onClick={saveInventory}
-                  >
-                    {savingInventory ? "保存中…" : "保存する"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-6">
-                {Object.entries(inventory?.items ?? {}).map(([name, qty]) => (
-                  <div key={name} className="text-center">
-                    <div className="text-2xl font-bold text-matcha-deep">{qty}</div>
-                    <div className="text-xs text-muted">{name}</div>
-                  </div>
-                ))}
-                {Object.keys(inventory?.items ?? {}).length === 0 && (
-                  <p className="text-sm text-muted">まだ在庫が登録されていません（「編集する」から登録してください）</p>
-                )}
-              </div>
-            )}
-          </section>
-
           {group === "茶道教室" && <ChadoClassLedger members={members} onSelect={openMemberDetail} />}
 
           {group === "茶道教室" && (
@@ -1922,6 +1842,86 @@ export default function AdminPage() {
                 <p className="text-sm text-muted text-center py-4">対応中の申請はありません</p>
               )}
             </div>
+          </section>
+
+          <section className="bg-paper border border-line rounded-md p-5 mb-6">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-bold">名月会 入門セット在庫</h2>
+              {!inventoryDraft && (
+                <button
+                  className="text-xs bg-paper border border-line rounded px-3 py-1.5"
+                  onClick={startInventoryEdit}
+                >
+                  編集する
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-muted mb-3">
+              名月会で新規入門があるたびに、下の品目がすべて自動的に1つ減ります（0未満にはなりません）。
+              {inventory?.updatedAt &&
+                `　最終更新：${new Date(inventory.updatedAt).toLocaleString("ja-JP")}`}
+            </p>
+            {inventoryDraft ? (
+              <div className="space-y-2">
+                {inventoryDraft.map((row, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      className="border border-line rounded px-2 py-1 text-sm flex-1"
+                      placeholder="品名（例：扇子）"
+                      value={row.name}
+                      onChange={(e) => updateInventoryRowName(i, e.target.value)}
+                    />
+                    <input
+                      className="border border-line rounded px-2 py-1 text-sm w-24"
+                      type="number"
+                      min={0}
+                      value={row.qty}
+                      onChange={(e) => updateInventoryRowQty(i, e.target.value)}
+                    />
+                    <button
+                      className="text-xs text-hanko"
+                      onClick={() => removeInventoryRow(i)}
+                    >
+                      削除
+                    </button>
+                  </div>
+                ))}
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    className="text-xs bg-paper border border-line rounded px-3 py-1.5"
+                    onClick={addInventoryRow}
+                  >
+                    ＋ 品目を追加
+                  </button>
+                  <div className="flex-1" />
+                  <button
+                    className="text-xs border border-line text-muted rounded px-3 py-1.5"
+                    onClick={cancelInventoryEdit}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5 disabled:opacity-50"
+                    disabled={savingInventory}
+                    onClick={saveInventory}
+                  >
+                    {savingInventory ? "保存中…" : "保存する"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-6">
+                {Object.entries(inventory?.items ?? {}).map(([name, qty]) => (
+                  <div key={name} className="text-center">
+                    <div className="text-2xl font-bold text-matcha-deep">{qty}</div>
+                    <div className="text-xs text-muted">{name}</div>
+                  </div>
+                ))}
+                {Object.keys(inventory?.items ?? {}).length === 0 && (
+                  <p className="text-sm text-muted">まだ在庫が登録されていません（「編集する」から登録してください）</p>
+                )}
+              </div>
+            )}
           </section>
         </>
       )}
