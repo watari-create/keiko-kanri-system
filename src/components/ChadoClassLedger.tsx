@@ -1,19 +1,15 @@
 "use client";
 
 // 茶道教室：クラス台帳（管理画面・本部稽古／茶道教室）
-// 曜日クラスごとの期・段階・在籍数・定員・入会受付を一覧で管理する。
+// 一覧は見るだけ（期・クラス・時間・講師・段階・在籍・要フォロー・入会受付）にし、
+// 開始月・段階・定員の編集はクラスを選んだときの右側パネルで行う。
 // 「入会受付」をオンにしたクラスだけが入会フォーム（/enroll）の「ご希望のクラス」に表示される。
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { CHADO_CLASS_LABEL, CHADO_CLASS_TIME } from "@/lib/chadoClasses";
-import {
-  CHADO_STAGES,
-  chadoKiLabel,
-  chadoLedgerTeacher,
-  mergeChadoLedger,
-} from "@/lib/chadoClassLedger";
+import { CHADO_STAGES, chadoKiLabel, chadoLedgerTeacher, mergeChadoLedger } from "@/lib/chadoClassLedger";
 import type { ChadoClassLedgerEntry, ChadoKyoshitsuClass, ChadoStage, Member } from "@/types";
 
 const RECENT_DAYS = 30;
@@ -26,7 +22,7 @@ export default function ChadoClassLedger({
   onSelect?: (m: Member) => void;
 }) {
   const [docs, setDocs] = useState<Record<string, Partial<ChadoClassLedgerEntry>>>({});
-  const [selected, setSelected] = useState<ChadoKyoshitsuClass | null>(null);
+  const [selected, setSelected] = useState<ChadoKyoshitsuClass>("土曜日");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +35,6 @@ export default function ChadoClassLedger({
   }, []);
 
   const ledger = useMemo(() => mergeChadoLedger(docs), [docs]);
-
   const active = useMemo(
     () => members.filter((m) => m.group === "茶道教室" && m.status === "在籍" && !m.isTestAccount),
     [members]
@@ -52,7 +47,9 @@ export default function ChadoClassLedger({
   const unassigned = active.filter((m) => !m.chadoClass);
 
   const rows = ledger.map((e) => {
-    const list = active.filter((m) => m.chadoClass === e.id);
+    const list = active
+      .filter((m) => m.chadoClass === e.id)
+      .sort((a, b) => (a.joinDate ?? "").localeCompare(b.joinDate ?? ""));
     const recent = list.filter((m) => (m.joinDate ?? "") >= recentSince).length;
     const follow = list.filter(
       (m) => Object.values(m.attendance ?? {}).filter((v) => v === "欠席").length >= 2
@@ -60,8 +57,9 @@ export default function ChadoClassLedger({
     const full = e.capacity != null && list.length >= e.capacity;
     return { e, list, recent, follow, full };
   });
-
   const openCount = rows.filter((r) => r.e.accepting).length;
+  const followTotal = rows.reduce((t, r) => t + r.follow, 0);
+  const sel = rows.find((r) => r.e.id === selected) ?? rows[0];
 
   async function save(id: ChadoKyoshitsuClass, patch: Partial<ChadoClassLedgerEntry>) {
     const current = ledger.find((e) => e.id === id)!;
@@ -78,147 +76,164 @@ export default function ChadoClassLedger({
     }
   }
 
-  const sel = rows.find((r) => r.e.id === selected) ?? null;
-
   return (
-    <section className="bg-paper border border-line rounded-md p-5 mb-6">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-        <h2 className="font-bold">クラス台帳</h2>
-        <span className="text-xs text-muted">
-          入会受付中 {openCount} クラス ／ 在籍 {active.length} 名
-        </span>
+    <section className="mb-6">
+      <div className="flex flex-wrap items-end justify-between gap-2 mb-3">
+        <div>
+          <h2 className="text-lg font-bold">クラス台帳</h2>
+          <p className="text-xs text-muted mt-0.5">「入会受付」をオンにしたクラスだけが入会フォームに表示されます。</p>
+        </div>
       </div>
-      <p className="text-xs text-muted mb-3">
-        曜日クラスごとの期（開始月）・段階・定員・入会受付を管理します。「入会受付」をオンにしたクラスだけが入会フォームの「ご希望のクラス」に表示されます（定員に達したクラスは表示されません）。
-        在籍数は会員名簿の「曜日クラス」から自動で集計しています。
-      </p>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[860px]">
-          <thead>
-            <tr className="text-xs text-muted border-b border-line text-left">
-              <th className="py-2 pr-3 font-normal">期 ／ クラス</th>
-              <th className="py-2 pr-3 font-normal">時間</th>
-              <th className="py-2 pr-3 font-normal">講師</th>
-              <th className="py-2 pr-3 font-normal">段階</th>
-              <th className="py-2 pr-3 font-normal">在籍 ／ 定員</th>
-              <th className="py-2 pr-3 font-normal">要フォロー</th>
-              <th className="py-2 font-normal">入会受付</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ e, list, recent, follow, full }) => (
-              <tr
-                key={e.id}
-                className={`border-b border-line align-top ${selected === e.id ? "bg-matcha-pale" : ""}`}
-              >
-                <td className="py-3 pr-3">
-                  <input
-                    type="month"
-                    className="text-xs border border-line rounded px-1.5 py-0.5 mb-1 bg-white"
-                    value={e.startMonth}
-                    aria-label={`${CHADO_CLASS_LABEL[e.id]}クラスの開始月`}
-                    onChange={(ev) => save(e.id, { startMonth: ev.target.value })}
-                  />
-                  <div className="text-[11px] text-muted">{chadoKiLabel(e.startMonth)}</div>
+      {/* 概況 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {[
+          { label: "入会受付中", value: openCount, unit: "クラス" },
+          { label: "在籍", value: active.length, unit: "名" },
+          { label: `新規（直近${RECENT_DAYS}日）`, value: rows.reduce((t, r) => t + r.recent, 0), unit: "名" },
+          { label: "要フォロー（欠席2回以上）", value: followTotal, unit: "名" },
+        ].map((k) => (
+          <div key={k.label} className="bg-paper border border-line rounded-lg px-4 py-3">
+            <div className="text-xs text-muted">{k.label}</div>
+            <div className="text-2xl font-bold">
+              {k.value}
+              <span className="text-sm font-normal ml-1">{k.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-4 items-start">
+        {/* 一覧 */}
+        <div className="flex-[999_1_560px] min-w-0 bg-paper border border-line rounded-lg overflow-hidden">
+          <ul>
+            {rows.map(({ e, list, recent, follow, full }) => {
+              const isSel = sel.e.id === e.id;
+              return (
+                <li
+                  key={e.id}
+                  className={`flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4 border-b border-line last:border-b-0 ${
+                    isSel ? "bg-matcha-pale" : ""
+                  }`}
+                >
                   <button
                     type="button"
-                    className="font-bold text-matcha-deep underline-offset-2 hover:underline text-left"
-                    onClick={() => setSelected(selected === e.id ? null : e.id)}
+                    onClick={() => setSelected(e.id)}
+                    className="flex-[1_1_220px] min-w-0 text-left"
                   >
-                    {CHADO_CLASS_LABEL[e.id]}クラス
+                    <div className="text-xs text-muted">{chadoKiLabel(e.startMonth)}</div>
+                    <div className="text-base font-bold">
+                      {CHADO_CLASS_LABEL[e.id]}クラス
+                      {recent > 0 && (
+                        <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[#FBEEE3] text-[#7A3A0E] align-middle">
+                          新規 {recent}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted mt-0.5">
+                      {CHADO_CLASS_TIME[e.id]}　{chadoLedgerTeacher(e.id)}
+                    </div>
                   </button>
-                  {recent > 0 && (
-                    <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[#FBEEE3] text-[#7A3A0E] font-bold">
-                      新規 {recent}
-                    </span>
-                  )}
-                </td>
-                <td className="py-3 pr-3 whitespace-nowrap">{CHADO_CLASS_TIME[e.id]}</td>
-                <td className="py-3 pr-3">{chadoLedgerTeacher(e.id)}</td>
-                <td className="py-3 pr-3">
-                  <select
-                    className="text-sm border border-line rounded px-2 py-1 bg-white"
-                    value={e.stage}
-                    aria-label={`${CHADO_CLASS_LABEL[e.id]}クラスの段階`}
-                    onChange={(ev) => save(e.id, { stage: ev.target.value as ChadoStage })}
-                  >
-                    {CHADO_STAGES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="py-3 pr-3 whitespace-nowrap">
-                  <span className="font-bold text-base">{list.length}</span> ／{" "}
-                  <input
-                    key={`${e.id}-${e.capacity ?? ""}`}
-                    type="number"
-                    min={0}
-                    className="w-16 text-sm border border-line rounded px-1.5 py-0.5 bg-white"
-                    defaultValue={e.capacity ?? ""}
-                    placeholder="上限なし"
-                    aria-label={`${CHADO_CLASS_LABEL[e.id]}クラスの定員（空欄で上限なし）`}
-                    onBlur={(ev) => {
-                      const v = ev.target.value.trim();
-                      const cap = v === "" ? null : Math.max(0, Number(v));
-                      if (cap !== e.capacity) save(e.id, { capacity: cap });
-                    }}
-                  />
-                  {full && <div className="text-[11px] font-bold mt-1">満席</div>}
-                </td>
-                <td className="py-3 pr-3">
-                  {follow > 0 ? <span className="font-bold text-[#7A3A0E]">{follow}名</span> : <span className="text-muted">—</span>}
-                </td>
-                <td className="py-3">
+
+                  <div className="w-28">
+                    <div className="text-xs text-muted">段階</div>
+                    <div className="text-sm font-bold">{e.stage}</div>
+                  </div>
+
+                  <div className="w-24">
+                    <div className="text-xs text-muted">在籍</div>
+                    <div className="text-sm">
+                      <span className="text-lg font-bold">{list.length}</span>
+                      {e.capacity != null && <span className="text-muted"> / {e.capacity}</span>}
+                      {full && <span className="ml-1 text-xs font-bold">満席</span>}
+                    </div>
+                  </div>
+
+                  <div className="w-20">
+                    <div className="text-xs text-muted">要フォロー</div>
+                    <div className={`text-sm ${follow > 0 ? "font-bold text-[#7A3A0E]" : "text-muted"}`}>
+                      {follow > 0 ? `${follow}名` : "—"}
+                    </div>
+                  </div>
+
                   <button
                     type="button"
                     aria-pressed={e.accepting}
+                    aria-label={`${CHADO_CLASS_LABEL[e.id]}クラスの入会受付`}
                     disabled={saving === e.id}
                     onClick={() => save(e.id, { accepting: !e.accepting })}
                     className={`inline-flex items-center gap-2 h-9 pl-1.5 pr-3 rounded-full text-xs font-bold border disabled:opacity-50 ${
-                      e.accepting
-                        ? "bg-matcha-deep border-matcha-deep text-white"
-                        : "bg-white border-line text-ink"
+                      e.accepting ? "bg-matcha-deep border-matcha-deep text-white" : "bg-white border-line text-ink"
                     }`}
                   >
                     <span className={`w-6 h-6 rounded-full ${e.accepting ? "bg-white" : "bg-line"}`} />
-                    {e.accepting ? "受付中" : "停止"}
+                    {e.accepting ? "受付中" : "受付停止"}
                   </button>
-                  <div className="text-[11px] text-muted mt-1">
-                    {!e.accepting ? "フォーム非表示" : full ? "満席のため非表示" : "フォームに表示中"}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
-      {error && <p className="text-hanko text-xs mt-2">{error}</p>}
-      {unassigned.length > 0 && (
-        <p className="text-xs text-[#7A3A0E] mt-3">
-          曜日クラスが未設定の在籍会員が {unassigned.length} 名います（{unassigned.map((m) => m.name).join("、")}）。会員詳細から設定すると台帳に反映されます。
-        </p>
-      )}
-      <p className="text-[11px] text-muted mt-2">
-        新規＝直近{RECENT_DAYS}日以内の入会／要フォロー＝出席簿の欠席が2回以上の会員
-      </p>
+        {/* 選択中のクラス */}
+        <aside className="flex-[1_1_300px] min-w-0 bg-paper border border-line rounded-lg p-5 space-y-4">
+          <div>
+            <div className="text-xs text-muted">{chadoKiLabel(sel.e.startMonth)}</div>
+            <h3 className="text-lg font-bold">{CHADO_CLASS_LABEL[sel.e.id]}クラス</h3>
+            <div className="text-xs text-muted">
+              {CHADO_CLASS_TIME[sel.e.id]}　{chadoLedgerTeacher(sel.e.id)}
+            </div>
+          </div>
 
-      {sel && (
-        <div className="mt-4 border-t border-line pt-4">
-          <h3 className="text-sm font-bold mb-2">
-            {chadoKiLabel(sel.e.startMonth)}・{CHADO_CLASS_LABEL[sel.e.id]}クラスの在籍会員（{sel.list.length}名）
-          </h3>
-          {sel.list.length === 0 ? (
-            <p className="text-xs text-muted">在籍会員はいません。</p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {sel.list
-                .slice()
-                .sort((a, b) => (a.joinDate ?? "").localeCompare(b.joinDate ?? ""))
-                .map((m) => (
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <label className="col-span-2 block">
+              <span className="block text-xs text-muted mb-1">開始月（期）</span>
+              <input
+                type="month"
+                className="w-full border border-line rounded px-2 py-1.5 bg-white"
+                value={sel.e.startMonth}
+                onChange={(ev) => save(sel.e.id, { startMonth: ev.target.value })}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs text-muted mb-1">段階</span>
+              <select
+                className="w-full border border-line rounded px-2 py-1.5 bg-white"
+                value={sel.e.stage}
+                onChange={(ev) => save(sel.e.id, { stage: ev.target.value as ChadoStage })}
+              >
+                {CHADO_STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="block text-xs text-muted mb-1">定員（空欄＝上限なし）</span>
+              <input
+                key={`${sel.e.id}-${sel.e.capacity ?? ""}`}
+                type="number"
+                min={0}
+                className="w-full border border-line rounded px-2 py-1.5 bg-white"
+                defaultValue={sel.e.capacity ?? ""}
+                placeholder="上限なし"
+                onBlur={(ev) => {
+                  const v = ev.target.value.trim();
+                  const cap = v === "" ? null : Math.max(0, Number(v));
+                  if (cap !== sel.e.capacity) save(sel.e.id, { capacity: cap });
+                }}
+              />
+            </label>
+          </div>
+
+          <div>
+            <div className="text-xs text-muted mb-2">在籍会員（{sel.list.length}名）</div>
+            {sel.list.length === 0 ? (
+              <p className="text-xs text-muted">在籍会員はいません。</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {sel.list.map((m) => (
                   <li key={m.id}>
                     <button
                       type="button"
@@ -226,13 +241,20 @@ export default function ChadoClassLedger({
                       className="text-xs border border-line rounded px-2.5 py-1.5 bg-white hover:border-matcha-deep"
                     >
                       {m.name}
-                      <span className="text-muted ml-1">（入会 {m.joinDate || "—"}）</span>
                     </button>
                   </li>
                 ))}
-            </ul>
-          )}
-        </div>
+              </ul>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      {error && <p className="text-hanko text-xs mt-2">{error}</p>}
+      {unassigned.length > 0 && (
+        <p className="text-xs text-[#7A3A0E] mt-3">
+          曜日クラス未設定の在籍会員：{unassigned.map((m) => m.name).join("、")}（会員詳細で設定すると台帳に入ります）
+        </p>
       )}
     </section>
   );
