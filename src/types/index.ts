@@ -8,7 +8,8 @@ export type Rsvp = "出席" | "欠席" | "未回答";
 export type GroupCategory = "宗徧流稽古" | "本部稽古" | "UCI";
 
 // 茶道教室の曜日クラス（土曜日は月2回・午前午後の定員制、木曜日・日曜日は毎週・人数上限なし）
-export type ChadoKyoshitsuClass = "土曜日" | "木曜日" | "日曜日";
+// 「日曜日」は日曜日の午前クラス（10:00〜12:00、既存データ互換のため値は据え置き）、「日曜日午後」は13:00〜15:00
+export type ChadoKyoshitsuClass = "土曜日" | "木曜日" | "日曜日" | "日曜日午後";
 
 export interface Member {
   id: string; // Firestore document ID = 会員番号
@@ -46,7 +47,7 @@ export interface Member {
   paymentStatus?: "済" | "未納";
   nextBillingDate?: string;
   rsvp?: Rsvp;
-  chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日）
+  chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日〈午前〉／日曜日午後）
   chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は1回として扱う）
   chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
   lineUserId?: string; // 公式LINEアカウントと連携した際のLINEユーザーID（Cloud Functions経由で設定）

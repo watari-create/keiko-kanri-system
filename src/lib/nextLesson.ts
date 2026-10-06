@@ -24,7 +24,8 @@ export function nextLessonKey(group: string, chadoClass?: string): string {
 }
 
 // 茶道教室のうち、次回のお稽古日を表示するクラス（土曜日クラスは予約制のため対象外）
-export const CHADO_NEXT_LESSON_CLASSES = ["木曜日", "日曜日"] as const;
+export const CHADO_NEXT_LESSON_CLASSES = ["木曜日", "日曜日", "日曜日午後"] as const;
+const CHADO_NEXT_LESSON_LABEL: Record<string, string> = { "日曜日": "日曜日午前" };
 
 // 管理画面・スタッフ画面用：会単位で次回のお稽古を一覧にする。
 // 茶道教室は木曜日・日曜日クラスをそれぞれ返す。
@@ -36,7 +37,7 @@ export function nextLessonsForGroup(
   if (group === "茶道教室") {
     return CHADO_NEXT_LESSON_CLASSES.flatMap((c) => {
       const info = dates[nextLessonKey(group, c)];
-      return info ? [{ label: `${c}クラス`, info }] : [];
+      return info ? [{ label: `${CHADO_NEXT_LESSON_LABEL[c] ?? c}クラス`, info }] : [];
     });
   }
   const info = dates[group];

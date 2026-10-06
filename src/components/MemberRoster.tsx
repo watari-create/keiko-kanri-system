@@ -1,4 +1,5 @@
 "use client";
+import { CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 
 // 会員名簿（全会横断）。本部の管理画面「会員名簿」タブで使う。
 // membersコレクションを全件購読し、氏名・年齢・入会日・所属の会・クラス／組・状態と、
@@ -16,7 +17,7 @@ import type { Member } from "@/types";
 // 表示順（宗徧流稽古 → 本部稽古 → UCI → その他）
 const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS, ...UCI_GROUPS];
 const SUBGROUP_ORDER = ["雪組", "月組", "花組"];
-const CHADO_CLASS_ORDER = ["土曜日", "木曜日", "日曜日"];
+const CHADO_CLASS_ORDER = ["土曜日", "木曜日", "日曜日", "日曜日午後"];
 
 
 // 年齢：生年月日があれば今日時点で計算し、なければ登録済みの年齢を使う
@@ -34,7 +35,7 @@ export function memberAge(m: Pick<Member, "birthDate" | "age">, today = new Date
 
 // クラス・組の表示（茶道教室は曜日クラス、雪月花は雪組・月組・花組）
 export function memberClassLabel(m: Pick<Member, "chadoClass" | "subGroup">): string {
-  if (m.chadoClass) return `${m.chadoClass}クラス`;
+  if (m.chadoClass) return `${CHADO_CLASS_LABEL[m.chadoClass] ?? m.chadoClass}クラス`;
   return m.subGroup ?? "";
 }
 

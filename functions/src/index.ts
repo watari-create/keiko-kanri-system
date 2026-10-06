@@ -1172,7 +1172,13 @@ async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
       if (group === "茶道教室") {
         const chadoClass = chadoClassOfEvent(title, date);
         if (!chadoClass) continue;
-        key = nextLessonKey(group, chadoClass);
+        // 日曜日はカレンダー上1つの予定で午前・午後の両クラスを兼ねるため、両方のキーに保存する
+        const classes = chadoClass === "日曜日" ? (["日曜日", "日曜日午後"] as const) : [chadoClass];
+        for (const c of classes) {
+          const k = nextLessonKey(group, c);
+          if (!result[k]) result[k] = { date, title };
+        }
+        continue;
       }
       // itemsは開始日時順なので、最初に見つかったものが一番近い予定
       if (!result[key]) result[key] = { date, title };
@@ -1182,7 +1188,14 @@ async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
 }
 
 // 茶道教室のうち、出欠ボタンで管理する（次回のお稽古日を表示する）曜日クラス
-const CHADO_RSVP_CLASSES = ["木曜日", "日曜日"] as const;
+const CHADO_RSVP_CLASSES = ["木曜日", "日曜日", "日曜日午後"] as const;
+
+// 表示用のクラス名（「日曜日」は午前クラス。値は既存データ互換のため据え置き）
+const CHADO_RSVP_CLASS_LABEL: Record<(typeof CHADO_RSVP_CLASSES)[number], string> = {
+  "木曜日": "木曜日",
+  "日曜日": "日曜日午前",
+  "日曜日午後": "日曜日午後",
+};
 
 /**
  * meta/nextLessonDates.dates のキー。茶道教室だけはクラスごとに
@@ -1200,7 +1213,7 @@ function nextLessonKey(group: string, chadoClass?: string): string {
  *  別の曜日の予定が「次回」として表示されてしまうのを防ぐ）。
  * 開催日が木曜・日曜以外の場合のみ、振替などのためにタイトルで判定する（土曜を含むものは土曜日クラス扱いで対象外）。
  */
-function chadoClassOfEvent(title: string, date: string): (typeof CHADO_RSVP_CLASSES)[number] | null {
+function chadoClassOfEvent(title: string, date: string): "木曜日" | "日曜日" | null {
   // 終日予定（YYYY-MM-DD）はUTC0時として解釈されるが、+9時間しても同じ日付のままなので問題ない
   const t = Date.parse(date);
   if (!Number.isNaN(t)) {
@@ -1844,6 +1857,7 @@ const CHADO_TEACHER_SLACK_MENTIONS: { name: string; keyword: string; slackUserId
 const CHADO_RSVP_CLASS_INFO: Record<(typeof CHADO_RSVP_CLASSES)[number], { time: string; teacher: string }> = {
   "木曜日": { time: "15:00〜17:00", teacher: "阿部宗亜先生" },
   "日曜日": { time: "10:00〜12:00", teacher: "郷田家元教授" },
+  "日曜日午後": { time: "13:00〜15:00", teacher: "郷田家元教授" },
 };
 
 // 何日前に通知するか
@@ -1945,7 +1959,7 @@ export const notifyChadoParticipants = onSchedule(
         if (mentionIds.length > 0) lines.push(mentionIds.map((id) => `<@${id}>`).join(" "));
         lines.push(
           header,
-          `${chadoClass}クラス ${info.time}／担当：${info.teacher}`,
+          `${CHADO_RSVP_CLASS_LABEL[chadoClass]}クラス ${info.time}／担当：${info.teacher}`,
           `出席（${attend.length}名）：${joinNames(attend)}`,
           `欠席（${absent.length}名）：${joinNames(absent)}`,
           `未回答（${unanswered.length}名）：${joinNames(unanswered)}`

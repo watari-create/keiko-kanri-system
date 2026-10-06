@@ -14,7 +14,7 @@ import { currentMonthKey } from "@/lib/fiscalMonths";
 import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
 import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
 import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
-import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME } from "@/lib/chadoClasses";
+import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME, CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import SaturdayReservation from "@/components/SaturdayReservation";
 import type { Member, LeaveRequestType } from "@/types";
 
@@ -277,7 +277,7 @@ export default function MyPage() {
             <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
             {member.group === "茶道教室" && member.chadoClass && (
               <p className="text-xs text-matcha-deep mb-1">
-                {member.chadoClass}クラス　{CHADO_CLASS_TIME[member.chadoClass]}
+                {CHADO_CLASS_LABEL[member.chadoClass]}クラス　{CHADO_CLASS_TIME[member.chadoClass]}
                 {CHADO_FIXED_TEACHERS[member.chadoClass] &&
                   `　担当：${CHADO_FIXED_TEACHERS[member.chadoClass]}`}
               </p>

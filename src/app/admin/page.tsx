@@ -41,7 +41,7 @@ import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import OperationRules from "@/components/OperationRules";
 import { memberFee, formatYen } from "@/lib/memberFees";
-import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
+import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
   Member,
   LicenseRequest,
@@ -1422,7 +1422,7 @@ export default function AdminPage() {
                         <option value="">（未設定）</option>
                         {CHADO_CLASSES.map((c) => (
                           <option key={c} value={c}>
-                            {c}
+                            {CHADO_CLASS_LABEL[c]}
                           </option>
                         ))}
                       </select>
@@ -2133,7 +2133,7 @@ export default function AdminPage() {
                     <option value="">（未設定）</option>
                     {CHADO_CLASSES.map((c) => (
                       <option key={c} value={c}>
-                        {c}
+                        {CHADO_CLASS_LABEL[c]}
                       </option>
                     ))}
                   </select>
