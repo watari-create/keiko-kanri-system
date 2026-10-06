@@ -38,6 +38,8 @@ import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
+import MemberRoster from "@/components/MemberRoster";
+import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
   Member,
@@ -53,8 +55,8 @@ import type {
   LineMessageLog,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "経理" | "スタッフ管理";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "経理", "スタッフ管理"];
+type Area = "宗徧流稽古" | "本部稽古" | "経理" | "会員名簿" | "スタッフ管理";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "経理", "会員名簿", "スタッフ管理"];
 
 // 経理タブの対象グループ（名月会・Gマダムの茶の湯講座のみ）
 const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座"];
@@ -74,6 +76,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "本部稽古":
     "名月会・茶道教室・G1マダムの茶の湯講座が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
   "経理": "名月会・G1マダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
+  "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
 };
 
@@ -309,7 +312,8 @@ export default function AdminPage() {
 
   // 会員一覧をリアルタイム購読
   useEffect(() => {
-    if (area === "スタッフ管理") {
+    // 会員名簿タブはMemberRosterコンポーネント側で全会員を購読する
+    if (area === "スタッフ管理" || area === "会員名簿") {
       setMembers([]);
       return;
     }
@@ -384,6 +388,8 @@ export default function AdminPage() {
   const showBilling = area === "本部稽古";
   const showAffiliation = false; // UCIタブ廃止（経理タブに置き換え）により所属列は使用しない
   const showSohenDetails = area === "宗徧流稽古";
+  // 会員詳細モーダル用：開いている会員の会が宗徧流稽古かどうか（会員名簿タブから全会の会員を開けるため、タブではなく会員の所属で判定）
+  const detailIsSohen = selectedMember ? areaForGroup(selectedMember.group) === "宗徧流稽古" : showSohenDetails;
   const showGuardian = !showSohenDetails && groupHasGuardianField(group); // 宗徧流稽古・茶道教室・Gマダムの茶の湯講座は保護者欄を使わない
   const showChadoClass = area === "本部稽古" && group === "茶道教室"; // 茶道教室のみ、曜日クラス列を表示
 
@@ -1292,7 +1298,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {area !== "スタッフ管理" && area !== "経理" && (
+      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
@@ -1869,6 +1875,8 @@ export default function AdminPage() {
         </>
       )}
 
+      {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} />}
+
       {area === "スタッフ管理" && (
         <section className="bg-paper border border-line rounded-md p-5">
           <div className="flex items-center justify-between mb-3">
@@ -2019,7 +2027,7 @@ export default function AdminPage() {
                   onChange={(e) => setDraft({ ...draft, sotomei: e.target.value })}
                 />
               </Field>
-              {showSohenDetails && (
+              {detailIsSohen && (
                 <Field label="支部">
                   <input
                     className="input"
@@ -2028,7 +2036,7 @@ export default function AdminPage() {
                   />
                 </Field>
               )}
-              {showSohenDetails && (
+              {detailIsSohen && (
                 <Field label="社中（代表）">
                   <input
                     className="input"
@@ -2050,7 +2058,7 @@ export default function AdminPage() {
                   }
                 />
               </Field>
-              {showSohenDetails && (
+              {detailIsSohen && (
                 <Field label="組（雪月花のみ）">
                   <select
                     className="input"
@@ -2090,7 +2098,7 @@ export default function AdminPage() {
                   <option>女性</option>
                 </select>
               </Field>
-              {area !== "宗徧流稽古" && groupHasGuardianField(selectedMember.group) && (
+              {!detailIsSohen && groupHasGuardianField(selectedMember.group) && (
                 <Field label="保護者名">
                   <input
                     className="input"
@@ -2214,6 +2222,28 @@ export default function AdminPage() {
                   </Field>
                 </>
               )}
+              <Field label="お月謝（個別設定）">
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  className="input"
+                  placeholder={(() => {
+                    const std = memberFee({ ...selectedMember, ...draft, monthlyFee: null });
+                    return std.amount !== null ? `標準：${formatYen(std.amount)}／${std.unit}` : "金額を入力（円）";
+                  })()}
+                  value={draft.monthlyFee ?? ""}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      monthlyFee: e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
+                    })
+                  }
+                />
+                <p className="text-[11px] text-muted mt-1">
+                  空欄なら会の標準額を使います。ご家族割引など標準額と異なる場合のみ入力してください（都度払いは1回あたり）。
+                </p>
+              </Field>
               <Field label="メールアドレス">
                 <input
                   className="input"

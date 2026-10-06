@@ -40,6 +40,9 @@ export interface Member {
   joinDate: string; // YYYY-MM-DD
   status: MemberStatus;
   paymentMethod?: PaymentMethod; // 本部稽古のみ
+  // 会員ごとの個別のお月謝（都度払いの場合は1回あたり）。未設定（またはnull）の場合は会の標準額（lib/memberFees.ts）を使う。
+  // ご家族割引や、標準額の決まっていない宗徧流稽古の会などで設定する。
+  monthlyFee?: number | null;
   paymentStatus?: "済" | "未納";
   nextBillingDate?: string;
   rsvp?: Rsvp;
