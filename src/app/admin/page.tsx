@@ -1671,10 +1671,6 @@ export default function AdminPage() {
       {area === "本部稽古" && (
         <>
           {group === "茶道教室" && (
-            <ChadoRecruitClasses classes={recruitClasses} members={members} onSelect={openMemberDetail} />
-          )}
-
-          {group === "茶道教室" && (
             <section className="bg-paper border border-line rounded-md p-5 mb-6">
               <h2 className="font-bold mb-3">開催日・予約状況</h2>
               <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line mb-4">
@@ -1914,6 +1910,10 @@ export default function AdminPage() {
               )}
             </div>
           </section>
+
+          {group === "茶道教室" && (
+            <ChadoRecruitClasses classes={recruitClasses} members={members} onSelect={openMemberDetail} />
+          )}
 
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">
