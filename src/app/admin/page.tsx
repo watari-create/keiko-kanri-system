@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 // 本部用の管理画面。
-// 上部タブで「宗徧流稽古／本部稽古／経理／スタッフ管理」の4エリアを切り替える。
+// 上部タブで「宗徧流稽古／本部稽古／UCI／経理／会員名簿／スタッフ管理」のエリアを切り替える。
 // ①名簿の閲覧・編集 ②許状申請の進行 ③退会・休会・復会申請の承認 ④新着通知（申請中の案件一覧）
 // ⑤スタッフ（世話人・講師）アカウントの管理 をFirestore連携で実装している。
 // 出席簿・入金確認などは、同じパターン（Firestoreのコレクションを読み書きするだけ）で追加できる。
@@ -36,7 +36,7 @@ import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/l
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
+import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import { memberFee, formatYen } from "@/lib/memberFees";
@@ -55,8 +55,8 @@ import type {
   LineMessageLog,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "経理" | "会員名簿" | "スタッフ管理";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "経理", "会員名簿", "スタッフ管理"];
+type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理"];
 
 // 経理タブの対象グループ（名月会・Gマダムの茶の湯講座のみ）
 const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座"];
@@ -65,6 +65,7 @@ const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座"];
 const AREA_GROUPS: Record<string, string[]> = {
   "宗徧流稽古": ["雪月花", "一喝会", "星組", "不識会", "萌芽会", "紅月会"],
   "本部稽古": ["名月会", "茶道教室", "Gマダムの茶の湯講座"],
+  "UCI": UCI_GROUPS,
 };
 
 // 雪月花は雪組・月組・花組の3つの実際のグループを束ねたもの。名簿はこの3区分で表示する。
@@ -75,6 +76,8 @@ const AREA_DESCRIPTION: Record<Area, string> = {
     "直門（雪月花・一喝会・星組・不識会）・萌芽会・紅月会が対象。世話人が名簿と出席を管理します。",
   "本部稽古":
     "名月会・茶道教室・G1マダムの茶の湯講座が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
+  "UCI":
+    "侘び数寄道・鎌倉教室が対象。宗徧流稽古と同じく、CSVで名簿を管理し出席を記録します（許状申請・経理は対象外）。",
   "経理": "名月会・G1マダムの茶の湯講座が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
   "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
@@ -111,7 +114,8 @@ function toDraft(m: Member): MemberDraft {
 function areaForGroup(g: string): Area {
   if (AREA_GROUPS["本部稽古"].includes(g)) return "本部稽古";
   if (AREA_GROUPS["宗徧流稽古"].includes(g)) return "宗徧流稽古";
-  // UCIタブ廃止（経理タブに置き換え）に伴い、どちらにも属さない会は本部稽古にフォールバックする
+  if (AREA_GROUPS["UCI"].includes(g)) return "UCI";
+  // どのエリアにも属さない会は本部稽古にフォールバックする
   return "本部稽古";
 }
 
@@ -386,10 +390,13 @@ export default function AdminPage() {
   const notificationCount = pendingLicense.length + pendingLeave.length;
 
   const showBilling = area === "本部稽古";
-  const showAffiliation = false; // UCIタブ廃止（経理タブに置き換え）により所属列は使用しない
-  const showSohenDetails = area === "宗徧流稽古";
-  // 会員詳細モーダル用：開いている会員の会が宗徧流稽古かどうか（会員名簿タブから全会の会員を開けるため、タブではなく会員の所属で判定）
-  const detailIsSohen = selectedMember ? areaForGroup(selectedMember.group) === "宗徧流稽古" : showSohenDetails;
+  const showAffiliation = false; // 所属列は使用しない
+  // UCIは宗徧流稽古と同じ運用（支部・年齢・社中の列、CSVインポート）
+  const showSohenDetails = area === "宗徧流稽古" || area === "UCI";
+  // 会員詳細モーダル用：開いている会員の会が宗徧流稽古（またはUCI）かどうか（会員名簿タブから全会の会員を開けるため、タブではなく会員の所属で判定）
+  const detailIsSohen = selectedMember
+    ? ["宗徧流稽古", "UCI"].includes(areaForGroup(selectedMember.group))
+    : showSohenDetails;
   const showGuardian = !showSohenDetails && groupHasGuardianField(group); // 宗徧流稽古・茶道教室・Gマダムの茶の湯講座は保護者欄を使わない
   const showChadoClass = area === "本部稽古" && group === "茶道教室"; // 茶道教室のみ、曜日クラス列を表示
 
@@ -1310,7 +1317,7 @@ export default function AdminPage() {
               >
                 {loadingFamilyCandidates ? "検出中…" : "ご家族候補を検出"}
               </button>
-              {area === "宗徧流稽古" && (
+              {(area === "宗徧流稽古" || area === "UCI") && (
                 <button
                   className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5"
                   onClick={() => setShowCsvImport(true)}
@@ -1540,7 +1547,7 @@ export default function AdminPage() {
         </section>
       )}
 
-      {(area === "宗徧流稽古" || area === "本部稽古") && (
+      {(area === "宗徧流稽古" || area === "本部稽古" || area === "UCI") && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
           <h2 className="font-bold mb-2">出席簿</h2>
           <AttendanceGrid
@@ -2553,7 +2560,7 @@ export default function AdminPage() {
         open={showCsvImport}
         onClose={() => setShowCsvImport(false)}
         group={group}
-        groupCategory="宗徧流稽古"
+        groupCategory={area === "UCI" ? "UCI" : "宗徧流稽古"}
         existingMembers={members}
       />
 

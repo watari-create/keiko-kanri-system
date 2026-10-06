@@ -27,7 +27,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { isHonbuKeikoGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
+import { isHonbuKeikoGroup, isUciGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
@@ -260,7 +260,7 @@ export default function StaffPage() {
     <div className="max-w-3xl mx-auto p-6">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-lg font-bold text-matcha-deep">
-          {isHonbuKeikoGroup(group) ? "本部稽古" : "宗徧流稽古"}
+          {isHonbuKeikoGroup(group) ? "本部稽古" : isUciGroup(group) ? "UCI" : "宗徧流稽古"}
           （{account.role === "sewanin" ? "世話人" : "講師"}）
         </h1>
         <div className="flex items-center gap-3">

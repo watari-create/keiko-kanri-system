@@ -9,12 +9,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { groupDisplayName, HONBU_KEIKO_GROUPS, SOHENRYU_KEIKO_GROUPS } from "@/lib/areas";
+import { groupDisplayName, HONBU_KEIKO_GROUPS, SOHENRYU_KEIKO_GROUPS, UCI_GROUPS } from "@/lib/areas";
 import { memberFee, entryFeeFor, formatYen } from "@/lib/memberFees";
 import type { Member, MemberStatus } from "@/types";
 
-// 表示順（宗徧流稽古 → 本部稽古 → その他）
-const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS];
+// 表示順（宗徧流稽古 → 本部稽古 → UCI → その他）
+const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS, ...UCI_GROUPS];
 const SUBGROUP_ORDER = ["雪組", "月組", "花組"];
 const CHADO_CLASS_ORDER = ["土曜日", "木曜日", "日曜日"];
 
