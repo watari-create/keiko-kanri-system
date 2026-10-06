@@ -11,14 +11,13 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { groupDisplayName, HONBU_KEIKO_GROUPS, SOHENRYU_KEIKO_GROUPS, UCI_GROUPS } from "@/lib/areas";
 import { memberFee, entryFeeFor, formatYen } from "@/lib/memberFees";
-import type { Member, MemberStatus } from "@/types";
+import type { Member } from "@/types";
 
 // 表示順（宗徧流稽古 → 本部稽古 → UCI → その他）
 const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS, ...UCI_GROUPS];
 const SUBGROUP_ORDER = ["雪組", "月組", "花組"];
 const CHADO_CLASS_ORDER = ["土曜日", "木曜日", "日曜日"];
 
-type StatusFilter = MemberStatus | "すべて";
 
 // 年齢：生年月日があれば今日時点で計算し、なければ登録済みの年齢を使う
 export function memberAge(m: Pick<Member, "birthDate" | "age">, today = new Date()): number | null {
@@ -62,7 +61,6 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   const [all, setAll] = useState<Member[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [groupFilter, setGroupFilter] = useState("すべて");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("在籍");
   const [keyword, setKeyword] = useState("");
   const [familyOnly, setFamilyOnly] = useState(false);
   const [includeTest, setIncludeTest] = useState(false);
@@ -85,14 +83,14 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   function familyOf(m: Member) {
     return (m.linkedMemberIds ?? [])
       .filter((id) => id !== m.id)
+      // 在籍していないご家族は表示しない（削除済みなどで引けない会員は番号のみ表示）
+      .filter((id) => { const f = byId.get(id); return !f || f.status === "在籍"; })
       .map((id) => {
         const f = byId.get(id);
         return {
           id,
           name: f?.name ?? "（不明）",
           group: f?.group ?? "",
-          classLabel: f ? memberClassLabel(f) : "",
-          status: f?.status,
           otherGroup: !!f && f.group !== m.group,
         };
       });
@@ -103,12 +101,13 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
     return all
       .filter((m) => includeTest || !m.isTestAccount)
       .filter((m) => groupFilter === "すべて" || m.group === groupFilter)
-      .filter((m) => statusFilter === "すべて" || m.status === statusFilter)
+      // 名簿は在籍会員のみ（休会・退会は表示しない）
+      .filter((m) => m.status === "在籍")
       .filter((m) => {
         if (!familyOnly) return true;
         return (m.linkedMemberIds ?? []).some((id) => {
           const f = byId.get(id);
-          return f && f.group !== m.group;
+          return f && f.status === "在籍" && f.group !== m.group;
         });
       })
       .filter((m) => {
@@ -126,7 +125,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           a.id.localeCompare(b.id)
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, byId, groupFilter, statusFilter, keyword, familyOnly, includeTest]);
+  }, [all, byId, groupFilter, keyword, familyOnly, includeTest]);
 
   // 会ごとの人数（絞り込み後）
   const countsByGroup = useMemo(() => {
@@ -140,9 +139,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
     let monthlyTotal = 0;
     let perSessionCount = 0;
     let unsetCount = 0;
-    rows
-      .filter((m) => m.status === "在籍")
-      .forEach((m) => {
+    rows.forEach((m) => {
         const f = memberFee(m);
         if (f.amount === null) unsetCount += 1;
         else if (f.unit === "回") perSessionCount += 1;
@@ -154,7 +151,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   function downloadCsv() {
     const header = [
       "会員番号", "氏名", "フリガナ", "年齢", "生年月日", "入会日",
-      "所属の会", "クラス・組", "状態", "お支払い方法", "お月謝（円）", "単位", "お月謝の区分",
+      "所属の会", "お支払い方法", "お月謝（円）", "単位", "お月謝の区分",
       "入会金（円）", "入会金の入金", "ご家族（会員番号・氏名・所属）", "ご家族が他の会に所属",
     ];
     const lines = rows.map((m) => {
@@ -162,10 +159,10 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
       const fee = memberFee(m);
       return [
         m.id, m.name, m.nameKana, memberAge(m), m.birthDate, m.joinDate,
-        groupDisplayName(m.group), memberClassLabel(m), m.status,
+        groupDisplayName(m.group),
         m.paymentMethod ?? "", fee.amount, fee.amount === null ? "" : `${fee.unit}`, fee.label,
         entryFeeFor(m.group), m.entryFeeStatus ?? "",
-        fam.map((f) => `${f.id} ${f.name}（${groupDisplayName(f.group)}${f.classLabel ? "・" + f.classLabel : ""}）`).join(" / "),
+        fam.map((f) => `${f.id} ${f.name}（${groupDisplayName(f.group)}）`).join(" / "),
         fam.some((f) => f.otherGroup) ? "あり" : "",
       ].map(csvCell).join(",");
     });
@@ -201,12 +198,6 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           {groupOptions.map((g) => (
             <option key={g} value={g}>{groupDisplayName(g)}</option>
           ))}
-        </select>
-        <select className="border border-line rounded px-2 py-1.5" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
-          <option value="在籍">在籍のみ</option>
-          <option value="休会">休会のみ</option>
-          <option value="退会">退会のみ</option>
-          <option value="すべて">すべての状態</option>
         </select>
         <input
           className="border border-line rounded px-2 py-1.5 w-56"
@@ -257,8 +248,6 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
                 <th className="py-2 pr-3 font-normal text-right">年齢</th>
                 <th className="py-2 pr-3 font-normal">入会日</th>
                 <th className="py-2 pr-3 font-normal">所属の会</th>
-                <th className="py-2 pr-3 font-normal">クラス・組</th>
-                <th className="py-2 pr-3 font-normal">状態</th>
                 <th className="py-2 pr-3 font-normal text-right">お月謝</th>
                 <th className="py-2 font-normal">ご家族</th>
               </tr>
@@ -288,20 +277,6 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
                     <td className="py-2 pr-3 text-right whitespace-nowrap">{age === null ? "—" : `${age}歳`}</td>
                     <td className="py-2 pr-3 whitespace-nowrap">{m.joinDate || "—"}</td>
                     <td className="py-2 pr-3 whitespace-nowrap">{groupDisplayName(m.group)}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap">{memberClassLabel(m) || "—"}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap">
-                      <span
-                        className={`text-xs rounded-full px-2 py-0.5 ${
-                          m.status === "在籍"
-                            ? "bg-matcha-pale text-matcha-deep"
-                            : m.status === "休会"
-                            ? "bg-hanko-pale text-hanko"
-                            : "bg-bg text-muted"
-                        }`}
-                      >
-                        {m.status}
-                      </span>
-                    </td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap">
                       {fee.amount === null ? (
                         <span className="text-xs text-muted">未設定</span>
@@ -336,8 +311,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
                               {f.name}
                               <span className={f.otherGroup ? "" : "text-muted"}>
                                 （{f.group ? groupDisplayName(f.group) : "所属不明"}
-                                {f.classLabel ? `・${f.classLabel}` : ""}
-                                {f.status && f.status !== "在籍" ? `・${f.status}` : ""}）
+）
                               </span>
                               {f.otherGroup && (
                                 <span className="ml-1 text-[10px] bg-hanko-pale text-hanko rounded px-1 py-0.5 font-normal">
@@ -360,7 +334,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
         ご家族は会員詳細の「ご家族との連携」で登録された会員を表示しています。別の会に所属するご家族は赤字で表示します。
         年齢は生年月日から本日時点で計算し、生年月日が未登録の場合は登録済みの年齢を表示します。
         お月謝は会の標準額を表示し、会員詳細で「お月謝（個別設定）」を入力した会員はその金額を緑の太字で表示します。
-        宗徧流稽古の会は標準額がないため、個別設定するまで「未設定」になります。
+        名簿は在籍会員のみ表示します（休会・退会の会員とご家族は表示しません）。
       </p>
     </section>
   );
