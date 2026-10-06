@@ -107,7 +107,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
         if (!familyOnly) return true;
         return (m.linkedMemberIds ?? []).some((id) => {
           const f = byId.get(id);
-          return f && f.status === "在籍" && f.group !== m.group;
+          return f && f.status === "在籍";
         });
       })
       .filter((m) => {
@@ -207,7 +207,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
         />
         <label className="flex items-center gap-1 text-xs">
           <input type="checkbox" checked={familyOnly} onChange={(e) => setFamilyOnly(e.target.checked)} />
-          ご家族が他の会に所属している会員のみ
+          ご家族がいる会員のみ
         </label>
         <label className="flex items-center gap-1 text-xs text-muted">
           <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} />
