@@ -33,6 +33,7 @@ interface WeeklySession {
   amTeacher?: string;
   pmTeacher?: string;
   attendance?: Record<string, Mark>;
+  virtual?: boolean; // Googleカレンダーの次回お稽古日で、まだ開催日として登録されていないもの
 }
 
 // 枠：木曜日は1枠、日曜日は午前（日曜日クラス）・午後（日曜日午後クラス）の2枠
@@ -79,7 +80,28 @@ export default function ChadoWeeklySessions({
     });
   }, []);
 
-  const monthSessions = sessions.filter((s) => s.date.startsWith(month));
+  // 登録済みの開催日に加えて、Googleカレンダー連携の「次回のお稽古日」が未登録なら自動で表示する
+  const monthSessions = useMemo(() => {
+    const list = sessions.filter((s) => s.date.startsWith(month));
+    const nextList = SLOTS[chadoClass]
+      .map((sl) => nextDates[nextLessonKey("茶道教室", sl.cls)]?.date?.slice(0, 10))
+      .filter((d): d is string => !!d && d.startsWith(month));
+    for (const d of Array.from(new Set(nextList))) {
+      if (!list.some((s) => s.date === d)) {
+        list.push({ id: `virtual-${d}`, date: d, chadoClass, virtual: true });
+      }
+    }
+    return list.sort((a, b) => a.date.localeCompare(b.date));
+  }, [sessions, month, nextDates, chadoClass]);
+
+  async function registerVirtual(d: string) {
+    await setDoc(doc(db, "chadoClassSessions", `${d}_${chadoClass}`), {
+      date: d,
+      chadoClass,
+      amTeacher: CHADO_FIXED_TEACHERS[SLOTS[chadoClass][0].cls] ?? "",
+      ...(SLOTS[chadoClass][1] ? { pmTeacher: CHADO_FIXED_TEACHERS[SLOTS[chadoClass][1].cls] ?? "" } : {}),
+    });
+  }
   const slots = SLOTS[chadoClass];
 
   const rosters = useMemo(() => {
@@ -139,13 +161,25 @@ export default function ChadoWeeklySessions({
         {monthSessions.map((s) => (
           <div key={s.id} className="border border-line rounded-md p-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold">{s.date}</span>
-              <button
-                className="text-xs text-hanko underline decoration-dotted underline-offset-2"
-                onClick={() => removeSession(s)}
-              >
-                この開催日を削除
-              </button>
+              <span className="text-sm font-semibold">
+                {s.date}
+                {s.virtual && <span className="ml-2 text-[11px] font-normal text-muted">カレンダーの次回お稽古日（未登録）</span>}
+              </span>
+              {s.virtual ? (
+                <button
+                  className="text-xs border border-line rounded px-2 py-1"
+                  onClick={() => registerVirtual(s.date)}
+                >
+                  開催日として登録
+                </button>
+              ) : (
+                <button
+                  className="text-xs text-hanko underline decoration-dotted underline-offset-2"
+                  onClick={() => removeSession(s)}
+                >
+                  この開催日を削除
+                </button>
+              )}
             </div>
             <div className={`grid gap-4 ${slots.length > 1 ? "md:grid-cols-2" : ""}`}>
               {slots.map((sl) => {
@@ -156,14 +190,16 @@ export default function ChadoWeeklySessions({
                 // 次回のお稽古日はマイページの回答（rsvp）、それ以外の日はその月の出欠（マイページ回答時に記録される）
                 const monthKey = s.date.slice(0, 7);
                 const answerOf = (m: Member): "出席" | "欠席" | "未回答" =>
-                  isNext ? m.rsvp ?? "未回答" : m.attendance?.[monthKey] ?? "未回答";
+                  m.rsvpByDate?.[s.date] ??
+                  (isNext ? m.rsvp : m.attendance?.[monthKey]) ??
+                  "未回答";
                 return (
                   <div key={sl.key}>
                     <p className="text-xs font-bold text-matcha-deep mb-1">
                       {CHADO_CLASS_LABEL[sl.cls]}クラス　{sl.label}
                       {isNext && <span className="ml-2 text-[11px] font-normal text-muted">次回のお稽古</span>}
                     </p>
-                    <input
+                    {!s.virtual && <input
                       key={`${s.id}-${teacherField}-${s[teacherField] ?? ""}`}
                       className="border border-line rounded px-2 py-1 text-xs w-full mb-1"
                       placeholder="担当講師名"
@@ -172,7 +208,7 @@ export default function ChadoWeeklySessions({
                         e.target.value !== (s[teacherField] ?? "") &&
                         updateDoc(doc(db, "chadoClassSessions", s.id), { [teacherField]: e.target.value })
                       }
-                    />
+                    />}
                     <p className="text-xs text-muted mb-2">
                       マイページの出欠回答（在籍 {roster.length}名）
                     </p>

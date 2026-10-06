@@ -139,9 +139,12 @@ export default function MyPage() {
   async function updateRsvp(value: "出席" | "欠席") {
     if (!memberId || !member) return;
     const monthKey = currentMonthKey();
+    // お稽古日ごとの回答も残す（管理画面の開催日・予約状況で、日付ごとの出席者／欠席者を表示するため）
+    const lessonDate = nextLesson?.date?.slice(0, 10);
     await updateDoc(doc(db, "members", memberId), {
       rsvp: value,
       [`attendance.${monthKey}`]: value,
+      ...(lessonDate ? { [`rsvpByDate.${lessonDate}`]: value } : {}),
     });
     setMember((prev) =>
       prev

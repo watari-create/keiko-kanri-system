@@ -79,6 +79,7 @@ export interface Member {
   chadoClass?: ChadoKyoshitsuClass; // 茶道教室のみ。曜日クラス（土曜日／木曜日／日曜日〈午前〉／日曜日午後）
   chadoMonthlyQuota?: 1 | 2; // 茶道教室・土曜日クラスのみ。月の予約可能回数（未設定時は1回として扱う）
   chadoMakeupTickets?: number; // 茶道教室・土曜日クラスのみ。欠席時に付与される振替チケットの残数（未設定時は0枚として扱う）
+  rsvpByDate?: Record<string, "出席" | "欠席">; // マイページの出欠回答を、お稽古日（YYYY-MM-DD）ごとに記録したもの（木曜日・日曜日クラスの開催日表示用）
   chadoCohortId?: string; // 茶道教室のみ。新規募集クラス（chadoRecruitClasses のdoc id）から入会した場合の所属クラス
   lineUserId?: string; // 公式LINEアカウントと連携した際のLINEユーザーID（Cloud Functions経由で設定）
   lastAttended?: string;
