@@ -3,7 +3,7 @@
 // 土曜日クラスは月2回開催・午前午後の2枠・各枠定員3名で、講師は交代制のため、
 // 開催日ごとの担当講師・定員は管理画面（chadoSaturdaySessionsコレクション）で設定する。
 
-import type { ChadoKyoshitsuClass } from "@/types";
+import type { ChadoKyoshitsuClass, Member } from "@/types";
 
 export const CHADO_CLASSES: ChadoKyoshitsuClass[] = ["土曜日", "木曜日", "日曜日"];
 
@@ -20,3 +20,9 @@ export const CHADO_CLASS_TIME: Record<ChadoKyoshitsuClass, string> = {
 };
 
 export const CHADO_SATURDAY_DEFAULT_CAPACITY = 3;
+
+// 土曜日クラスの会員かどうか。土曜日クラスの出欠は開催日ごと（chadoSaturdaySessions）に一本化しており、
+// 月ごとの出席簿はCloud Functions（onChadoSaturdaySessionAttendanceChanged）が自動で埋めるため、画面からは編集させない。
+export function isChadoSaturdayMember(m: Pick<Member, "group" | "chadoClass">): boolean {
+  return m.group === "茶道教室" && m.chadoClass === "土曜日";
+}

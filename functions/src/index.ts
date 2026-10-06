@@ -1737,48 +1737,90 @@ export const backupKeikoNoteEntries = onSchedule(
 );
 
 /**
- * 茶道教室・土曜日クラスの振替チケット自動付与（出席簿経由）。
+ * 茶道教室・土曜日クラスの振替チケット自動付与（開催日ごとの出欠経由）。
  *
- * 講師画面・世話人画面の出席簿（members.attendance の月別セル）で「欠席」にした場合、
- * Firestoreルール上、講師は chadoMakeupTickets を書き換えられないため、これまでチケットが付与されていなかった。
- * 会員ドキュメントの attendance の変化を監視し、サーバー側でチケットを増減する。
- *   ・ある月が「欠席」になった → +1
- *   ・ある月が「欠席」から別の値（出席／未記録）になった → -1（下限0）
+ * 土曜日クラスの出欠は「開催日ごと」（chadoSaturdaySessions の各予約の attended）に一本化している。
+ * 月2回コースの人が1回だけ休んだ場合も正しく数えられるよう、予約1件の欠席＝チケット1枚とする。
+ * （予約しなかった回はチケットにならない。2026-10-06 ゆちゃの決定）
  *
- * 管理画面の出席簿（setAttendance）は同じ書き込みの中でチケットも更新しているため、
- * 同一更新内で chadoMakeupTickets がすでに変化している場合は二重付与を避けるため何もしない。
- * この関数自身はチケットのみ更新し attendance は変えないので、再トリガーされても無限ループにならない。
+ * 管理画面・講師画面のどちらで出欠を付けても、ここで一括して処理する
+ * （講師は Firestore ルール上 chadoMakeupTickets を書き換えられないため、サーバー側で行う）。
+ *   ・予約が「欠席」になった → +1
+ *   ・「欠席」から出席／未確認になった、または欠席の予約が削除された → -1（下限0）
+ * あわせて、出席簿（members.attendance の月別セル）をその月の開催日ごとの出欠から自動で埋める
+ * （1回でも出席 → 出席、出席がなく欠席あり → 欠席、記録なし → 空欄）。
+ * 出席簿の土曜日クラスの行は画面上で編集できないようにしている。
  */
-export const onChadoSaturdayAttendanceChanged = onDocumentUpdated(
-  "members/{memberId}",
+type ChadoSaturdayAttendanceDoc = {
+  date?: string;
+  amBookings?: { memberId: string; attended?: string }[];
+  pmBookings?: { memberId: string; attended?: string }[];
+};
+
+function collectSaturdayAttendance(d: ChadoSaturdayAttendanceDoc): Map<string, string | undefined> {
+  const map = new Map<string, string | undefined>();
+  [...(d.amBookings ?? []), ...(d.pmBookings ?? [])].forEach((b) => map.set(b.memberId, b.attended));
+  return map;
+}
+
+export const onChadoSaturdaySessionAttendanceChanged = onDocumentUpdated(
+  "chadoSaturdaySessions/{sessionId}",
   async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
+    const before = event.data?.before.data() as ChadoSaturdayAttendanceDoc | undefined;
+    const after = event.data?.after.data() as ChadoSaturdayAttendanceDoc | undefined;
     if (!before || !after) return;
-    if (after.group !== "茶道教室" || after.chadoClass !== "土曜日") return;
-    if ((before.chadoMakeupTickets ?? 0) !== (after.chadoMakeupTickets ?? 0)) return;
 
-    const prevAtt: Record<string, string> = before.attendance ?? {};
-    const nextAtt: Record<string, string> = after.attendance ?? {};
-    const months = new Set([...Object.keys(prevAtt), ...Object.keys(nextAtt)]);
-    let delta = 0;
-    months.forEach((mk) => {
-      const p = prevAtt[mk];
-      const n = nextAtt[mk];
-      if (p !== "欠席" && n === "欠席") delta += 1;
-      if (p === "欠席" && n !== "欠席") delta -= 1;
+    const prev = collectSaturdayAttendance(before);
+    const next = collectSaturdayAttendance(after);
+    const changed: { memberId: string; delta: number }[] = [];
+    new Set([...prev.keys(), ...next.keys()]).forEach((memberId) => {
+      const p = prev.get(memberId);
+      const n = next.get(memberId);
+      if (p === n) return;
+      let delta = 0;
+      if (p !== "欠席" && n === "欠席") delta = 1;
+      if (p === "欠席" && n !== "欠席") delta = -1;
+      changed.push({ memberId, delta });
     });
-    if (delta === 0) return;
+    if (changed.length === 0) return;
 
-    const ref = event.data!.after.ref;
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const current = (snap.data()?.chadoMakeupTickets as number | undefined) ?? 0;
-      tx.update(ref, { chadoMakeupTickets: Math.max(0, current + delta) });
-    });
-    console.log(
-      `振替チケットを自動調整しました memberId=${event.params.memberId} delta=${delta}`
-    );
+    const date = after.date ?? event.params.sessionId;
+    const monthKey = date.slice(0, 7);
+    const monthSnap = await db
+      .collection("chadoSaturdaySessions")
+      .where("date", ">=", `${monthKey}-01`)
+      .where("date", "<=", `${monthKey}-31`)
+      .get();
+
+    for (const { memberId, delta } of changed) {
+      // この会員のその月の出欠を、全開催日から集計する
+      let hasPresent = false;
+      let hasAbsent = false;
+      monthSnap.docs.forEach((docSnap) => {
+        const att = collectSaturdayAttendance(docSnap.data() as ChadoSaturdayAttendanceDoc).get(memberId);
+        if (att === "出席") hasPresent = true;
+        if (att === "欠席") hasAbsent = true;
+      });
+      const monthValue = hasPresent ? "出席" : hasAbsent ? "欠席" : null;
+
+      const memberRef = db.collection("members").doc(memberId);
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(memberRef);
+        if (!snap.exists) return;
+        const updates: Record<string, unknown> = {
+          [`attendance.${monthKey}`]:
+            monthValue === null ? admin.firestore.FieldValue.delete() : monthValue,
+        };
+        if (delta !== 0) {
+          const current = (snap.data()?.chadoMakeupTickets as number | undefined) ?? 0;
+          updates.chadoMakeupTickets = Math.max(0, current + delta);
+        }
+        tx.update(memberRef, updates);
+      });
+      console.log(
+        `土曜日クラスの出欠を反映しました memberId=${memberId} date=${date} ticketDelta=${delta} month=${monthValue ?? "空欄"}`
+      );
+    }
   }
 );
 

@@ -2,6 +2,7 @@
 
 // 出席簿：会員×月のグリッド。セルをクリックすると 未記録 → 出席 → 欠席 → 未記録 と切り替わる。
 // editable=false のときはクリック不可（閲覧のみ）。
+// isRowEditable を渡すと、行ごとに編集可否を切り替えられる（土曜日クラスの会員は開催日ごとの出欠から自動反映のためロック）。
 //
 // sections を渡すと、雪月花のように組（雪組・月組・花組）ごとに見出し付きで区切って表示できる。
 // sections を渡さない場合は members をそのまま1つの表として表示する（従来通り）。
@@ -24,11 +25,13 @@ export default function AttendanceGrid({
   members,
   sections,
   editable,
+  isRowEditable,
   onCellChange,
 }: {
   members?: Member[];
   sections?: AttendanceSection[];
   editable: boolean;
+  isRowEditable?: (m: Member) => boolean;
   onCellChange?: (memberId: string, monthKey: string, next: AttendanceValue) => void;
 }) {
   const allMonths = fiscalYearMonths();
@@ -50,6 +53,8 @@ export default function AttendanceGrid({
     sections ?? [{ label: null, members: members ?? [] }];
   const totalMembers = resolvedSections.reduce((sum, s) => sum + s.members.length, 0);
   const colCount = 1 + months.length;
+  const hasLockedRows =
+    editable && !!isRowEditable && resolvedSections.some((s) => s.members.some((m) => !isRowEditable(m)));
 
   return (
     <div>
@@ -90,11 +95,15 @@ export default function AttendanceGrid({
                   </td>
                 </tr>
               )}
-              {section.members.map((m) => (
+              {section.members.map((m) => {
+                const rowEditable = editable && (!isRowEditable || isRowEditable(m));
+                const rowLocked = editable && !rowEditable;
+                return (
                 <tr key={m.id} className="border-b border-line">
                   <td className="py-2 pr-2 sticky left-0 bg-paper w-16 sm:w-24">
                     <span className="block truncate" title={m.name}>
                       {m.name}
+                      {rowLocked && <span className="text-muted">※</span>}
                     </span>
                   </td>
                   {months.map((mk) => {
@@ -109,10 +118,11 @@ export default function AttendanceGrid({
                       <td
                         key={mk}
                         className={`w-9 h-9 text-center border border-line ${colorClass} ${
-                          editable ? "cursor-pointer hover:bg-matcha-pale/40" : ""
+                          rowEditable ? "cursor-pointer hover:bg-matcha-pale/40" : ""
                         }`}
+                        title={rowLocked ? "土曜日クラスは開催日ごとの出欠から自動で反映されます" : undefined}
                         onClick={() => {
-                          if (!editable || !onCellChange) return;
+                          if (!rowEditable || !onCellChange) return;
                           const current = val === "" ? undefined : (val as AttendanceValue);
                           const idx = CYCLE.indexOf(current);
                           const next = CYCLE[(idx + 1) % CYCLE.length];
@@ -124,7 +134,8 @@ export default function AttendanceGrid({
                     );
                   })}
                 </tr>
-              ))}
+                );
+              })}
             </>
           ))}
           {totalMembers === 0 && (
@@ -142,6 +153,11 @@ export default function AttendanceGrid({
         <span>× 欠席</span>
         <span>－ 未記録</span>
       </div>
+      {hasLockedRows && (
+        <p className="mt-1 text-xs text-muted">
+          ※ 土曜日クラスの方は、土曜日クラスの開催日ごとの出欠から自動で反映されます（ここでは変更できません）。
+        </p>
+      )}
     </div>
   );
 }

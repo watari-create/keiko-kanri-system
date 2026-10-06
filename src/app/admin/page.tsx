@@ -38,7 +38,7 @@ import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
-import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY } from "@/lib/chadoClasses";
+import { CHADO_CLASSES, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import type {
   Member,
   LicenseRequest,
@@ -459,37 +459,16 @@ export default function AdminPage() {
     await updateDoc(doc(db, "members", memberId), { [field]: value });
   }
 
-  // 出席簿（月次マトリクス）での出欠記録。茶道教室・土曜日クラスの会員については、
-  // 専用の予約管理画面（setSaturdayBookingAttendance）を使わずここで「欠席」にした場合も
-  // 振替チケットの付与漏れが起きないよう、同じ付与・取消ロジックをここにも適用する
-  // （土曜日クラスの振替チケットは、どちらの画面で欠席が記録されても連動する）。
+  // 出席簿（月次マトリクス）での出欠記録。
+  // 茶道教室・土曜日クラスの会員は開催日ごとの出欠に一本化しているため、出席簿からは編集できない
+  // （行をロックしている。月の値と振替チケットは Cloud Functions が開催日ごとの出欠から自動で反映する）。
   async function setAttendance(
     memberId: string,
     monthKey: string,
     value: "出席" | "欠席" | undefined
   ) {
-    const memberRef = doc(db, "members", memberId);
-    await runTransaction(db, async (tx) => {
-      const memberSnap = await tx.get(memberRef);
-      if (!memberSnap.exists()) return;
-      const data = memberSnap.data() as Member;
-      const prev = data.attendance?.[monthKey];
-
-      const updates: Record<string, unknown> = {
-        [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
-      };
-
-      if (data.group === "茶道教室" && data.chadoClass === "土曜日") {
-        let ticketDelta = 0;
-        if (prev !== "欠席" && value === "欠席") ticketDelta = 1;
-        if (prev === "欠席" && value !== "欠席") ticketDelta = -1;
-        if (ticketDelta !== 0) {
-          const currentTickets = data.chadoMakeupTickets ?? 0;
-          updates.chadoMakeupTickets = Math.max(0, currentTickets + ticketDelta);
-        }
-      }
-
-      tx.update(memberRef, updates);
+    await updateDoc(doc(db, "members", memberId), {
+      [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
     });
   }
 
@@ -741,8 +720,8 @@ export default function AdminPage() {
     await deleteDoc(doc(db, "chadoSaturdaySessions", sessionId));
   }
 
-  // 本部による事後の出欠記録。「欠席」にすると振替チケットを1枚付与し、
-  // 取り消す／「出席」に変えると付与したチケットを1枚戻す（トランザクションで整合性を保つ）。
+  // 本部による事後の出欠記録（開催日ごと）。
+  // 振替チケットの付与・取消と出席簿への反映は Cloud Functions（onChadoSaturdaySessionAttendanceChanged）が行う。
   async function setSaturdayBookingAttendance(
     sessionId: string,
     slot: "am" | "pm",
@@ -750,31 +729,20 @@ export default function AdminPage() {
     value: "出席" | "欠席" | undefined
   ) {
     const sessionRef = doc(db, "chadoSaturdaySessions", sessionId);
-    const memberRef = doc(db, "members", memberId);
     await runTransaction(db, async (tx) => {
       const sessionSnap = await tx.get(sessionRef);
-      const memberSnap = await tx.get(memberRef);
-      if (!sessionSnap.exists() || !memberSnap.exists()) return;
+      if (!sessionSnap.exists()) return;
       const data = sessionSnap.data() as ChadoSaturdaySession;
       const field = slot === "am" ? "amBookings" : "pmBookings";
       const bookings = (slot === "am" ? data.amBookings : data.pmBookings) ?? [];
       const idx = bookings.findIndex((b) => b.memberId === memberId);
       if (idx === -1) return;
-      const prev = bookings[idx].attended;
       const updated = bookings.slice();
-      updated[idx] = { ...updated[idx], attended: value };
-
-      let ticketDelta = 0;
-      if (prev !== "欠席" && value === "欠席") ticketDelta = 1;
-      if (prev === "欠席" && value !== "欠席") ticketDelta = -1;
-
+      const next = { ...updated[idx] };
+      if (value === undefined) delete next.attended;
+      else next.attended = value;
+      updated[idx] = next;
       tx.update(sessionRef, { [field]: updated });
-      if (ticketDelta !== 0) {
-        const currentTickets = (memberSnap.data() as Member).chadoMakeupTickets ?? 0;
-        tx.update(memberRef, {
-          chadoMakeupTickets: Math.max(0, currentTickets + ticketDelta),
-        });
-      }
     });
   }
 
@@ -1572,6 +1540,7 @@ export default function AdminPage() {
           <AttendanceGrid
             sections={memberSections}
             editable
+            isRowEditable={(m) => !isChadoSaturdayMember(m)}
             onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
           />
         </section>

@@ -21,6 +21,7 @@ import {
   addDoc,
   deleteDoc,
   deleteField,
+  runTransaction,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db, auth } from "@/lib/firebase";
@@ -32,6 +33,7 @@ import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
 import { currentMonthKey } from "@/lib/fiscalMonths";
+import { isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession, LineMessageLog } from "@/types";
 
@@ -115,16 +117,17 @@ export default function StaffPage() {
     );
   }, [group]);
 
-  // 茶道教室：土曜日クラスの開催日・予約状況（当日以降のみ）をリアルタイム購読
+  // 茶道教室：土曜日クラスの開催日・予約状況をリアルタイム購読。
+  // 講師が開催後に出欠を付けられるよう、過去45日分の開催日も含める。
   useEffect(() => {
     if (group !== "茶道教室") {
       setSaturdaySessions([]);
       return;
     }
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const fromKey = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const q = query(
       collection(db, "chadoSaturdaySessions"),
-      where("date", ">=", todayKey),
+      where("date", ">=", fromKey),
       orderBy("date")
     );
     return onSnapshot(q, (snap) => {
@@ -198,6 +201,32 @@ export default function StaffPage() {
   ) {
     await updateDoc(doc(db, "members", memberId), {
       [`attendance.${monthKey}`]: value === undefined ? deleteField() : value,
+    });
+  }
+
+  // 土曜日クラスの開催日ごとの出欠記録。「欠席」にすると振替チケットが1枚付与される
+  // （付与・取消と出席簿への反映は Cloud Functions の onChadoSaturdaySessionAttendanceChanged が行う）。
+  async function setSaturdayBookingAttendance(
+    sessionId: string,
+    slot: "am" | "pm",
+    memberId: string,
+    value: "出席" | "欠席" | undefined
+  ) {
+    const sessionRef = doc(db, "chadoSaturdaySessions", sessionId);
+    await runTransaction(db, async (tx) => {
+      const sessionSnap = await tx.get(sessionRef);
+      if (!sessionSnap.exists()) return;
+      const data = sessionSnap.data() as ChadoSaturdaySession;
+      const field = slot === "am" ? "amBookings" : "pmBookings";
+      const bookings = (slot === "am" ? data.amBookings : data.pmBookings) ?? [];
+      const idx = bookings.findIndex((b) => b.memberId === memberId);
+      if (idx === -1) return;
+      const updated = bookings.slice();
+      const next = { ...updated[idx] };
+      if (value === undefined) delete next.attended;
+      else next.attended = value;
+      updated[idx] = next;
+      tx.update(sessionRef, { [field]: updated });
     });
   }
 
@@ -414,8 +443,11 @@ export default function StaffPage() {
 
       {group === "茶道教室" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
-          <h2 className="font-bold mb-1">土曜日クラスの予約状況</h2>
-          <p className="text-xs text-muted mb-3">当日以降の開催日と、午前・午後それぞれの予約者です</p>
+          <h2 className="font-bold mb-1">土曜日クラスの予約状況・出欠</h2>
+          <p className="text-xs text-muted mb-3">
+            直近45日以降の開催日と、午前・午後それぞれの予約者です。お稽古のあと、予約者ごとに出席・欠席を付けてください。
+            「欠席」にすると振替チケットが1枚付与されます（予約していない回はチケットになりません）。
+          </p>
           <MakeupTicketList members={members} />
           <div className="space-y-3">
             {saturdaySessions.map((s) => (
@@ -437,12 +469,35 @@ export default function StaffPage() {
                         ) : (
                           <ul className="space-y-0.5">
                             {bookings.map((b) => (
-                              <li key={b.memberId}>
-                                {b.memberName}
-                                {b.usedTicket && (
-                                  <span className="text-muted">（振替チケット使用）</span>
-                                )}
-                                {b.attended && <span className="text-muted">・{b.attended}</span>}
+                              <li key={b.memberId} className="flex items-center justify-between gap-2">
+                                <span>
+                                  {b.memberName}
+                                  {b.usedTicket && (
+                                    <span className="text-muted">（振替チケット使用）</span>
+                                  )}
+                                </span>
+                                <select
+                                  className={`border border-line rounded px-1 py-0.5 text-xs ${
+                                    b.attended === "欠席"
+                                      ? "text-hanko"
+                                      : b.attended === "出席"
+                                      ? "text-matcha-deep font-bold"
+                                      : ""
+                                  }`}
+                                  value={b.attended ?? ""}
+                                  onChange={(e) =>
+                                    setSaturdayBookingAttendance(
+                                      s.id,
+                                      slot,
+                                      b.memberId,
+                                      (e.target.value || undefined) as "出席" | "欠席" | undefined
+                                    )
+                                  }
+                                >
+                                  <option value="">未確認</option>
+                                  <option value="出席">出席</option>
+                                  <option value="欠席">欠席</option>
+                                </select>
                               </li>
                             ))}
                           </ul>
@@ -455,7 +510,7 @@ export default function StaffPage() {
             ))}
             {saturdaySessions.length === 0 && (
               <p className="text-sm text-muted text-center py-4">
-                本日以降の開催日はまだ登録されていません
+                直近の開催日はまだ登録されていません
               </p>
             )}
           </div>
@@ -516,6 +571,7 @@ export default function StaffPage() {
         <AttendanceGrid
           members={members}
           editable
+          isRowEditable={(m) => !isChadoSaturdayMember(m)}
           onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
         />
       </section>
