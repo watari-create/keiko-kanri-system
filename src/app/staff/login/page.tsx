@@ -33,8 +33,14 @@ export default function StaffLoginPage() {
       const result = await verify({ memberNo: staffId, email });
       await signInWithCustomToken(auth, result.data.token);
       router.push(result.data.role === "member" ? "/mypage" : "/staff");
-    } catch {
-      setError("IDとメールアドレスの組み合わせが確認できませんでした。");
+    } catch (err) {
+      // 失敗が続いて一時停止中の場合は、サーバーからのメッセージをそのまま表示する
+      const code = (err as { code?: string })?.code;
+      if (code === "functions/resource-exhausted") {
+        setError((err as Error).message);
+      } else {
+        setError("IDとメールアドレスの組み合わせが確認できませんでした。");
+      }
     } finally {
       setLoading(false);
     }

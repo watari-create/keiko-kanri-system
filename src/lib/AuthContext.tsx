@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "./firebase";
 
-type Role = "honbu" | "staff" | "member" | null;
+type Role = "honbu" | "staff" | "member" | "keikoNoteGuest" | null;
 
 interface AuthState {
   user: User | null;

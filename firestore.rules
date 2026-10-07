@@ -247,7 +247,10 @@ service cloud.firestore {
     // 開けないよう合言葉（アクセスコード）で保護している（アプリ側のmiddlewareで実施）。
     // 記録の追加・編集・削除は本部、または茶道教室担当の世話人・講師のみ（ログイン必須）。
     match /keikoNoteEntries/{entryId} {
-      allow read: if true;
+      // 2026-10-07：誰でも読める状態をやめ、ログイン中の人だけ読めるようにした。
+      // 会員・スタッフ・本部以外は、合言葉で keikoNoteGuestLogin（Cloud Functions）から
+      // 閲覧専用ゲストとしてログインしてから読む。
+      allow read: if isSignedIn();
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }
 
@@ -259,6 +262,25 @@ service cloud.firestore {
       match /entries/{entryId} {
         allow read, write: if false;
       }
+    }
+
+    // ---- securityLogs / securityReports（不正アクセス監視。Cloud Functionsが
+    //      Admin SDKで書き込む。ログはクライアントから読み書き不可、レポートは本部のみ閲覧可） ----
+    match /securityLogs/{logId} {
+      allow read, write: if false;
+    }
+    match /securityCounters/{id} {
+      allow read, write: if false;
+    }
+    match /securityAlerts/{id} {
+      allow read, write: if false;
+    }
+    match /securityState/{id} {
+      allow read, write: if false;
+    }
+    match /securityReports/{reportId} {
+      allow read: if isHonbu();
+      allow write: if false;
     }
   }
 }

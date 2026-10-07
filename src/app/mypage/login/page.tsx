@@ -42,8 +42,14 @@ export default function MemberLoginPage() {
       const result = await verify({ memberNo, email });
       await signInWithCustomToken(auth, result.data.token);
       router.push(result.data.role === "staff" ? "/staff" : "/mypage");
-    } catch {
-      setError("会員番号とメールアドレスの組み合わせが確認できませんでした。");
+    } catch (err) {
+      // 失敗が続いて一時停止中の場合は、サーバーからのメッセージをそのまま表示する
+      const code = (err as { code?: string })?.code;
+      if (code === "functions/resource-exhausted") {
+        setError((err as Error).message);
+      } else {
+        setError("会員番号とメールアドレスの組み合わせが確認できませんでした。");
+      }
     } finally {
       setLoading(false);
     }

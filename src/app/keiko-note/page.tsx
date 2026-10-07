@@ -962,7 +962,7 @@ type FormState =
   | null;
 
 export default function KeikoNotePage() {
-  const { role, loading } = useAuth();
+  const { user, role, loading } = useAuth();
   const canEdit = role === "honbu" || role === "staff";
 
   const [teacherMode, setTeacherMode] = useState(false);
@@ -972,14 +972,22 @@ export default function KeikoNotePage() {
   const [form, setForm] = useState<FormState>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
+  // データはログイン中の人しか読めないので、未ログインなら合言葉ページで（ゲスト）ログインしてもらう
   useEffect(() => {
+    if (!loading && !user) {
+      window.location.href = "/keiko-note/access?next=" + encodeURIComponent(window.location.pathname);
+    }
+  }, [loading, user]);
+
+  useEffect(() => {
+    if (!user) return;
     const unsub = onSnapshot(collection(db, "keikoNoteEntries"), (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<KeikoNoteEntry, "id">) }));
       list.sort((a, b) => b.date.localeCompare(a.date));
       setEntries(list);
     });
     return () => unsub();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!canEdit) setTeacherMode(false);
@@ -1012,7 +1020,7 @@ export default function KeikoNotePage() {
     setForm(entry.blocks ? { kind: "block", entry } : { kind: "simple", entry });
   }
 
-  if (loading) return <div className="p-8 text-muted">確認中…</div>;
+  if (loading || !user) return <div className="p-8 text-muted">確認中…</div>;
 
   const backHref =
     role === "member" ? "/mypage" : role === "staff" ? "/staff" : role === "honbu" ? "/admin" : null;

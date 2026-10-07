@@ -26,6 +26,10 @@ const lineChannelAccessToken = defineSecret("LINE_CHANNEL_ACCESS_TOKEN");
 // 設定方法： firebase functions:secrets:set LINE_CHANNEL_SECRET
 const lineChannelSecret = defineSecret("LINE_CHANNEL_SECRET");
 
+// お稽古ノート（/keiko-note）の合言葉。VercelのKEIKO_NOTE_ACCESS_CODEと同じ値を入れる。
+// 設定方法： firebase functions:secrets:set KEIKO_NOTE_ACCESS_CODE
+const keikoNoteAccessCode = defineSecret("KEIKO_NOTE_ACCESS_CODE");
+
 // LIFFアプリを追加した「LINEログイン」チャネル（Messaging APIのチャネルとは別チャネル。
 // LIFFアプリはLINEログインチャネルにしか追加できない）のチャネルID。チャネル基本設定タブに表示される数字。
 // マイページのLIFF連携で受け取るID Tokenの検証（audクレームの確認）に使う。
@@ -78,6 +82,164 @@ const hqCalendarId = defineString("HQ_CALENDAR_ID");
 // アプリの本番URL。Slack通知の「detail」ボタンのリンク先などに使う。
 const APP_BASE_URL = "https://okeiko.sohenryu.com";
 
+// ---- セキュリティログ（不正アクセス監視用） ----
+// ログイン試行（成功・失敗）を securityLogs に記録する。週次レポート〈weeklySecurityReport〉が集計する。
+// クライアントからは読み書き不可（firestore.rules で禁止）。90日より古いログは週次レポート時に自動削除。
+// 週次レポート・即時アラートを送るSlackの宛先。ユーザーID（U…）ならBotとのDM、チャンネルID（C…）ならそのチャンネル。
+const slackSecurityReportTarget = defineString("SLACK_SECURITY_REPORT_TARGET", { default: "C02GH8X0U3C" });
+
+// 即時アラートのしきい値
+const ALERT_IP_WINDOW_MS = 10 * 60 * 1000; // 10分
+const ALERT_IP_FAIL_COUNT = 5; // 10分以内に同じIPから5回以上失敗
+const ALERT_SUCCESS_AFTER_FAILS = 3; // 3回以上連続失敗した会員番号でログイン成功
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 同じ内容の通知は1時間に1回まで
+
+// ログインの一時停止（ロック）
+const LOCK_MEMBER_FAILS = 5; // 同じ会員番号で5回連続失敗したら
+const LOCK_DURATION_MS = 30 * 60 * 1000; // 30分ログインを止める
+
+/**
+ * 会員番号がロック中なら、ロック解除時刻（ミリ秒）を返す。ロックされていなければ null。
+ * 解除方法（本人確認後に早く解除したい場合）：Firestoreコンソールで
+ * securityCounters/member_{会員番号} の lockedUntil を削除する。
+ */
+async function getMemberLockUntil(memberNo: string): Promise<number | null> {
+  try {
+    const snap = await db.collection("securityCounters").doc(safeDocId("member_" + memberNo)).get();
+    const until = snap.exists ? (snap.data()?.lockedUntil as admin.firestore.Timestamp | undefined) : undefined;
+    if (until && until.toMillis() > Date.now()) return until.toMillis();
+  } catch (e) {
+    console.error("ロック状態の確認に失敗しました", e);
+  }
+  return null;
+}
+
+function safeDocId(s: string): string {
+  return (s || "unknown").replace(/[\/]/g, "_").slice(0, 200);
+}
+
+/**
+ * 不正アクセスの兆候を即時にSlackへ通知する。同じkeyの通知は1時間に1回まで。
+ */
+async function sendSecurityAlert(key: string, text: string): Promise<void> {
+  try {
+    const ref = db.collection("securityAlerts").doc(safeDocId(key));
+    const shouldSend = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const last = snap.exists ? (snap.data()?.lastSentAt as admin.firestore.Timestamp | undefined) : undefined;
+      if (last && Date.now() - last.toMillis() < ALERT_COOLDOWN_MS) return false;
+      tx.set(ref, { lastSentAt: admin.firestore.Timestamp.now(), text });
+      return true;
+    });
+    if (!shouldSend) return;
+    const token = slackBotToken.value();
+    const target = slackSecurityReportTarget.value();
+    if (token && target) {
+      await postSlackMessage(token, target, `🚨【不正アクセスの疑い】\n${text}\n（${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false })}）`);
+    } else {
+      console.warn("Slack未設定のためセキュリティアラートを送れませんでした: " + text);
+    }
+  } catch (e) {
+    console.error("セキュリティアラートの送信に失敗しました", e);
+  }
+}
+
+/**
+ * ログイン試行のたびに呼ばれ、即時アラートの条件に当てはまるかを判定する。
+ * - 10分以内に同じIPから5回以上失敗（総当たりの疑い）
+ * - 3回以上連続で失敗した会員番号で、ログインに成功（乗っ取りの疑い）
+ */
+async function checkLoginAnomaly(entry: LoginLogInput, ip: string): Promise<void> {
+  try {
+    const now = Date.now();
+    if (entry.result === "fail" && ip) {
+      const ref = db.collection("securityCounters").doc(safeDocId("ip_" + ip));
+      const recent = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const data = snap.exists ? snap.data() ?? {} : {};
+        const fails = ((data.fails as { t: number; m: string }[]) ?? []).filter((f) => now - f.t < ALERT_IP_WINDOW_MS);
+        fails.push({ t: now, m: entry.memberNo ?? "" });
+        tx.set(ref, { fails: fails.slice(-50), updatedAt: admin.firestore.Timestamp.now() });
+        return fails;
+      });
+      if (recent.length >= ALERT_IP_FAIL_COUNT) {
+        const members = new Set(recent.map((f) => f.m).filter(Boolean));
+        await sendSecurityAlert(
+          "ipfail_" + ip,
+          `IP ${ip} から10分以内に${recent.length}回ログインに失敗しています（試された会員番号 ${members.size}件：${[...members].slice(0, 5).join("、")}）。総当たりの可能性があります。`
+        );
+      }
+    }
+
+    if (entry.memberNo) {
+      const ref = db.collection("securityCounters").doc(safeDocId("member_" + entry.memberNo));
+      const { prevFails, lockedNow } = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const prev = snap.exists ? Number(snap.data()?.consecutiveFails ?? 0) : 0;
+        if (entry.result === "fail") {
+          const next = prev + 1;
+          const lock = next % LOCK_MEMBER_FAILS === 0;
+          tx.set(ref, {
+            consecutiveFails: next,
+            lastFailIp: ip,
+            updatedAt: admin.firestore.Timestamp.now(),
+            ...(lock ? { lockedUntil: admin.firestore.Timestamp.fromMillis(now + LOCK_DURATION_MS) } : {}),
+          }, { merge: true });
+          return { prevFails: prev, lockedNow: lock };
+        }
+        // 成功したら連続失敗数とロックをリセット
+        tx.set(ref, { consecutiveFails: 0, updatedAt: admin.firestore.Timestamp.now() });
+        return { prevFails: prev, lockedNow: false };
+      });
+      if (lockedNow) {
+        await sendSecurityAlert(
+          "locked_" + entry.memberNo,
+          `会員番号 ${entry.memberNo} で${prevFails + 1}回連続してログインに失敗したため、30分間ログインを停止しました（最後の試行のIP ${ip || "不明"}）。ご本人が困っている場合は、本人確認のうえ securityCounters/member_${entry.memberNo} の lockedUntil を削除すると解除できます。`
+        );
+      }
+      if (entry.result === "success" && prevFails >= ALERT_SUCCESS_AFTER_FAILS) {
+        await sendSecurityAlert(
+          "succafter_" + entry.memberNo,
+          `会員番号 ${entry.memberNo}（${entry.role ?? ""}）で、${prevFails}回連続で失敗した後にログインが成功しました（IP ${ip || "不明"}、${entry.method === "line" ? "LINEログイン" : "会員番号ログイン"}）。ご本人か確認してください。`
+        );
+      }
+    }
+  } catch (e) {
+    console.error("ログイン異常チェックに失敗しました", e);
+  }
+}
+
+type LoginLogInput = {
+  method: "memberNo" | "line";
+  result: "success" | "fail";
+  memberNo?: string;
+  role?: string;
+  reason?: string;
+};
+async function logLoginAttempt(
+  rawRequest: { ip?: string; headers?: Record<string, unknown> } | undefined,
+  entry: LoginLogInput
+): Promise<void> {
+  try {
+    const headers = rawRequest?.headers ?? {};
+    const fwd = typeof headers["x-forwarded-for"] === "string" ? (headers["x-forwarded-for"] as string) : "";
+    const ip = (fwd.split(",")[0] || rawRequest?.ip || "").trim();
+    const ua = typeof headers["user-agent"] === "string" ? (headers["user-agent"] as string).slice(0, 300) : "";
+    await db.collection("securityLogs").add({
+      type: "login",
+      ...entry,
+      memberNo: entry.memberNo ? String(entry.memberNo).slice(0, 50) : "",
+      ip,
+      userAgent: ua,
+      at: admin.firestore.Timestamp.now(),
+    });
+    if (entry.reason !== "locked") await checkLoginAnomaly(entry, ip);
+  } catch (e) {
+    // ログ記録の失敗でログイン処理自体を止めない
+    console.error("securityLogsへの記録に失敗しました", e);
+  }
+}
+
 /**
  * マイページ・スタッフポータルのログイン確認。
  * 会員番号＋メールアドレスの組み合わせが members または staff コレクションと一致すれば、
@@ -85,11 +247,23 @@ const APP_BASE_URL = "https://okeiko.sohenryu.com";
  *
  * フロントは result.token を signInWithCustomToken() に渡す。
  */
-export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(async (request) => {
+export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>({ secrets: [slackBotToken] }, async (request) => {
   const { memberNo, email } = request.data;
   if (!memberNo || !email) {
+    await logLoginAttempt(request.rawRequest, { method: "memberNo", result: "fail", memberNo, reason: "empty" });
     throw new HttpsError("invalid-argument", "会員番号とメールアドレスを入力してください。");
   }
+  // 失敗が続いてロック中なら、照合せずに断る
+  const lockUntil = await getMemberLockUntil(memberNo);
+  if (lockUntil) {
+    await logLoginAttempt(request.rawRequest, { method: "memberNo", result: "fail", memberNo, reason: "locked" });
+    const mins = Math.max(1, Math.ceil((lockUntil - Date.now()) / 60000));
+    throw new HttpsError(
+      "resource-exhausted",
+      `ログインの失敗が続いたため、一時的にログインを停止しています。約${mins}分後にもう一度お試しください。お困りの場合は本部までご連絡ください。`
+    );
+  }
+
   const normalizedEmail = email.trim().toLowerCase();
 
   // まず会員（マイページ）として確認
@@ -100,6 +274,7 @@ export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(asy
       role: "member",
       memberId: memberNo,
     });
+    await logLoginAttempt(request.rawRequest, { method: "memberNo", result: "success", memberNo, role: "member" });
     return { token, role: "member" };
   }
 
@@ -111,9 +286,16 @@ export const verifyMemberLogin = onCall<{ memberNo: string; email: string }>(asy
       role: "staff",
       staffId: memberNo,
     });
+    await logLoginAttempt(request.rawRequest, { method: "memberNo", result: "success", memberNo, role: "staff" });
     return { token, role: "staff" };
   }
 
+  await logLoginAttempt(request.rawRequest, {
+    method: "memberNo",
+    result: "fail",
+    memberNo,
+    reason: memberSnap.exists || staffSnap.exists ? "email-mismatch" : "unknown-memberNo",
+  });
   throw new HttpsError("not-found", "会員番号とメールアドレスの組み合わせが確認できませんでした。");
 });
 
@@ -1072,7 +1254,7 @@ export const linkLineViaLiff = onCall<{ idToken: string }>(async (request) => {
  * 会員番号＋メールアドレスのログイン画面に案内する（ログイン後、マイページの
  * 「公式LINEとの連携」から連携すれば、次回以降はこのボタンで自動ログインできるようになる）。
  */
-export const loginViaLine = onCall<{ idToken: string }>(async (request) => {
+export const loginViaLine = onCall<{ idToken: string }>({ secrets: [slackBotToken] }, async (request) => {
   const { idToken } = request.data ?? ({} as { idToken?: string });
   if (typeof idToken !== "string" || !idToken) {
     throw new HttpsError("invalid-argument", "IDトークンが指定されていません。");
@@ -1088,6 +1270,7 @@ export const loginViaLine = onCall<{ idToken: string }>(async (request) => {
   });
   if (!verifyRes.ok) {
     console.error(`LINEログインのID Token検証に失敗しました: ${verifyRes.status} ${await verifyRes.text()}`);
+    await logLoginAttempt(request.rawRequest, { method: "line", result: "fail", reason: "line-token-invalid" });
     throw new HttpsError("unauthenticated", "LINEの認証確認に失敗しました。もう一度お試しください。");
   }
   const verifyData = (await verifyRes.json()) as { sub?: string };
@@ -1110,6 +1293,7 @@ export const loginViaLine = onCall<{ idToken: string }>(async (request) => {
     role: "member",
     memberId,
   });
+  await logLoginAttempt(request.rawRequest, { method: "line", result: "success", memberNo: memberId, role: "member" });
   return { linked: true as const, token, role: "member" as const };
 });
 
@@ -1502,29 +1686,11 @@ export const bookChadoSaturdaySlot = onCall<{
     const pmCapacity = sessionData.pmCapacity ?? CHADO_SATURDAY_DEFAULT_CAPACITY;
     const existingAm = sessionData.amBookings ?? [];
     const existingPm = sessionData.pmBookings ?? [];
-    const myExistingBooking =
-      existingAm.find((b) => b.memberId === memberId) ?? existingPm.find((b) => b.memberId === memberId);
-    const filteredAm = existingAm.filter((b) => b.memberId !== memberId);
-    const filteredPm = existingPm.filter((b) => b.memberId !== memberId);
+    // 午前・午後は別々の予約として扱う（同じ日に午前と午後の両方を予約できる。2026-10-06 ゆちゃの決定）。
+    const targetExisting = slot === "am" ? existingAm : existingPm;
+    const myBookingInSlot = targetExisting.find((b) => b.memberId === memberId);
 
-    // 今月、この会員が（このセッション以外で）すでに予約している開催日の数を数える
-    // （月の予約可能回数のチェックに使う。出欠が未確認・欠席のものも「予約を使った」ことに変わりないため含める）
-    let bookedElsewhereThisMonth = 0;
-    monthSnap.docs.forEach((docSnap) => {
-      if (docSnap.id === date) return; // 対象セッション自体は別途カウント
-      const d = docSnap.data() as {
-        amBookings?: ChadoSaturdayBookingDoc[];
-        pmBookings?: ChadoSaturdayBookingDoc[];
-      };
-      const has =
-        (d.amBookings ?? []).some((b) => b.memberId === memberId) ||
-        (d.pmBookings ?? []).some((b) => b.memberId === memberId);
-      if (has) bookedElsewhereThisMonth += 1;
-    });
-
-    if (action === "cancel") {
-      // 振替チケットを使って確保した予約を取り消した場合は、チケットを1枚戻す
-      const ticketDelta = myExistingBooking?.usedTicket ? 1 : 0;
+    const writeSession = (amBookings: ChadoSaturdayBookingDoc[], pmBookings: ChadoSaturdayBookingDoc[]) =>
       tx.set(
         sessionRef,
         {
@@ -1533,68 +1699,69 @@ export const bookChadoSaturdaySlot = onCall<{
           pmCapacity,
           amTeacher: sessionData.amTeacher ?? "",
           pmTeacher: sessionData.pmTeacher ?? "",
-          amBookings: filteredAm,
-          pmBookings: filteredPm,
+          amBookings,
+          pmBookings,
         },
         { merge: true }
       );
-      if (ticketDelta !== 0) {
+
+    if (action === "cancel") {
+      if (!myBookingInSlot) return { ok: true };
+      const remaining = targetExisting.filter((b) => b.memberId !== memberId);
+      writeSession(slot === "am" ? remaining : existingAm, slot === "pm" ? remaining : existingPm);
+      // 振替チケットを使って確保した予約を取り消した場合は、チケットを1枚戻す
+      if (myBookingInSlot.usedTicket) {
         tx.update(memberRef, {
-          chadoMakeupTickets: Math.max(0, (member.chadoMakeupTickets ?? 0) + ticketDelta),
+          chadoMakeupTickets: (member.chadoMakeupTickets ?? 0) + 1,
         });
       }
       return { ok: true };
     }
 
     // action === "book"
-    // 同じ開催日内での午前⇔午後の変更（すでにその日を予約済み）は、月の予約回数を追加消費しない
-    const isSwitchingSameDate = !!myExistingBooking;
-    let usedTicket = myExistingBooking?.usedTicket ?? false;
+    if (myBookingInSlot) return { ok: true }; // すでにこの枠を予約済み
 
-    if (!isSwitchingSameDate) {
-      const quota = member.chadoMonthlyQuota ?? CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA;
-      if (bookedElsewhereThisMonth >= quota) {
-        const tickets = member.chadoMakeupTickets ?? 0;
-        if (tickets <= 0) {
-          throw new HttpsError(
-            "resource-exhausted",
-            `今月の予約可能回数（月${quota}回）の上限に達しています。振替チケットもありません。`
-          );
-        }
-        usedTicket = true;
-      } else {
-        usedTicket = false;
-      }
-    }
-
-    const targetBookings = slot === "am" ? filteredAm : filteredPm;
-    const targetCapacity = slot === "am" ? amCapacity : pmCapacity;
-    if (targetBookings.length >= targetCapacity) {
-      throw new HttpsError("resource-exhausted", "この枠はすでに定員に達しています。");
-    }
-    targetBookings.push({
-      memberId,
-      memberName: member.name ?? "",
-      bookedAt: new Date().toISOString(),
-      usedTicket,
+    // 今月、この会員がすでに予約している枠の数（午前・午後はそれぞれ1回と数える。
+    // 出欠が未確認・欠席のものも「予約を使った」ことに変わりないため含める）
+    let bookedThisMonth = 0;
+    monthSnap.docs.forEach((docSnap) => {
+      const d = docSnap.data() as {
+        amBookings?: ChadoSaturdayBookingDoc[];
+        pmBookings?: ChadoSaturdayBookingDoc[];
+      };
+      if ((d.amBookings ?? []).some((b) => b.memberId === memberId)) bookedThisMonth += 1;
+      if ((d.pmBookings ?? []).some((b) => b.memberId === memberId)) bookedThisMonth += 1;
     });
 
-    tx.set(
-      sessionRef,
-      {
-        date,
-        amCapacity,
-        pmCapacity,
-        amTeacher: sessionData.amTeacher ?? "",
-        pmTeacher: sessionData.pmTeacher ?? "",
-        amBookings: slot === "am" ? targetBookings : filteredAm,
-        pmBookings: slot === "pm" ? targetBookings : filteredPm,
-      },
-      { merge: true }
-    );
+    const quota = member.chadoMonthlyQuota ?? CHADO_SATURDAY_DEFAULT_MONTHLY_QUOTA;
+    let usedTicket = false;
+    if (bookedThisMonth >= quota) {
+      const tickets = member.chadoMakeupTickets ?? 0;
+      if (tickets <= 0) {
+        throw new HttpsError(
+          "resource-exhausted",
+          `今月の予約可能回数（月${quota}回）の上限に達しています。振替チケットもありません。`
+        );
+      }
+      usedTicket = true;
+    }
 
-    // 新規に振替チケットを消費した場合のみ1枚減らす（同日内の枠変更では消費しない）
-    if (!isSwitchingSameDate && usedTicket) {
+    const targetCapacity = slot === "am" ? amCapacity : pmCapacity;
+    if (targetExisting.length >= targetCapacity) {
+      throw new HttpsError("resource-exhausted", "この枠はすでに定員に達しています。");
+    }
+    const added = [
+      ...targetExisting,
+      {
+        memberId,
+        memberName: member.name ?? "",
+        bookedAt: new Date().toISOString(),
+        usedTicket,
+      },
+    ];
+    writeSession(slot === "am" ? added : existingAm, slot === "pm" ? added : existingPm);
+
+    if (usedTicket) {
       tx.update(memberRef, {
         chadoMakeupTickets: Math.max(0, (member.chadoMakeupTickets ?? 0) - 1),
       });
@@ -1770,9 +1937,11 @@ type ChadoSaturdayAttendanceDoc = {
   pmBookings?: { memberId: string; attended?: string }[];
 };
 
+// 予約ごとの出欠を「枠:会員ID」をキーにして集める（同じ日に午前・午後の両方を予約している場合があるため）。
 function collectSaturdayAttendance(d: ChadoSaturdayAttendanceDoc): Map<string, string | undefined> {
   const map = new Map<string, string | undefined>();
-  [...(d.amBookings ?? []), ...(d.pmBookings ?? [])].forEach((b) => map.set(b.memberId, b.attended));
+  (d.amBookings ?? []).forEach((b) => map.set(`am:${b.memberId}`, b.attended));
+  (d.pmBookings ?? []).forEach((b) => map.set(`pm:${b.memberId}`, b.attended));
   return map;
 }
 
@@ -1785,16 +1954,18 @@ export const onChadoSaturdaySessionAttendanceChanged = onDocumentUpdated(
 
     const prev = collectSaturdayAttendance(before);
     const next = collectSaturdayAttendance(after);
-    const changed: { memberId: string; delta: number }[] = [];
-    new Set([...prev.keys(), ...next.keys()]).forEach((memberId) => {
-      const p = prev.get(memberId);
-      const n = next.get(memberId);
+    const deltas = new Map<string, number>(); // 会員ID → チケット増減
+    new Set([...prev.keys(), ...next.keys()]).forEach((key) => {
+      const p = prev.get(key);
+      const n = next.get(key);
       if (p === n) return;
+      const memberId = key.slice(3);
       let delta = 0;
       if (p !== "欠席" && n === "欠席") delta = 1;
       if (p === "欠席" && n !== "欠席") delta = -1;
-      changed.push({ memberId, delta });
+      deltas.set(memberId, (deltas.get(memberId) ?? 0) + delta);
     });
+    const changed = [...deltas.entries()].map(([memberId, delta]) => ({ memberId, delta }));
     if (changed.length === 0) return;
 
     const date = after.date ?? event.params.sessionId;
@@ -1810,9 +1981,11 @@ export const onChadoSaturdaySessionAttendanceChanged = onDocumentUpdated(
       let hasPresent = false;
       let hasAbsent = false;
       monthSnap.docs.forEach((docSnap) => {
-        const att = collectSaturdayAttendance(docSnap.data() as ChadoSaturdayAttendanceDoc).get(memberId);
-        if (att === "出席") hasPresent = true;
-        if (att === "欠席") hasAbsent = true;
+        const map = collectSaturdayAttendance(docSnap.data() as ChadoSaturdayAttendanceDoc);
+        [map.get(`am:${memberId}`), map.get(`pm:${memberId}`)].forEach((att) => {
+          if (att === "出席") hasPresent = true;
+          if (att === "欠席") hasAbsent = true;
+        });
       });
       const monthValue = hasPresent ? "出席" : hasAbsent ? "欠席" : null;
 
@@ -2099,5 +2272,311 @@ export const remindChadoSweetsOrder = onSchedule(
     } catch (err) {
       console.error("Slack通知の送信に失敗しました", err);
     }
+  }
+);
+
+
+// ===================================================================
+// 週次セキュリティレポート（不正アクセスの兆候チェック）
+// ===================================================================
+
+
+// しきい値（これ以上で「要確認」として警告）
+const SEC_IP_FAIL_THRESHOLD = 10; // 同じIPからのログイン失敗回数
+const SEC_MEMBER_FAIL_THRESHOLD = 5; // 同じ会員番号へのログイン失敗回数
+const SEC_IP_DISTINCT_MEMBER_THRESHOLD = 5; // 同じIPから失敗した会員番号の種類数（総当たりの兆候）
+const SEC_LOG_RETENTION_DAYS = 90;
+
+type SecurityReport = {
+  periodFrom: string;
+  periodTo: string;
+  totals: { success: number; fail: number; lineSuccess: number; lineFail: number };
+  alerts: string[];
+  topFailIps: { ip: string; fails: number; members: number }[];
+  topFailMembers: { memberNo: string; fails: number }[];
+  successAfterFails: { memberNo: string; fails: number; ip: string }[];
+  honbuAccounts: { email: string; uid: string; created: string; lastSignIn: string; isNew: boolean }[];
+  newAuthUsers: { member: number; staff: number; other: { uid: string; email: string; provider: string }[] };
+  deletedOldLogs: number;
+};
+
+function fmtJst(d: Date | string | undefined): string {
+  if (!d) return "-";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "-";
+  return date.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
+}
+
+async function buildSecurityReport(): Promise<SecurityReport> {
+  const now = new Date();
+  const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const alerts: string[] = [];
+
+  // ---- 1) ログイン試行ログの集計 ----
+  const logsSnap = await db
+    .collection("securityLogs")
+    .where("at", ">=", admin.firestore.Timestamp.fromDate(from))
+    .get();
+
+  const totals = { success: 0, fail: 0, lineSuccess: 0, lineFail: 0 };
+  const failByIp = new Map<string, { fails: number; members: Set<string> }>();
+  const failByMember = new Map<string, number>();
+  const events = logsSnap.docs
+    .map((d) => d.data())
+    .sort((a, b) => a.at.toMillis() - b.at.toMillis());
+  const pendingFails = new Map<string, number>(); // 会員番号ごとの「直近の連続失敗数」
+  const successAfterFails: SecurityReport["successAfterFails"] = [];
+
+  for (const e of events) {
+    const isLine = e.method === "line";
+    const memberNo = String(e.memberNo || "");
+    const ip = String(e.ip || "(不明)");
+    if (e.result === "success") {
+      if (isLine) totals.lineSuccess++;
+      else totals.success++;
+      const prev = pendingFails.get(memberNo) ?? 0;
+      if (memberNo && prev >= 3) successAfterFails.push({ memberNo, fails: prev, ip });
+      pendingFails.delete(memberNo);
+    } else {
+      if (isLine) totals.lineFail++;
+      else totals.fail++;
+      const ipEntry = failByIp.get(ip) ?? { fails: 0, members: new Set<string>() };
+      ipEntry.fails++;
+      if (memberNo) ipEntry.members.add(memberNo);
+      failByIp.set(ip, ipEntry);
+      if (memberNo) {
+        failByMember.set(memberNo, (failByMember.get(memberNo) ?? 0) + 1);
+        pendingFails.set(memberNo, (pendingFails.get(memberNo) ?? 0) + 1);
+      }
+    }
+  }
+
+  const topFailIps = [...failByIp.entries()]
+    .map(([ip, v]) => ({ ip, fails: v.fails, members: v.members.size }))
+    .sort((a, b) => b.fails - a.fails)
+    .slice(0, 5);
+  const topFailMembers = [...failByMember.entries()]
+    .map(([memberNo, fails]) => ({ memberNo, fails }))
+    .sort((a, b) => b.fails - a.fails)
+    .slice(0, 5);
+
+  for (const r of topFailIps) {
+    if (r.fails >= SEC_IP_FAIL_THRESHOLD) alerts.push(`IP ${r.ip} からログイン失敗が${r.fails}回`);
+    if (r.members >= SEC_IP_DISTINCT_MEMBER_THRESHOLD)
+      alerts.push(`IP ${r.ip} が${r.members}件の異なる会員番号でログインを試行（総当たりの可能性）`);
+  }
+  for (const r of topFailMembers) {
+    if (r.fails >= SEC_MEMBER_FAIL_THRESHOLD) alerts.push(`会員番号 ${r.memberNo} へのログイン失敗が${r.fails}回`);
+  }
+  for (const r of successAfterFails) {
+    alerts.push(`会員番号 ${r.memberNo}：${r.fails}回失敗した後にログイン成功（IP ${r.ip}）`);
+  }
+
+  // ---- 2) Firebase Authenticationのアカウント確認 ----
+  const honbuAccounts: SecurityReport["honbuAccounts"] = [];
+  const newAuthUsers: SecurityReport["newAuthUsers"] = { member: 0, staff: 0, other: [] };
+  let pageToken: string | undefined;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    for (const u of page.users) {
+      const created = new Date(u.metadata.creationTime);
+      const isNew = created >= from;
+      if (u.customClaims?.role === "honbu") {
+        honbuAccounts.push({
+          email: u.email ?? "(メールなし)",
+          uid: u.uid,
+          created: fmtJst(u.metadata.creationTime),
+          lastSignIn: fmtJst(u.metadata.lastSignInTime),
+          isNew,
+        });
+        if (isNew) alerts.push(`本部権限のアカウントが新しく作られています：${u.email ?? u.uid}`);
+      }
+      if (isNew) {
+        if (u.uid.startsWith("member_")) newAuthUsers.member++;
+        else if (u.uid.startsWith("staff_")) newAuthUsers.staff++;
+        else if (u.customClaims?.role !== "honbu") {
+          const provider = u.providerData.map((p) => p.providerId).join(",") || "custom";
+          newAuthUsers.other.push({ uid: u.uid, email: u.email ?? "", provider });
+          alerts.push(`想定外の新規アカウント：${u.email || u.uid}（${provider}）`);
+        }
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
+  // ---- 3) 古いログの削除 ----
+  const cutoff = new Date(now.getTime() - SEC_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  let deletedOldLogs = 0;
+  while (true) {
+    const old = await db
+      .collection("securityLogs")
+      .where("at", "<", admin.firestore.Timestamp.fromDate(cutoff))
+      .limit(400)
+      .get();
+    if (old.empty) break;
+    const batch = db.batch();
+    old.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    deletedOldLogs += old.size;
+    if (old.size < 400) break;
+  }
+
+  return {
+    periodFrom: fmtJst(from),
+    periodTo: fmtJst(now),
+    totals,
+    alerts,
+    topFailIps,
+    topFailMembers,
+    successAfterFails,
+    honbuAccounts,
+    newAuthUsers,
+    deletedOldLogs,
+  };
+}
+
+function formatSecurityReport(r: SecurityReport): string {
+  const lines: string[] = [];
+  lines.push(`【週次セキュリティレポート】${r.periodFrom} 〜 ${r.periodTo}`);
+  lines.push(r.alerts.length ? `⚠️ 要確認 ${r.alerts.length}件` : "✅ 不正アクセスの兆候は見つかりませんでした");
+  if (r.alerts.length) r.alerts.forEach((a) => lines.push(`・${a}`));
+  lines.push("");
+  lines.push(
+    `ログイン（会員番号）成功 ${r.totals.success}回／失敗 ${r.totals.fail}回、LINEログイン 成功 ${r.totals.lineSuccess}回／失敗 ${r.totals.lineFail}回`
+  );
+  if (r.topFailIps.length) {
+    lines.push("失敗の多いIP：" + r.topFailIps.map((x) => `${x.ip}（${x.fails}回・${x.members}件）`).join("、"));
+  }
+  if (r.topFailMembers.length) {
+    lines.push("失敗の多い会員番号：" + r.topFailMembers.map((x) => `${x.memberNo}（${x.fails}回）`).join("、"));
+  }
+  lines.push(
+    `新規アカウント：会員 ${r.newAuthUsers.member}件、スタッフ ${r.newAuthUsers.staff}件、その他 ${r.newAuthUsers.other.length}件`
+  );
+  lines.push("");
+  lines.push(`本部権限アカウント（${r.honbuAccounts.length}件）：`);
+  r.honbuAccounts.forEach((h) =>
+    lines.push(`・${h.email}　最終ログイン ${h.lastSignIn}${h.isNew ? "　🆕今週作成" : ""}`)
+  );
+  if (r.deletedOldLogs) lines.push(`\n（${SEC_LOG_RETENTION_DAYS}日より古いログ ${r.deletedOldLogs}件を削除しました）`);
+  return lines.join("\n");
+}
+
+async function runSecurityReport(): Promise<{ report: SecurityReport; text: string }> {
+  const report = await buildSecurityReport();
+  const text = formatSecurityReport(report);
+  await db.collection("securityReports").doc(todayKeyJST()).set({
+    ...report,
+    text,
+    createdAt: admin.firestore.Timestamp.now(),
+  });
+  // 週次レポートはSlackには投稿しない（Firestoreに保存のみ）。即時アラートだけSlackに送る。
+  return { report, text };
+}
+
+/**
+ * 毎週月曜 9:00（JST）に過去7日間のログイン試行・アカウントを確認し、
+ * securityReports/{YYYY-MM-DD} に保存する（Slackには投稿しない）。
+ */
+export const weeklySecurityReport = onSchedule(
+  { schedule: "every monday 09:00", timeZone: "Asia/Tokyo" },
+  async () => {
+    await runSecurityReport();
+  }
+);
+
+/** 上と同じ処理を今すぐ実行する（本部のみ）。動作確認用。 */
+export const runSecurityReportNow = onCall(async (request) => {
+  if (request.auth?.token?.role !== "honbu") {
+    throw new HttpsError("permission-denied", "本部のみ実行できます。");
+  }
+  const { text } = await runSecurityReport();
+  return { text };
+});
+
+/**
+ * 1時間ごとに Firebase Authentication のアカウントを確認し、前回から
+ * - 本部権限（role: honbu）のアカウントが増えた／外れた
+ * - 会員・スタッフ以外の想定外のアカウントが作られた
+ * 場合に即時アラートを送る。前回の状態は securityState/accounts に保存。
+ */
+export const watchPrivilegedAccounts = onSchedule(
+  { schedule: "every 60 minutes", timeZone: "Asia/Tokyo", secrets: [slackBotToken] },
+  async () => {
+    const honbu: Record<string, string> = {};
+    const other: Record<string, string> = {};
+    let pageToken: string | undefined;
+    do {
+      const page = await admin.auth().listUsers(1000, pageToken);
+      for (const u of page.users) {
+        const label = u.email || u.uid;
+        if (u.customClaims?.role === "honbu") honbu[u.uid] = label;
+        else if (!u.uid.startsWith("member_") && !u.uid.startsWith("staff_") && !u.uid.startsWith("keikonote_"))
+          other[u.uid] = label;
+      }
+      pageToken = page.pageToken;
+    } while (pageToken);
+
+    const stateRef = db.collection("securityState").doc("accounts");
+    const prevSnap = await stateRef.get();
+    if (prevSnap.exists) {
+      const prev = prevSnap.data() ?? {};
+      const prevHonbu = (prev.honbu ?? {}) as Record<string, string>;
+      const prevOther = (prev.other ?? {}) as Record<string, string>;
+      for (const [uid, label] of Object.entries(honbu)) {
+        if (!prevHonbu[uid]) {
+          await sendSecurityAlert("honbu_added_" + uid, `本部権限のアカウントが追加されました：${label}（UID ${uid}）。心当たりがなければすぐに確認してください。`);
+        }
+      }
+      for (const [uid, label] of Object.entries(prevHonbu)) {
+        if (!honbu[uid]) {
+          await sendSecurityAlert("honbu_removed_" + uid, `本部権限のアカウントが削除・権限解除されました：${label}（UID ${uid}）。`);
+        }
+      }
+      for (const [uid, label] of Object.entries(other)) {
+        if (!prevOther[uid] && !honbu[uid]) {
+          await sendSecurityAlert("other_added_" + uid, `会員・スタッフ以外の新しいアカウントが作られました：${label}（UID ${uid}）。心当たりがなければ確認してください。`);
+        }
+      }
+    }
+    await stateRef.set({ honbu, other, checkedAt: admin.firestore.Timestamp.now() });
+  }
+);
+
+/**
+ * お稽古ノート（/keiko-note）の閲覧用ログイン。
+ * 合言葉が正しければ、閲覧専用のゲスト（role: keikoNoteGuest）としてのカスタムトークンを発行する。
+ * Firestoreの keikoNoteEntries はログイン中の人だけが読めるルールにしてあるため、
+ * 会員・スタッフ・本部としてログインしていない人は、これでゲストログインしてから読む。
+ * 合言葉の誤りが10分以内に10回以上続いたら即時アラートを送る。
+ */
+export const keikoNoteGuestLogin = onCall<{ code: string }>(
+  { secrets: [keikoNoteAccessCode, slackBotToken] },
+  async (request) => {
+    const code = typeof request.data?.code === "string" ? request.data.code : "";
+    const expected = keikoNoteAccessCode.value();
+    const a = Buffer.from(code);
+    const b = Buffer.from(expected || "");
+    const ok = !!expected && a.length === b.length && crypto.timingSafeEqual(a, b);
+    if (!ok) {
+      const now = Date.now();
+      const ref = db.collection("securityCounters").doc("keikonote_code");
+      const recent = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const fails = ((snap.data()?.fails as number[]) ?? []).filter((t) => now - t < ALERT_IP_WINDOW_MS);
+        fails.push(now);
+        tx.set(ref, { fails: fails.slice(-50), updatedAt: admin.firestore.Timestamp.now() });
+        return fails.length;
+      });
+      if (recent >= 10) {
+        await sendSecurityAlert(
+          "keikonote_code",
+          `お稽古ノートの合言葉が10分以内に${recent}回間違えて入力されています。合言葉を当てようとしている可能性があります。`
+        );
+      }
+      throw new HttpsError("permission-denied", "合言葉が正しくありません。");
+    }
+    const token = await admin.auth().createCustomToken("keikonote_guest", { role: "keikoNoteGuest" });
+    return { token };
   }
 );
