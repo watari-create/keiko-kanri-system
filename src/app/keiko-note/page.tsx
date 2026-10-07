@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { signInWithCustomToken } from "firebase/auth";
 import { useAuth } from "@/lib/AuthContext";
 import { KEIKO_NOTE_CLASSES } from "@/lib/keikoNoteData";
 import type {
@@ -972,11 +974,33 @@ export default function KeikoNotePage() {
   const [form, setForm] = useState<FormState>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
-  // データはログイン中の人しか読めないので、未ログインなら合言葉ページで（ゲスト）ログインしてもらう
+  // データはログイン中の人しか読めない。
+  // ・会員・スタッフ・本部としてログイン済み → そのまま表示（合言葉不要）
+  // ・未ログインでも、以前に合言葉を入れたCookieがある → 自動で閲覧専用ゲストとしてログイン
+  // ・どちらでもない → 合言葉ページへ
   useEffect(() => {
-    if (!loading && !user) {
-      window.location.href = "/keiko-note/access?next=" + encodeURIComponent(window.location.pathname);
-    }
+    if (loading || user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/keiko-note-access", { method: "GET" });
+        const data = await res.json().catch(() => ({ ok: false }));
+        if (data.ok && data.code) {
+          const guestLogin = httpsCallable<{ code: string }, { token: string }>(getFunctions(), "keikoNoteGuestLogin");
+          const result = await guestLogin({ code: data.code });
+          await signInWithCustomToken(auth, result.data.token);
+          return; // ログインできればuserが入り、そのまま表示される
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      if (!cancelled) {
+        window.location.href = "/keiko-note/access?next=" + encodeURIComponent(window.location.pathname);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loading, user]);
 
   useEffect(() => {

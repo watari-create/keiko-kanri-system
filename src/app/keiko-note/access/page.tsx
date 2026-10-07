@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 // お稽古ノート（/keiko-note）用の合言葉入力ページ。
-// middleware（src/middleware.ts）が、合言葉Cookieを持たないアクセスをここへ誘導する。
+// お稽古ノートのページ（src/app/keiko-note/page.tsx）が、ログインしていない人をここへ誘導する。
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
