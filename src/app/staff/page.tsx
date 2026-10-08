@@ -136,7 +136,7 @@ export default function StaffPage() {
   }, [group]);
 
   useEffect(() => {
-    // 許状申請は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）のグループのみ対象。
+    // 許状申請は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座・新月会）のグループのみ対象。
     // 宗徧流稽古側のグループでは、スタッフの役割（世話人・講師）に関わらず対象外。
     if (!group || !isHonbuKeikoGroup(group)) return;
     const q = query(collection(db, "licenseRequests"), where("group", "==", group));

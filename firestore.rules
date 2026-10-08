@@ -13,6 +13,12 @@ service cloud.firestore {
     }
 
     // 本部アカウントかどうか（Firebase Authのカスタムクレームで管理）
+    // 正規の利用者（本部・スタッフ・会員）。Firebase Authにはメール/パスワードで誰でも
+    // アカウントを作れてしまうため、「ログインしているだけ」ではなく役割（role）まで確認する。
+    function isKnownUser() {
+      return isSignedIn() && request.auth.token.role in ['honbu', 'staff', 'member'];
+    }
+
     function isHonbu() {
       return isSignedIn() && request.auth.token.role == 'honbu';
     }
@@ -36,10 +42,10 @@ service cloud.firestore {
       return isStaffFor(group) && staffDoc().role == 'teacher';
     }
 
-    // 許状申請（licenseRequests）は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）のみ対象。
+    // 許状申請（licenseRequests）は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座・新月会）のみ対象。
     // 宗徧流稽古側のグループでは、スタッフの役割（世話人・講師）に関わらず許状申請の機能自体を使わない。
     function isHonbuKeikoGroup(group) {
-      return group in ['名月会', '茶道教室', 'Gマダムの茶の湯講座'];
+      return group in ['名月会', '茶道教室', 'Gマダムの茶の湯講座', '新月会'];
     }
 
     // 本人（マイページ）かどうか
@@ -185,7 +191,7 @@ service cloud.firestore {
 
     // ---- meta（Googleカレンダーから同期した「次回のお稽古」日など） ----
     match /meta/{docId} {
-      allow read: if isSignedIn();
+      allow read: if isKnownUser();
       allow write: if false; // Cloud Functions（Googleカレンダー同期）からのみ
     }
 
@@ -222,7 +228,7 @@ service cloud.firestore {
 
     // ---- chadoClassSessions（茶道教室：木曜日・日曜日クラスの開催日ごとの担当講師・出欠） ----
     match /chadoClassSessions/{sessionId} {
-      allow read: if isSignedIn();
+      allow read: if isKnownUser();
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }
 
@@ -231,7 +237,7 @@ service cloud.firestore {
     // （定員チェックをトランザクションで確実に行うため、クライアントからの直接書き込みは許可しない）。
     // 開催日の追加・担当講師や定員の設定、予約の手動修正は本部・茶道教室担当の世話人・講師が管理画面から行う。
     match /chadoSaturdaySessions/{sessionId} {
-      allow read: if isSignedIn();
+      allow read: if isKnownUser();
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }
 
@@ -247,10 +253,10 @@ service cloud.firestore {
     // 開けないよう合言葉（アクセスコード）で保護している（アプリ側のmiddlewareで実施）。
     // 記録の追加・編集・削除は本部、または茶道教室担当の世話人・講師のみ（ログイン必須）。
     match /keikoNoteEntries/{entryId} {
-      // 2026-10-07：誰でも読める状態をやめ、ログイン中の人だけ読めるようにした。
-      // 会員・スタッフ・本部以外は、合言葉で keikoNoteGuestLogin（Cloud Functions）から
-      // 閲覧専用ゲストとしてログインしてから読む。
-      allow read: if isSignedIn();
+      // 2026-10-07：誰でも読める状態をやめ、本部・スタッフ・会員と、合言葉で入った
+      // 閲覧専用ゲスト（keikoNoteGuestLogin で発行、role: keikoNoteGuest）だけが読めるようにした。
+      // ゲストはこのお稽古ノート以外は読めない。
+      allow read: if isKnownUser() || (isSignedIn() && request.auth.token.role == 'keikoNoteGuest');
       allow write: if isHonbu() || isStaffFor('茶道教室');
     }
 

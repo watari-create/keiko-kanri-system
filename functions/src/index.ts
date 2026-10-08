@@ -783,7 +783,7 @@ export const onMemberCreated = onDocumentCreated(
     const data = event.data?.data();
     if (!data) return;
 
-    // 本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）の入会申込のみ通知する。
+    // 本部稽古（名月会・茶道教室・Gマダムの茶の湯講座・新月会）の入会申込のみ通知する。
     // 宗徧流稽古・UCIの新規登録（名簿のCSV一括取り込みを含む）ではSlack通知しない。
     if (data.groupCategory !== "本部稽古") return;
 
@@ -1299,7 +1299,8 @@ export const loginViaLine = onCall<{ idToken: string }>({ secrets: [slackBotToke
 
 // 「次回のお稽古」表示の対象となる会。イベントのタイトルにこの文字列が
 // 含まれているかどうかで、どの会のお稽古かを判定する（例："名月会お稽古"）。
-const LESSON_GROUPS = ["名月会", "Gマダムの茶の湯講座", "茶道教室"];
+// 新月会は月2会開催。カレンダーの予定タイトルに「新月会」を含めると次回のお稽古として拾われる。
+const LESSON_GROUPS = ["名月会", "Gマダムの茶の湯講座", "茶道教室", "新月会"];
 
 interface NextLessonInfo {
   date: string; // イベントのstart（終日なら日付のみ、時刻指定ならISO日時）

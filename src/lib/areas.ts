@@ -5,7 +5,8 @@
 // 管理画面（admin/page.tsx）側のAREA_GROUPSと対になっているので、
 // グループ構成を変える場合はそちらも合わせて確認すること。
 
-export const HONBU_KEIKO_GROUPS = ["名月会", "茶道教室", "Gマダムの茶の湯講座"];
+// 新月会：2026-10-12開始（指導者・責任者 山田宗囲）。入会フォームは保留中のため enrollGroups.ts には未登録。
+export const HONBU_KEIKO_GROUPS = ["名月会", "茶道教室", "Gマダムの茶の湯講座", "新月会"];
 export const SOHENRYU_KEIKO_GROUPS = ["雪月花", "一喝会", "星組", "不識会", "萌芽会", "紅月会"];
 // UCI（点前指導ではなく、世界観・哲学などを扱う会）。運用は宗徧流稽古と同じ
 // （CSV一括インポートで名簿管理・出席簿あり・許状申請／経理は対象外）。
@@ -15,7 +16,7 @@ export function isUciGroup(group: string): boolean {
   return UCI_GROUPS.includes(group);
 }
 
-// 本部稽古（名月会・茶道教室・Gマダムの茶の湯講座）のグループかどうか。
+// 本部稽古（名月会・茶道教室・Gマダムの茶の湯講座・新月会）のグループかどうか。
 // 許状申請の提出・状況表示は、このエリアのグループでのみ行う
 // （宗徧流稽古側は、スタッフの役割が「講師」であっても許状申請は対象外）。
 export function isHonbuKeikoGroup(group: string): boolean {
