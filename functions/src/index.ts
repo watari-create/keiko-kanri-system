@@ -1489,14 +1489,15 @@ export const sendLineReminders = onSchedule(
       }
     }
 
-    // 2. 出欠リマインド:明日が「次回のお稽古」日の会について、出欠未回答の会員に送る
-    // (茶道教室・土曜日クラスは予約制のため対象外。木曜日・日曜日クラスはrsvpで管理するため対象)
+    // 2. 出欠リマインド:明日が「次回のお稽古」日の茶道教室クラスについて、出欠未回答の会員に送る
+    // (自動リマインドは茶道教室のみが対象。土曜日クラスは予約制のため対象外。木曜日・日曜日クラスはrsvpで管理するため対象)
     const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
     const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
     if (nextDates) {
       for (const [key, info] of Object.entries(nextDates)) {
         if (info.date.slice(0, 10) !== tomorrowKey) continue;
         const group = key.split("・")[0];
+        if (group !== "茶道教室") continue;
         const membersSnap = await db.collection("members").where("group", "==", group).get();
         for (const memberDoc of membersSnap.docs) {
           const member = memberDoc.data();
