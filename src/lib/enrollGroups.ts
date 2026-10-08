@@ -146,7 +146,8 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
       defaultKey: "月1回",
       options: {
         "月1回": { label: "茶道教室　月1回", amount: "¥15,000", link: "https://square.link/u/Mt9gZ51b", monthlyQuota: 1 },
-        "月2回": { label: "茶道教室　月2回（土曜日クラスのみ）", amount: "¥28,000", link: "https://square.link/u/2iuoWXm9", monthlyQuota: 2 },
+        // 入門時は月1回のみ。土曜日クラス（月2回プラン）は入門修了後の進級先のため、入会フォームでは選ばせない。
+        // 再開する場合は "月2回": { label: "茶道教室　月2回（土曜日クラスのみ）", amount: "¥28,000", link: "https://square.link/u/2iuoWXm9", monthlyQuota: 2 }
       },
     },
     notice: {
@@ -163,22 +164,12 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
         id: "chadoClass",
         label: "ご希望のクラス",
         type: "select",
-        options: ["土曜日", "木曜日", "日曜日"],
+        options: ["木曜日", "日曜日"], // 入門時は土曜日クラスを選択不可
         optionLabels: {
-          "土曜日": "土曜日クラス（月2回開催・午前／午後から予約）",
           "木曜日": "木曜日クラス（15:00〜17:00）",
           "日曜日": "日曜日クラス（10:00〜12:00）",
         },
         required: true,
-      },
-      {
-        id: "plan",
-        label: "ご契約プラン",
-        type: "select",
-        options: ["月1回", "月2回"],
-        optionLabels: { "月1回": "月1回（¥15,000／月）", "月2回": "月2回（¥28,000／月）" },
-        required: true,
-        showIf: { field: "chadoClass", equals: "土曜日" },
       },
       { id: "name", label: "氏名", type: "text", placeholder: "山田 花子", required: true },
       { id: "nameKana", label: "氏名（フリガナ）", type: "text", placeholder: "ヤマダ ハナコ", required: true },

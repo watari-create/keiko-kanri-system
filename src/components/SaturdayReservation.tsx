@@ -82,7 +82,7 @@ export default function SaturdayReservation({
         </span>
       </div>
       <p className="text-xs text-muted mb-3">
-        予約して欠席された回数分の振替チケットが付与されます（予約しなかった回は対象外です）。月{quota}回の予約枠を使い切った後も、チケット1枚につき1回追加で予約できます。
+        予約して欠席された回数分の振替チケットが付与されます（予約しなかった回は対象外です）。月{quota}回の予約枠を使い切った後も、チケット1枚につき1回追加で予約できます。同じ日の午前と午後を両方予約することもできます（それぞれ1回と数えます）。
       </p>
       {sessions.length === 0 && (
         <p className="text-xs text-muted">現在、予約可能な開催日はありません。本部にお問い合わせください。</p>
