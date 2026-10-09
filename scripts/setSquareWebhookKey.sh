@@ -5,7 +5,8 @@
 cd "$(dirname "$0")/.."
 echo ""
 echo "👉 Squareの画面で Signature key をコピーして、ここに貼り付けて Enter を押してください。"
-read "RAW?Signature key: "
+read -s "RAW?Signature key（貼り付けても画面には表示されません）: "
+echo ""
 KEY="$(printf '%s' "$RAW" | tr -d '[:space:]')"
 LEN=${#KEY}
 if [ "$LEN" -lt 10 ] || [ "$LEN" -gt 100 ] || [[ "$KEY" == *zsh* ]] || [[ "$KEY" == *firebase* ]] || [[ "$KEY" == *npx* ]] || [[ "$KEY" == *scripts* ]]; then

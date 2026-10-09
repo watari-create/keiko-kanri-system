@@ -5,7 +5,8 @@
 cd "$(dirname "$0")/.."
 echo ""
 echo "👉 Squareの Credentials 画面（Production）の Access token をコピーして、ここに貼り付けて Enter を押してください。"
-read "RAW?Access token: "
+read -s "RAW?Access token（貼り付けても画面には表示されません）: "
+echo ""
 TOKEN="$(printf '%s' "$RAW" | tr -d '[:space:]')"
 LEN=${#TOKEN}
 if [[ "$TOKEN" != EAAA* ]] || [ "$LEN" -lt 40 ]; then
