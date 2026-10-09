@@ -73,6 +73,8 @@ export interface Member {
   // 会員ごとの個別のお月謝（都度払いの場合は1回あたり）。未設定（またはnull）の場合は会の標準額（lib/memberFees.ts）を使う。
   // ご家族割引や、標準額の決まっていない宗徧流稽古の会などで設定する。
   monthlyFee?: number | null;
+  // 入会フォームの独自項目（管理画面の「会の設定」で追加した項目）の回答。「項目名：回答」
+  enrollAnswers?: Record<string, string>;
   paymentStatus?: "済" | "未納";
   nextBillingDate?: string;
   rsvp?: Rsvp;

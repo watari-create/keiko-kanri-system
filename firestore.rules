@@ -24,6 +24,20 @@ service cloud.firestore {
     }
 
     // 世話人・講師のスタッフドキュメントを取得
+    // 会の設定（groupSettings/{会の名前}）。公開の入会フォームの受付可否の判定に使う
+    function groupSettingPath(group) {
+      return /databases/$(database)/documents/groupSettings/$(group);
+    }
+    // 入会フォームからの申し込みを受け付けている会か。
+    // 管理画面で一度も保存していない会（ドキュメントなし）は、従来どおり名月会・G1マダム・茶道教室のみ受付。
+    function enrollOpenFor(group, category) {
+      return exists(groupSettingPath(group))
+        ? (get(groupSettingPath(group)).data.enrollOpen == true
+            && get(groupSettingPath(group)).data.active == true
+            && get(groupSettingPath(group)).data.area == category)
+        : (group in ['名月会', 'Gマダムの茶の湯講座', '茶道教室'] && category == '本部稽古');
+    }
+
     function staffDoc() {
       return get(/databases/$(database)/documents/staff/$(request.auth.token.staffId)).data;
     }
@@ -44,8 +58,11 @@ service cloud.firestore {
 
     // 許状申請（licenseRequests）は本部稽古（名月会・茶道教室・Gマダムの茶の湯講座・新月会）のみ対象。
     // 宗徧流稽古側のグループでは、スタッフの役割（世話人・講師）に関わらず許状申請の機能自体を使わない。
+    // 管理画面の「会の設定」で発足した会（groupSettings の area が本部稽古）も含める。
     function isHonbuKeikoGroup(group) {
-      return group in ['名月会', '茶道教室', 'Gマダムの茶の湯講座', '新月会'];
+      return group in ['名月会', '茶道教室', 'Gマダムの茶の湯講座', '新月会']
+        || (exists(/databases/$(database)/documents/groupSettings/$(group))
+            && get(/databases/$(database)/documents/groupSettings/$(group)).data.area == '本部稽古');
     }
 
     // 本人（マイページ）かどうか
@@ -93,11 +110,12 @@ service cloud.firestore {
       // 注：Cloud Functionsが使えるようになったら、スパム防止のためこちらの経路を
       //     コールアブル関数（Callable Functions）に置き換えることを推奨。
       allow create: if request.resource.data.status == '在籍'
-        && request.resource.data.groupCategory == '本部稽古'
+        && request.resource.data.groupCategory in ['本部稽古', 'UCI', '宗徧流稽古']
         && request.resource.data.license == '入門'
         && request.resource.data.paymentStatus == '未納'
         && request.resource.data.rsvp == '未回答'
-        && request.resource.data.group in ['名月会', 'Gマダムの茶の湯講座', '茶道教室']
+        && request.resource.data.group is string
+        && enrollOpenFor(request.resource.data.group, request.resource.data.groupCategory)
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.email is string && request.resource.data.email.size() > 0
         && request.resource.data.keys().hasOnly([
@@ -105,8 +123,12 @@ service cloud.firestore {
              'occupation', 'otherLessons', 'healthNotes', 'emergencyContact', 'expectations',
              'group', 'groupCategory', 'license', 'joinDate', 'status', 'paymentMethod',
              'paymentStatus', 'rsvp', 'email', 'phone', 'address', 'createdAt',
-             'gender', 'affiliation', 'chadoClass', 'chadoMonthlyQuota', 'chadoCohortId'
+             'gender', 'affiliation', 'chadoClass', 'chadoMonthlyQuota', 'chadoCohortId',
+             'enrollAnswers'
            ])
+        // 管理画面で追加した独自の項目の回答（項目名：回答の文字列）
+        && (!('enrollAnswers' in request.resource.data)
+             || (request.resource.data.enrollAnswers is map && request.resource.data.enrollAnswers.size() <= 30))
         // 新規募集クラスからの入会は、受付中のクラスのみ許可
         && (!('chadoCohortId' in request.resource.data)
              || (request.resource.data.chadoCohortId is string
@@ -198,6 +220,15 @@ service cloud.firestore {
         allow read: if isHonbu() || isSelf(memberId);
         allow write: if false;
       }
+    }
+
+    // ---- groupSettings（会の設定：料金・入会の申し込み・会の発足／削除。管理画面「会の設定」タブ） ----
+    // 入会フォーム（未ログイン）・マイページが料金や受付の可否を表示するため、読み取りは公開。
+    // 変更は本部のみ。会員データと結びつくため削除はさせない（「削除」は active=false にする）。
+    match /groupSettings/{groupName} {
+      allow read: if true;
+      allow create, update: if isHonbu();
+      allow delete: if false;
     }
 
     // ---- Square連携の内部データ（プランIDのキャッシュ・受信済みWebhook） ----

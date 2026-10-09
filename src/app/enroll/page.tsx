@@ -5,7 +5,7 @@
 // このURLに直接誘導できるよう、/enroll として独立させている。
 //
 // 会員番号は送信と同時にその場で発行する（本部の事前承認は挟まない）。
-// 発行ロジック・料金・入力項目は src/lib/enrollGroups.ts を参照。
+// 料金・入力項目・受付の可否は管理画面の「会の設定」（Firestore groupSettings、既定値は src/lib/groupSettings.ts）。
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +13,56 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
-import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
+import { MEMBER_COUNTER_START, type EnrollField } from "@/lib/enrollGroups";
+import { STANDARD_FIELD_IDS, useGroupSettings, useGroupSettingsLoaded, type GroupSetting } from "@/lib/groupSettings";
 import type { ChadoClassLedgerEntry, ChadoRecruitClass, PaymentMethod } from "@/types";
 import { formatYenNum, recruitTimeLabel } from "@/lib/chadoRecruit";
-import { entryFeeFor } from "@/lib/memberFees";
 import { chadoEnrollOptionLabel, mergeChadoLedger } from "@/lib/chadoClassLedger";
 
 type Step = "form" | "confirm";
 
+const yenLabel = (n: number | null | undefined) => (typeof n === "number" ? formatYenNum(n) : "");
+
+// 会の設定から、入会フォームで使う形（従来の enrollGroups.ts と同じ形）を組み立てる
+function toEnrollGroup(s: GroupSetting) {
+  const paymentField: EnrollField[] = s.allowSessionPay
+    ? [{ id: "paymentMethod", label: "お支払い方法", type: "select", options: ["月謝（自動払い）", "都度払い"], required: true }]
+    : [];
+  const isChado = s.name === "茶道教室";
+  return {
+    key: s.enrollKey,
+    title: s.name,
+    label: s.displayName,
+    area: s.area,
+    cardAutoPay: s.cardAutoPay,
+    // 入会金を自動でいただく仕組み（カード登録時・支払いページ・請求書）は本部稽古の会のみ
+    entryFee: s.area === "本部稽古" ? s.entryFee : null,
+    amounts: { subscription: yenLabel(s.monthlyFee), onetime: yenLabel(s.sessionFee) },
+    links: { subscription: s.subscriptionLink },
+    fields: [...s.enrollFields, ...paymentField],
+    notice:
+      s.enrollNotice || s.guideUrl
+        ? { body: s.enrollNotice, guideUrl: s.guideUrl, guideLabel: s.guideLabel || undefined }
+        : undefined,
+    extraFeeNote: s.entryFee != null && s.area === "本部稽古" ? { label: "入会金（初回のみ）", body: s.entryFeeNote } : undefined,
+    // 茶道教室：月謝はプラン（入門時は月1回のみ。土曜日クラス＝月2回プランは入門修了後の進級先のため入会フォームでは選ばせない）
+    plans: isChado
+      ? {
+          fieldId: "plan",
+          defaultKey: "月1回",
+          options: {
+            "月1回": { label: "茶道教室　月1回", amount: yenLabel(s.monthlyFee), link: s.subscriptionLink, monthlyQuota: 1 as 1 | 2 },
+          } as Record<string, { label: string; amount: string; link: string; monthlyQuota?: 1 | 2 }>,
+        }
+      : undefined,
+  };
+}
+
 export default function EnrollPage() {
-  const [groupKey, setGroupKey] = useState<string>("meigetsu");
+  const groupSettings = useGroupSettings();
+  const settingsLoaded = useGroupSettingsLoaded();
+  const enrollGroups = groupSettings.filter((g) => g.active && g.enrollOpen && g.enrollKey).map(toEnrollGroup);
+  const [groupKey, setGroupKey] = useState<string>("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [step, setStep] = useState<Step>("form");
   const [issuedNo, setIssuedNo] = useState<string | null>(null);
@@ -63,9 +103,11 @@ export default function EnrollPage() {
   }, []);
   const [recruitClasses, setRecruitClasses] = useState<ChadoRecruitClass[] | null>(null);
 
-  const baseGroup = ENROLL_GROUPS[groupKey];
-  const group =
-    baseGroup.title === "茶道教室"
+  const baseGroup = enrollGroups.find((g) => g.key === groupKey) ?? enrollGroups[0];
+  const noGroupOpen = settingsLoaded && enrollGroups.length === 0;
+  const group = !baseGroup
+    ? null
+    : baseGroup.title === "茶道教室"
       ? {
           ...baseGroup,
           fields: baseGroup.fields.map((f) =>
@@ -87,25 +129,25 @@ export default function EnrollPage() {
       : baseGroup;
   // 茶道教室で受付中のクラスが1つも無いときは、フォームの代わりに案内を表示する
   const chadoClosed =
-    baseGroup.title === "茶道教室" &&
+    baseGroup?.title === "茶道教室" &&
     chadoOpenClasses !== null &&
     recruitClasses !== null &&
     chadoOpenClasses.length === 0 &&
     recruitClasses.length === 0;
-  const chadoLoading = baseGroup.title === "茶道教室" && (chadoOpenClasses === null || recruitClasses === null);
+  const chadoLoading = baseGroup?.title === "茶道教室" && (chadoOpenClasses === null || recruitClasses === null);
   // 選択中の新規募集クラス
   const selectedRecruit =
-    baseGroup.title === "茶道教室" && values.chadoClass?.startsWith("cohort:")
+    baseGroup?.title === "茶道教室" && values.chadoClass?.startsWith("cohort:")
       ? (recruitClasses ?? []).find((c) => `cohort:${c.id}` === values.chadoClass) ?? null
       : null;
 
   // showIf の条件を満たす項目だけを表示・必須チェックする（例：茶道教室のプランは土曜日クラスのみ）
-  const visibleFields = group.fields.filter(
+  const visibleFields = (group?.fields ?? []).filter(
     (f) => !f.showIf || values[f.showIf.field] === f.showIf.equals
   );
 
   // プラン制の会（茶道教室）で、現在選ばれているプラン
-  const selectedPlan = group.plans
+  const selectedPlan = group?.plans
     ? group.plans.options[
         visibleFields.some((f) => f.id === group.plans!.fieldId) && values[group.plans.fieldId]
           ? values[group.plans.fieldId]
@@ -117,8 +159,10 @@ export default function EnrollPage() {
   // 会ごとの募集チラシ・SNS等から、案内文つきのページへ直接誘導するのに使う。
   useEffect(() => {
     const g = new URLSearchParams(window.location.search).get("group");
-    if (g && ENROLL_GROUPS[g]) setGroupKey(g);
+    if (g) setGroupKey(g);
   }, []);
+  // ?group= で指定された会が受付停止中のとき
+  const requestedClosed = settingsLoaded && !!groupKey && !enrollGroups.some((g) => g.key === groupKey);
 
   function setField(id: string, v: string) {
     setValues((prev) => ({ ...prev, [id]: v }));
@@ -126,6 +170,12 @@ export default function EnrollPage() {
 
   function handleGroupChange(key: string) {
     setGroupKey(key);
+    // URLの ?group= も合わせる（そのまま共有・ブックマークできるように）
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("group", key);
+      window.history.replaceState(null, "", url.toString());
+    } catch {}
     setValues({});
     setError(null);
   }
@@ -133,7 +183,7 @@ export default function EnrollPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (chadoClosed || chadoLoading) return;
+    if (chadoClosed || chadoLoading || !group || !settingsLoaded) return;
 
     for (const f of visibleFields) {
       if (f.required && !values[f.id]?.trim()) {
@@ -156,6 +206,13 @@ export default function EnrollPage() {
         }
       }
       const paymentMethod: PaymentMethod = isOneTime ? "都度払い" : "月謝";
+      // 管理画面で追加した独自の項目は、会員データの enrollAnswers に「項目名：回答」で保存する
+      const enrollAnswers: Record<string, string> = {};
+      for (const f of visibleFields) {
+        if (STANDARD_FIELD_IDS.includes(f.id) || ["paymentMethod", "chadoClass", "plan"].includes(f.id)) continue;
+        const v = values[f.id]?.trim();
+        if (v) enrollAnswers[f.label] = v;
+      }
       const counterRef = doc(db, "counters", "members");
 
       const issued = await runTransaction(db, async (tx) => {
@@ -183,7 +240,7 @@ export default function EnrollPage() {
           emergencyContact: values.emergencyContact ?? "",
           expectations: values.expectations ?? "",
           group: group.title,
-          groupCategory: "本部稽古",
+          groupCategory: group.area,
           license: "入門",
           joinDate: new Date().toISOString().slice(0, 10),
           status: "在籍",
@@ -194,6 +251,7 @@ export default function EnrollPage() {
           phone: values.phone ?? "",
           address: values.address ?? "",
           ...chadoFields,
+          ...(Object.keys(enrollAnswers).length ? { enrollAnswers } : {}),
           createdAt: serverTimestamp(),
         });
         return memberId;
@@ -244,7 +302,7 @@ export default function EnrollPage() {
       const cardBilling =
         process.env.NEXT_PUBLIC_SQUARE_BILLING_ENABLED === "1" &&
         !isOneTime &&
-        ["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(group.title);
+        group.cardAutoPay;
       const withCard = <T extends object>(info: T) => ({ ...info, cardBilling });
       setEntryFeeWithFirstPayment(cardBilling || onetimeEntryFee > 0);
       setPayInfo(withCard(
@@ -292,17 +350,17 @@ export default function EnrollPage() {
         <h1 className="text-xl font-bold text-matcha-deep">お稽古入会のお申し込み</h1>
       </div>
 
-      {step === "form" && group.notice && (
+      {step === "form" && !requestedClosed && group?.notice && (
         <div className="bg-matcha-pale border border-line rounded-md p-5 mb-6 text-sm leading-relaxed">
-          <p className="whitespace-pre-line mb-4">{group.notice.body}</p>
-          <a
+          {group.notice.body && <p className="whitespace-pre-line mb-4">{group.notice.body}</p>}
+          {group.notice.guideUrl && <a
             href={group.notice.guideUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="block text-center bg-white border border-matcha-deep text-matcha-deep rounded py-3 text-sm font-semibold"
           >
             {group.notice.guideLabel ?? "入会の手引きをダウンロード"}
-          </a>
+          </a>}
         </div>
       )}
 
@@ -313,16 +371,36 @@ export default function EnrollPage() {
               <label className="block text-xs text-muted mb-1">お申し込み先の会</label>
               <select
                 className="w-full border border-line rounded px-3 py-2 text-sm bg-[#FCFBF8]"
-                value={groupKey}
+                value={requestedClosed ? "" : baseGroup?.key ?? ""}
                 onChange={(e) => handleGroupChange(e.target.value)}
               >
-                {Object.values(ENROLL_GROUPS).map((g) => (
+                {requestedClosed && (
+                  <option value="" disabled>
+                    選択してください
+                  </option>
+                )}
+                {enrollGroups.map((g) => (
                   <option key={g.key} value={g.key}>
                     {g.label ?? g.title}
                   </option>
                 ))}
               </select>
             </div>
+
+            {!settingsLoaded && <p className="text-xs text-muted">読み込んでいます…</p>}
+            {(noGroupOpen || requestedClosed) && (
+              <div className="bg-matcha-pale border border-line rounded p-4 text-sm leading-relaxed">
+                {requestedClosed ? "お申し込みの会は、" : ""}現在、新規のご入会を受け付けておりません。
+                <br />
+                次回の募集は公式LINE・ホームページでご案内いたします。
+                {requestedClosed && enrollGroups.length > 0 && (
+                  <>
+                    <br />
+                    ほかの会へのお申し込みは、上の「お申し込み先の会」からお選びください。
+                  </>
+                )}
+              </div>
+            )}
 
             {chadoClosed && (
               <div className="bg-matcha-pale border border-line rounded p-4 text-sm leading-relaxed">
@@ -333,7 +411,7 @@ export default function EnrollPage() {
             )}
             {chadoLoading && <p className="text-xs text-muted">受付中のクラスを確認しています…</p>}
 
-            {!chadoClosed && !chadoLoading && visibleFields.map((f) => (
+            {settingsLoaded && !noGroupOpen && !requestedClosed && !chadoClosed && !chadoLoading && visibleFields.map((f) => (
               <div key={f.id}>
                 <label className="block text-xs text-muted mb-1">
                   {f.label}
@@ -418,7 +496,7 @@ export default function EnrollPage() {
             {error && <p className="text-hanko text-xs">{error}</p>}
 
             <button
-              disabled={submitting || chadoClosed || chadoLoading}
+              disabled={submitting || chadoClosed || chadoLoading || !settingsLoaded || noGroupOpen || requestedClosed || !group}
               className="w-full bg-matcha-deep text-white rounded py-3 text-sm disabled:opacity-50"
             >
               {submitting ? "送信中…" : "申し込む"}
@@ -454,7 +532,7 @@ export default function EnrollPage() {
                   <>
                     <p className="text-xs text-muted leading-relaxed mb-3">
                       お月謝は前払いのクレジットカード自動払いです（参加開始月の分はカード登録時、以降は毎月25日に翌月分）。
-                      {entryFeeFor(group.title) !== null && "入会金もカード登録時に同じカードでお支払いいただきます。"}
+                      {group?.entryFee != null && "入会金もカード登録時に同じカードでお支払いいただきます。"}
                       上の会員番号とご登録のメールアドレスでマイページにログインし、カード情報をご登録ください。
                     </p>
                     <a
@@ -481,12 +559,12 @@ export default function EnrollPage() {
               </div>
             )}
 
-            {entryFeeFor(group.title) !== null && (
+            {group?.entryFee != null && (
               <div className="border border-line rounded p-4 mt-3 bg-[#FCFBF8]">
-                <div className="text-xs text-muted mb-1">{group.extraFeeNote?.label ?? "入会金（初回のみ）"}</div>
-                <div className="text-lg font-bold mb-2">{formatYenNum(entryFeeFor(group.title) ?? 0)}</div>
+                <div className="text-xs text-muted mb-1">{group?.extraFeeNote?.label ?? "入会金（初回のみ）"}</div>
+                <div className="text-lg font-bold mb-2">{formatYenNum(group?.entryFee ?? 0)}</div>
                 <p className="text-xs text-muted leading-relaxed">
-                  {group.extraFeeNote?.body}
+                  {group?.extraFeeNote?.body}
                   {entryFeeWithFirstPayment
                     ? payInfo?.cardBilling
                       ? "マイページでカードをご登録いただく際に、お月謝と一緒にお支払いいただきます（別途のお手続きは不要です）。"

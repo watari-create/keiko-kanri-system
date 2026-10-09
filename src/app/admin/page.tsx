@@ -38,7 +38,9 @@ import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/l
 import { fiscalYearMonths, monthLabel } from "@/lib/fiscalMonths";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
-import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas";
+import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
+import { activeGroupsIn, allGroupSettings, cardAutoPayGroups, useGroupSettings } from "@/lib/groupSettings";
+import GroupSettingsPanel from "@/components/GroupSettingsPanel";
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import AdminSubscriptionStatus from "@/components/AdminSubscriptionStatus";
@@ -46,7 +48,7 @@ import SquareInvoiceInfo from "@/components/SquareInvoiceInfo";
 import OperationRules from "@/components/OperationRules";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
-import { memberFee, formatYen } from "@/lib/memberFees";
+import { memberFee, formatYen, entryFeeFor } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { CHADO_LEDGER_DEFAULTS, chadoKiLabel } from "@/lib/chadoClassLedger";
 import MonthSelect from "@/components/MonthSelect";
@@ -65,13 +67,18 @@ import type {
   ChadoRecruitClass,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "運用ルール";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "運用ルール"];
+type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "会の設定" | "運用ルール";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "会の設定", "運用ルール"];
+// 会員・申請の購読をしないタブ
+const NO_MEMBER_AREAS: Area[] = ["スタッフ管理", "会員名簿", "会の設定", "運用ルール"];
 
-// 経理タブの対象グループ（名月会・Gマダムの茶の湯講座・新月会・茶道教室）
-const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座", "新月会", "茶道教室"];
-// 入会金の請求書を送る会と金額（functions/src/squareInvoice.ts の ENTRY_FEE_INVOICE と同じ）
-const ENTRY_FEE_BY_GROUP: Record<string, number> = { "名月会": 33000, "茶道教室": 15000 };
+// 経理タブの対象グループ（本部稽古の会。削除済みの会も入金の確認のため含める）。入会金の金額は「会の設定」
+function keiriGroups(): string[] {
+  return allGroupSettings()
+    .filter((g) => g.area === "本部稽古")
+    .map((g) => g.name)
+    .slice(0, 30); // Firestoreの in 条件の上限
+}
 // 茶道教室の入会金は、Square請求書の自動送信を始めた日以降の入会者から経理タブに表示する
 const CHADO_ENTRY_FEE_FROM = "2026-10-10";
 // この日以降の入会者は、入会金をカード登録時・支払いページでお月謝と一緒にいただく（functions/src/entryFee.ts の
@@ -79,12 +86,11 @@ const CHADO_ENTRY_FEE_FROM = "2026-10-10";
 const ENTRY_FEE_WITH_FIRST_PAYMENT_FROM = "2026-10-10";
 const ENTRY_FEE_INVOICE_AFTER_DAYS = 3;
 
-// エリアごとの対象グループ。経理・スタッフ管理はグループ選択なし（下のコードで分岐）。
-const AREA_GROUPS: Record<string, string[]> = {
-  "宗徧流稽古": ["雪月花", "一喝会", "星組", "不識会", "萌芽会", "紅月会"],
-  "本部稽古": ["名月会", "茶道教室", "Gマダムの茶の湯講座", "新月会"],
-  "UCI": UCI_GROUPS,
-};
+// エリアごとの対象グループ（「会の設定」で発足・削除した結果を反映）。経理・スタッフ管理はグループ選択なし（下のコードで分岐）。
+function areaGroups(a: string): string[] | undefined {
+  if (a === "宗徧流稽古" || a === "本部稽古" || a === "UCI") return activeGroupsIn(a);
+  return undefined;
+}
 
 // 雪月花は雪組・月組・花組の3つの実際のグループを束ねたもの。名簿はこの3区分で表示する。
 const SOHEN_SUBGROUPS = ["雪組", "月組", "花組"];
@@ -99,6 +105,8 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "経理": "名月会・G1マダムの茶の湯講座・新月会・茶道教室が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。許状代金と入会金はSquareの請求書を自動で送り、入金されると自動で「済」になります。",
   "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
+  "会の設定":
+    "会ごとの料金（お月謝・都度払い・入会金）と入会の申し込み（受付中／停止・案内文・入力項目）を変更します。新しい会の発足・会の削除もここで行います。",
   "運用ルール": "お稽古の形態整理と新規開講ルール、記入用テンプレート、現行の各会の登録シート（担当者・料金・運営ルール）を確認できます。",
 };
 
@@ -131,9 +139,8 @@ function toDraft(m: Member): MemberDraft {
 }
 
 function areaForGroup(g: string): Area {
-  if (AREA_GROUPS["本部稽古"].includes(g)) return "本部稽古";
-  if (AREA_GROUPS["宗徧流稽古"].includes(g)) return "宗徧流稽古";
-  if (AREA_GROUPS["UCI"].includes(g)) return "UCI";
+  const a = allGroupSettings().find((s) => s.name === g)?.area;
+  if (a) return a;
   // どのエリアにも属さない会は本部稽古にフォールバックする
   return "本部稽古";
 }
@@ -169,7 +176,8 @@ export default function AdminPage() {
   const router = useRouter();
 
   const [area, setArea] = useState<Area>("本部稽古");
-  const [group, setGroup] = useState(AREA_GROUPS["本部稽古"][0]);
+  const groupSettingsList = useGroupSettings(); // 会の設定が変わったら再描画する
+  const [group, setGroup] = useState(areaGroups("本部稽古")?.[0] ?? "名月会");
 
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
@@ -367,24 +375,26 @@ export default function AdminPage() {
   function switchArea(a: Area) {
     setArea(a);
     setShowNotifications(false);
-    if (AREA_GROUPS[a]) setGroup(AREA_GROUPS[a][0]);
+    const gs = areaGroups(a);
+    if (gs?.length) setGroup(gs[0]);
   }
 
   // 会員一覧をリアルタイム購読
   useEffect(() => {
     // 会員名簿タブはMemberRosterコンポーネント側で全会員を購読する
-    if (area === "スタッフ管理" || area === "会員名簿" || area === "運用ルール") {
+    if (NO_MEMBER_AREAS.includes(area)) {
       setMembers([]);
       return;
     }
     const q =
       area === "経理"
-        ? query(collection(db, "members"), where("group", "in", KEIRI_GROUPS))
+        ? query(collection(db, "members"), where("group", "in", keiriGroups()))
         : query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
     });
-  }, [area, group]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [area, group, area === "経理" ? keiriGroups().join(",") : ""]);
 
   // 許状申請をリアルタイム購読（本部稽古・経理のみ。宗徧流稽古は許状申請の仕組みを使わない）
   useEffect(() => {
@@ -394,12 +404,13 @@ export default function AdminPage() {
     }
     const q =
       area === "経理"
-        ? query(collection(db, "licenseRequests"), where("group", "in", KEIRI_GROUPS))
+        ? query(collection(db, "licenseRequests"), where("group", "in", keiriGroups()))
         : query(collection(db, "licenseRequests"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
     });
-  }, [area, group]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [area, group, area === "経理" ? keiriGroups().join(",") : ""]);
 
   // 退会・休会・復会申請をリアルタイム購読（本部稽古のみ）
   useEffect(() => {
@@ -554,8 +565,17 @@ export default function AdminPage() {
         !m.isTestAccount &&
         (m.joinDate >= CHADO_ENTRY_FEE_FROM || !!m.entryFeeInvoice || !!m.entryFeeInvoiceError || !!m.entryFeePaid)
     );
-    return [...meigetsuTargets, ...chado];
-  }, [members]);
+    // そのほかの入会金のある会（「会の設定」で入会金を設定した会）：入会金を最初のお支払いと一緒にいただく仕組みを始めた日以降の入会者
+    const others = members.filter(
+      (m) =>
+        m.group !== "名月会" &&
+        m.group !== "茶道教室" &&
+        !m.isTestAccount &&
+        entryFeeFor(m.group) !== null &&
+        (m.joinDate >= ENTRY_FEE_WITH_FIRST_PAYMENT_FROM || !!m.entryFeeInvoice || !!m.entryFeeInvoiceError || !!m.entryFeePaid)
+    );
+    return [...meigetsuTargets, ...chado, ...others];
+  }, [members, groupSettingsList]);
 
   // 経理タブ：Squareの請求書を手動で送る（自動送信できなかった場合や、自動送信を始める前の申請・入会者）
   const [invoiceSending, setInvoiceSending] = useState<string | null>(null);
@@ -1219,14 +1239,14 @@ export default function AdminPage() {
       </div>
       <p className="text-sm text-muted mb-6">{AREA_DESCRIPTION[area]}</p>
 
-      {area !== "スタッフ管理" && AREA_GROUPS[area] && (
+      {area !== "スタッフ管理" && areaGroups(area) && (
         <div className="flex items-center gap-3 mb-6">
           <select
             className="border border-line rounded px-3 py-2 text-sm"
             value={group}
             onChange={(e) => setGroup(e.target.value)}
           >
-            {AREA_GROUPS[area].map((g) => (
+            {areaGroups(area)!.map((g) => (
               <option key={g} value={g}>
                 {groupDisplayName(g)}
               </option>
@@ -1405,7 +1425,7 @@ export default function AdminPage() {
                       <td className="py-2 pr-3 font-semibold align-top">{m.name}</td>
                       <td className="pr-3 align-top">{groupDisplayName(m.group)}</td>
                       <td className="pr-3 align-top">{m.joinDate}</td>
-                      <td className="pr-3 align-top">¥{(ENTRY_FEE_BY_GROUP[m.group] ?? 0).toLocaleString()}</td>
+                      <td className="pr-3 align-top">¥{(entryFeeFor(m.group) ?? 0).toLocaleString()}</td>
                       <td className="whitespace-normal">
                         {m.entryFeeStatus === "済" ? (
                           <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
@@ -1443,7 +1463,7 @@ export default function AdminPage() {
                             sendInvoiceManually(
                               "entryFee",
                               m.id,
-                              `${m.name}様　入会金（${groupDisplayName(m.group)}）¥${(ENTRY_FEE_BY_GROUP[m.group] ?? 0).toLocaleString()}`
+                              `${m.name}様　入会金（${groupDisplayName(m.group)}）¥${(entryFeeFor(m.group) ?? 0).toLocaleString()}`
                             )
                           }
                         />
@@ -1463,7 +1483,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "運用ルール" && (
+      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "会の設定" && area !== "運用ルール" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
@@ -2134,6 +2154,7 @@ export default function AdminPage() {
 
       {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} />}
 
+      {area === "会の設定" && <GroupSettingsPanel />}
       {area === "運用ルール" && <OperationRules />}
 
       {area === "スタッフ管理" && (
@@ -2515,7 +2536,7 @@ export default function AdminPage() {
                   </select>
                 </Field>
               )}
-              {["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"].includes(selectedMember.group) && (
+              {cardAutoPayGroups().includes(selectedMember.group) && (
                 <>
                   <Field label="カード自動払い（Square）の申込みボタン">
                     <select
@@ -2606,6 +2627,18 @@ export default function AdminPage() {
                   onChange={(e) => setDraft({ ...draft, expectations: e.target.value })}
                 />
               </Field>
+              {selectedMember.enrollAnswers && Object.keys(selectedMember.enrollAnswers).length > 0 && (
+                <Field label="入会フォームの追加項目の回答" full>
+                  <dl className="text-sm grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                    {Object.entries(selectedMember.enrollAnswers).map(([k, v]) => (
+                      <Fragment key={k}>
+                        <dt className="text-muted">{k}</dt>
+                        <dd className="whitespace-pre-line">{v}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                </Field>
+              )}
             </div>
 
             {selectedMember.groupCategory === "本部稽古" && (

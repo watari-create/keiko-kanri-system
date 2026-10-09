@@ -28,6 +28,7 @@ import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, isUciGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
+import { useGroupSettings } from "@/lib/groupSettings";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
 import { SHINGETSU_GROUP } from "@/lib/shingetsu";
@@ -41,6 +42,7 @@ import MonthSelect from "@/components/MonthSelect";
 import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession, LineMessageLog } from "@/types";
 
 export default function StaffPage() {
+  useGroupSettings(); // 会の設定（表示名・エリア）の読み込み後に再描画する
   const { role, staffId, loading } = useAuth();
   const router = useRouter();
   const [account, setAccount] = useState<StaffAccount | null>(null);

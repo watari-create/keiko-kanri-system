@@ -10,13 +10,19 @@ import { CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { groupDisplayName, HONBU_KEIKO_GROUPS, SOHENRYU_KEIKO_GROUPS, UCI_GROUPS } from "@/lib/areas";
+import { groupDisplayName } from "@/lib/areas";
+import { allGroupSettings, cardAutoPayGroups, useGroupSettings } from "@/lib/groupSettings";
 import { memberFee, entryFeeFor, formatYen } from "@/lib/memberFees";
 import type { Member } from "@/types";
 import LegacySquareMigration from "@/components/LegacySquareMigration";
 
-// 表示順（宗徧流稽古 → 本部稽古 → UCI → その他）
-const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS, ...UCI_GROUPS];
+// 表示順（宗徧流稽古 → 本部稽古 → UCI → その他。エリア内は「会の設定」の並び順）
+const AREA_RANK: Record<string, number> = { "宗徧流稽古": 0, "本部稽古": 1, "UCI": 2 };
+function groupOrderList(): string[] {
+  return [...allGroupSettings()]
+    .sort((a, b) => (AREA_RANK[a.area] ?? 9) - (AREA_RANK[b.area] ?? 9) || a.order - b.order)
+    .map((g) => g.name);
+}
 const SUBGROUP_ORDER = ["雪組", "月組", "花組"];
 const CHADO_CLASS_ORDER = ["土曜日", "木曜日", "日曜日", "日曜日午後"];
 
@@ -41,8 +47,9 @@ export function memberClassLabel(m: Pick<Member, "chadoClass" | "subGroup">): st
 }
 
 function groupRank(g: string) {
-  const i = GROUP_ORDER.indexOf(g);
-  return i === -1 ? GROUP_ORDER.length : i;
+  const order = groupOrderList();
+  const i = order.indexOf(g);
+  return i === -1 ? order.length : i;
 }
 
 function classRank(m: Member) {
@@ -60,6 +67,7 @@ function csvCell(v: string | number | null | undefined) {
 }
 
 export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => void }) {
+  const groupSettings = useGroupSettings(); // 会の設定（料金・並び順）が変わったら再描画する
   const [all, setAll] = useState<Member[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [groupFilter, setGroupFilter] = useState("すべて");
@@ -97,7 +105,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   const groupOptions = useMemo(() => {
     const set = new Set(all.map((m) => m.group).filter(Boolean));
     return Array.from(set).sort((a, b) => groupRank(a) - groupRank(b) || a.localeCompare(b, "ja"));
-  }, [all]);
+  }, [all, groupSettings]);
 
   // ご家族の一覧（会員番号から引けない＝削除済みなどは番号のみ表示）
   function familyOf(m: Member) {
@@ -118,7 +126,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
 
   // 対象の会（月謝払い）の会員のカード自動払いの状況
   function cardStatus(m: Member): "対象外" | "未登録" | "登録済み" | "旧契約の解約待ち" {
-    if (!["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"].includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
+    if (!cardAutoPayGroups().includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
     const sub = subs[m.id];
     if (!sub || !["PENDING", "ACTIVE", "PAUSED"].includes(sub.status)) return "未登録";
     if (sub.migratedFromLink && !m.legacySquareCanceled) return "旧契約の解約待ち";
@@ -162,14 +170,14 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           a.id.localeCompare(b.id)
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, byId, groupFilter, keyword, familyOnly, includeTest, cardFilter, subs]);
+  }, [all, byId, groupFilter, keyword, familyOnly, includeTest, cardFilter, subs, groupSettings]);
 
   // 会ごとの人数（絞り込み後）
   const countsByGroup = useMemo(() => {
     const map = new Map<string, number>();
     rows.forEach((m) => map.set(m.group, (map.get(m.group) ?? 0) + 1));
     return Array.from(map.entries());
-  }, [rows]);
+  }, [rows, groupSettings]);
 
   // 表示中の在籍会員のお月謝合計（月額のみ。都度払い・金額未設定は除く）
   const feeSummary = useMemo(() => {
@@ -183,7 +191,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
         else monthlyTotal += f.amount;
       });
     return { monthlyTotal, perSessionCount, unsetCount };
-  }, [rows]);
+  }, [rows, groupSettings]);
 
   function downloadCsv() {
     const header = [

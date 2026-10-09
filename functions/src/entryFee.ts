@@ -7,7 +7,7 @@
  *  - 都度払いの会員             … 入会フォームの「今回分」の支払いページに入会金の明細を足して、1回で払う（squareSessionCheckout.ts）
  *  - どちらでも払われなかった会員 … 入会日から ENTRY_FEE_INVOICE_AFTER_DAYS 日（既定3日）たったら、従来どおりSquareの請求書を自動で送る（毎朝9:15）
  *
- * 対象：ENTRY_FEE_INVOICE の会（名月会 ¥33,000・茶道教室 ¥15,000）で、入会日が ENTRY_FEE_COLLECT_FROM 以降の新規入会者
+ * 対象：管理画面の「会の設定」で入会金を設定した本部稽古の会（既定は名月会 ¥33,000・茶道教室 ¥15,000）で、入会日が ENTRY_FEE_COLLECT_FROM 以降の新規入会者
  *       （それより前に入会して請求書が未入金のまま残っている会員も、カード登録・支払いページで一緒に払えるようにし、請求書は取り消す）
  *
  * 記録（members/{会員番号}）：
@@ -22,7 +22,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { square, squareAccessToken, todayJst, ymd } from "./square";
 import {
-  ENTRY_FEE_INVOICE,
+  entryFeeFor,
   InvoiceSummary,
   cancelSquareInvoice,
   handleOneOffInvoicePaid,
@@ -30,6 +30,7 @@ import {
   postKeiri,
   groupName,
 } from "./squareInvoice";
+import { refreshGroupSettings } from "./groupSettings";
 
 const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
 export const entryFeeCollectFrom = defineString("ENTRY_FEE_COLLECT_FROM", { default: "2026-10-10" });
@@ -57,7 +58,7 @@ export function invoiceAfterDays(): number {
  */
 export function pendingEntryFee(m: FirebaseFirestore.DocumentData | undefined): PendingEntryFee | null {
   if (!m) return null;
-  const conf = m.group ? ENTRY_FEE_INVOICE[m.group as string] : undefined;
+  const conf = entryFeeFor(m.group as string | undefined);
   if (!conf) return null;
   if (m.entryFeeStatus === "済" || m.isTestAccount === true || m.skipEnrollmentNotice === true) return null;
   const inv = m.entryFeeInvoice as InvoiceSummary | undefined;
@@ -180,6 +181,7 @@ export const sendPendingEntryFeeInvoices = onSchedule(
     secrets: [squareAccessToken, slackBotToken],
   },
   async () => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const [y, mo, d] = todayJst().split("-").map(Number);
     const cutoff = ymd(y, mo, d - invoiceAfterDays()); // この日以前に入会した会員が対象
     const from = entryFeeCollectFrom.value();

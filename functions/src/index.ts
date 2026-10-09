@@ -13,8 +13,9 @@ import {
   licenseInvoiceParams,
   describeInvoiceError,
   cancelSquareInvoice,
-  ENTRY_FEE_INVOICE,
+  entryFeeFor,
 } from "./squareInvoice";
+import { refreshGroupSettings, groupDisplayNameServer } from "./groupSettings";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -56,12 +57,10 @@ const slackHqChannel = defineString("SLACK_HQ_CHANNEL");
 // Slack通知文などユーザーの目に触れるテキストに使う表示用グループ名。
 // Firestoreのgroupフィールドやクエリ条件・メンション対象判定などの内部的な値は、既存データとの
 // 整合性のためこれまで通り「Gマダムの茶の湯講座」のままにし、表示だけ「G1マダムの茶の湯講座」にする。
-const GROUP_DISPLAY_NAMES: Record<string, string> = {
-  "Gマダムの茶の湯講座": "G1マダムの茶の湯講座",
-};
+// 表示名は管理画面の「会の設定」から（groupSettings.ts）。
 function groupDisplayName(group: unknown): string {
   if (typeof group !== "string") return "";
-  return GROUP_DISPLAY_NAMES[group] ?? group;
+  return groupDisplayNameServer(group);
 }
 
 // 請求書発行依頼のSlack通知でメンションする人のSlackユーザーID（例：U0123456）。
@@ -841,6 +840,7 @@ async function decrementNyumonSetInventory(gender: unknown, birthDate: unknown):
 export const onMemberCreated = onDocumentCreated(
   { document: "members/{memberId}", secrets: [slackBotToken, squareAccessToken] },
   async (event) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const data = event.data?.data();
     if (!data) return;
 
@@ -887,7 +887,7 @@ export const onMemberCreated = onDocumentCreated(
     // 入会金のある会（名月会 ¥33,000・茶道教室 ¥15,000）の新規入会：入会金は請求書ではなく、
     // カード登録時（月謝）・支払いページ（都度払い）でお月謝と一緒にいただく（entryFee.ts）。
     // ここでは「未納」にしておくだけ。入会から数日たっても払われなければ、毎朝のチェックで請求書を自動で送る。
-    if (data.isTestAccount !== true && ENTRY_FEE_INVOICE[data.group as string] && !data.entryFeeStatus) {
+    if (data.isTestAccount !== true && entryFeeFor(data.group as string | undefined) && !data.entryFeeStatus) {
       await event.data?.ref.update({ entryFeeStatus: "未納" }).catch(() => undefined);
     }
 

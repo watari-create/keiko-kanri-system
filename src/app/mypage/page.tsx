@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
 import SessionPaymentBox from "@/components/SessionPaymentBox";
 import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
+import { useGroupSettings } from "@/lib/groupSettings";
 import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
 import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME, CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import SaturdayReservation from "@/components/SaturdayReservation";
@@ -22,6 +23,7 @@ import MyPagePaymentCard from "@/components/MyPagePaymentCard";
 import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
+  useGroupSettings(); // 会の設定（表示名・エリア）の読み込み後に再描画する
   const { role, memberId, loading } = useAuth();
   const router = useRouter();
   const [member, setMember] = useState<Member | null>(null);

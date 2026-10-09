@@ -27,15 +27,12 @@ import * as crypto from "crypto";
 import { square, squareAccessToken, squareLocationId, ensureCustomer, todayJst, MemberDoc } from "./square";
 import { postKeiri, groupName } from "./squareInvoice";
 import { pendingEntryFee, markEntryFeePaid } from "./entryFee";
+import { refreshGroupSettings, sessionFeeStd } from "./groupSettings";
 
 const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
 const sessionUnpaidFrom = defineString("SESSION_UNPAID_FROM", { default: "2026-10" });
 
-/** 都度払いの1回あたりの標準額（src/lib/enrollGroups.ts の amounts.onetime と同じにしておくこと） */
-export const SESSION_FEES: Record<string, number> = {
-  "名月会": 15000,
-  "Gマダムの茶の湯講座": 20000,
-};
+// 都度払いの1回あたりの標準額は、管理画面の「会の設定」から読む（groupSettings.ts の sessionFeeStd）
 
 interface SessionMember extends MemberDoc {
   attendance?: Record<string, string>;
@@ -74,7 +71,7 @@ function monthLabel(ym: string): string {
 
 function sessionFeeFor(m: SessionMember): number | null {
   if (typeof m.monthlyFee === "number" && m.monthlyFee > 0) return m.monthlyFee;
-  return (m.group && SESSION_FEES[m.group]) || null;
+  return sessionFeeStd(m.group);
 }
 
 function isMonthKey(v: unknown): v is string {
@@ -213,6 +210,7 @@ function wrapError(err: unknown): never {
 export const createSessionCheckout = onCall<{ monthKey: string; returnUrl?: string }>(
   { secrets: [squareAccessToken] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const memberId = request.auth?.token?.memberId as string | undefined;
     if (request.auth?.token?.role !== "member" || !memberId) {
       throw new HttpsError("permission-denied", "会員としてログインしてください。");
@@ -239,6 +237,7 @@ export const createSessionCheckout = onCall<{ monthKey: string; returnUrl?: stri
 export const createEnrollSessionCheckout = onCall<{ memberId: string; returnUrl?: string }>(
   { secrets: [squareAccessToken] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const memberId = String(request.data?.memberId ?? "");
     if (!/^\d{5,10}$/.test(memberId)) throw new HttpsError("invalid-argument", "会員番号が正しくありません。");
     const snap = await db().doc(`members/${memberId}`).get();
@@ -300,6 +299,7 @@ export async function handleSessionCheckoutPaid(payment: any): Promise<boolean> 
 export const onSessionPaidThenAbsent = onDocumentUpdated(
   { document: "members/{memberId}", secrets: [slackBotToken] },
   async (event) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const before = event.data?.before.data() as SessionMember | undefined;
     const after = event.data?.after.data() as SessionMember | undefined;
     if (!before || !after || after.paymentMethod !== "都度払い" || after.sessionPaymentExempt) return;
@@ -319,6 +319,7 @@ export const onSessionPaidThenAbsent = onDocumentUpdated(
 export const checkUnpaidSessionPayments = onSchedule(
   { schedule: "20 9 * * *", timeZone: "Asia/Tokyo", secrets: [slackBotToken] },
   async () => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const today = todayJst();
     const thisMonth = today.slice(0, 7);
     const [y, mo, d] = today.split("-").map(Number);

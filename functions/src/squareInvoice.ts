@@ -37,6 +37,7 @@ import {
   ymd,
   MemberDoc,
 } from "./square";
+import { refreshGroupSettings, entryFeeConf, groupDisplayNameServer } from "./groupSettings";
 
 const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
 // 経理チャンネル（請求書-経理全般）
@@ -46,14 +47,11 @@ const slackEntryFeeMentionUserId = defineString("SLACK_ENTRY_FEE_MENTION_USER_ID
 export const squareAutoInvoice = defineString("SQUARE_AUTO_INVOICE", { default: "on" });
 const squareInvoiceDueDays = defineString("SQUARE_INVOICE_DUE_DAYS", { default: "14" });
 
-/** 入会金の請求書を自動で送る会と金額（src/lib/memberFees.ts の ENTRY_FEES と同じ金額にしておくこと） */
-export const ENTRY_FEE_INVOICE: Record<string, { amount: number; note: string }> = {
-  "名月会": { amount: 33000, note: "名月会の入会金です。" },
-  "茶道教室": { amount: 15000, note: "入会費・宗徧会費・入門許状代・扇子代を含みます。" },
-};
+/** 入会金をいただく会と金額・内訳（管理画面の「会の設定」から。groupSettings.ts） */
+export const entryFeeFor = (group?: string) => entryFeeConf(group);
 
-const GROUP_DISPLAY: Record<string, string> = { "Gマダムの茶の湯講座": "G1マダムの茶の湯講座" };
-export const groupName = (g?: string) => (g ? GROUP_DISPLAY[g] ?? g : "");
+/** 画面・通知に出す会の名前（「会の設定」の表示名） */
+export const groupName = (g?: string) => groupDisplayNameServer(g);
 
 export type InvoiceKind = "license" | "entryFee";
 
@@ -269,7 +267,7 @@ export function licenseInvoiceParams(requestId: string, r: FirebaseFirestore.Doc
 // ---- 入会金 ----
 
 export function entryFeeInvoiceParams(memberId: string, m: FirebaseFirestore.DocumentData, attempt = 0): IssueParams | null {
-  const conf = m.group ? ENTRY_FEE_INVOICE[m.group] : undefined;
+  const conf = entryFeeFor(m.group);
   if (!conf) return null;
   return {
     kind: "entryFee",
@@ -372,6 +370,7 @@ export const checkOverdueSquareInvoices = onSchedule(
     secrets: [squareAccessToken, slackBotToken],
   },
   async () => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const today = todayJst();
     const snap = await db().collection("squareInvoices").where("status", "==", "UNPAID").get();
     const lines: string[] = [];
@@ -420,6 +419,7 @@ export const checkOverdueSquareInvoices = onSchedule(
 export const sendSquareInvoiceManually = onCall<{ kind: InvoiceKind; id: string }>(
   { secrets: [squareAccessToken, slackBotToken] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     if (request.auth?.token?.role !== "honbu") {
       throw new HttpsError("permission-denied", "本部アカウントでログインしてください。");
     }

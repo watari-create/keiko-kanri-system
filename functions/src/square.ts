@@ -24,6 +24,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret, defineString } from "firebase-functions/params";
 import * as crypto from "crypto";
+import { refreshGroupSettings, isCardAutoPayGroup, isNoLegacyLinkGroup, monthlyFeeStd, hasTwicePlan } from "./groupSettings";
 
 export const squareAccessToken = defineSecret("SQUARE_ACCESS_TOKEN");
 const squareWebhookSignatureKey = defineSecret("SQUARE_WEBHOOK_SIGNATURE_KEY");
@@ -42,20 +43,11 @@ const slackHqChannelForSquare = defineString("SLACK_HQ_CHANNEL");
 const SQUARE_VERSION = "2025-01-23";
 // 毎月のお引き落とし日
 const BILLING_DAY = 25;
-// カード自動払いの対象の会（Firestoreのgroup名）
-const TARGET_GROUPS = ["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"];
-// 決済リンク（従来のSquareサブスク）を使っていない会。切り替え月（SQUARE_MIGRATION_MONTH）からの開始は同じだが、
+// カード自動払いの対象の会・標準のお月謝・決済リンク（従来のSquareサブスク）を使っていた会は、
+// 管理画面の「会の設定」（Firestore groupSettings）から読む（groupSettings.ts）。
+// 決済リンクを使っていない会（新月会・新しく発足した会）は、切り替え月（SQUARE_MIGRATION_MONTH）からの開始は同じだが、
 // 同じメールアドレスの旧契約の検索・自動解約はしない（別の会の契約を誤って解約しないため）。
 // 新月会：2026-10開始。10月分は別の仕組みで支払い済み、11月分（10/25）からカード自動払い（2026-10-09 ゆちゃ）
-const NO_LEGACY_LINK_GROUPS = ["新月会"];
-// 標準のお月謝（src/lib/enrollGroups.ts・src/lib/memberFees.ts と同じ金額にしておくこと）
-const STANDARD_MONTHLY_FEES: Record<string, number> = {
-  "名月会": 12000,
-  "Gマダムの茶の湯講座": 20000,
-  "新月会": 15000,
-};
-const CHADO_ONCE_FEE = 15000;
-const CHADO_TWICE_FEE = 28000;
 
 function db() {
   return admin.firestore();
@@ -135,6 +127,7 @@ export interface MemberDoc {
 
 /** お月謝の金額と表示名 */
 async function monthlyFeeFor(m: MemberDoc): Promise<{ amount: number | null; label: string; cohortStartDate?: string }> {
+  await refreshGroupSettings();
   let cohortStartDate: string | undefined;
   let cohortFee: number | undefined;
   if (m.group === "茶道教室" && m.chadoCohortId) {
@@ -148,17 +141,16 @@ async function monthlyFeeFor(m: MemberDoc): Promise<{ amount: number | null; lab
   if (typeof m.monthlyFee === "number" && m.monthlyFee > 0) {
     return { amount: m.monthlyFee, label: "お月謝（個別設定）", cohortStartDate };
   }
-  if (m.group === "茶道教室") {
-    if (cohortFee) return { amount: cohortFee, label: "お月謝", cohortStartDate };
+  if (m.group === "茶道教室" && cohortFee) return { amount: cohortFee, label: "お月謝", cohortStartDate };
+  if (hasTwicePlan(m.group)) {
     const twice = m.chadoMonthlyQuota === 2;
     return {
-      amount: twice ? CHADO_TWICE_FEE : CHADO_ONCE_FEE,
+      amount: monthlyFeeStd(m.group, twice),
       label: twice ? "お月謝（月2回プラン）" : "お月謝（月1回プラン）",
       cohortStartDate,
     };
   }
-  const std = m.group ? STANDARD_MONTHLY_FEES[m.group] : undefined;
-  return { amount: std ?? null, label: "お月謝" };
+  return { amount: monthlyFeeStd(m.group), label: "お月謝", cohortStartDate };
 }
 
 // ---- 前払いのお引き落としスケジュール ----
@@ -249,7 +241,7 @@ function isMigrationMember(m: MemberDoc): boolean {
 
 /** 切り替え会員のうち、決済リンクの旧契約がある（＝旧契約の検索・自動解約の対象になる）会員か */
 function hasLegacyLink(m: MemberDoc): boolean {
-  return isMigrationMember(m) && !NO_LEGACY_LINK_GROUPS.includes(m.group ?? "");
+  return isMigrationMember(m) && !isNoLegacyLinkGroup(m.group);
 }
 
 /** 選べる参加開始月。新規募集クラスは開講月、切り替え会員は切り替え月（過ぎていれば翌月）に固定、それ以外は今月・来月から選ぶ */
@@ -270,7 +262,7 @@ function startMonthOptions(cohortStartDate: string | undefined, migration: boole
 
 /** 申込ボタンを出してよい会員か。出せない場合は理由を返す */
 function eligibility(m: MemberDoc): { ok: boolean; reason?: string } {
-  if (!m.group || !TARGET_GROUPS.includes(m.group)) return { ok: false, reason: "対象外の会" };
+  if (!m.group || !isCardAutoPayGroup(m.group)) return { ok: false, reason: "対象外の会" };
   if (m.status !== "在籍") return { ok: false, reason: "在籍中の会員のみ" };
   if (m.paymentMethod === "都度払い") return { ok: false, reason: "都度払いの会員" };
   if (m.squareBillingAllowed === false) return { ok: false, reason: "本部の設定で対象外" };
@@ -437,6 +429,7 @@ async function notifySlack(text: string, thread?: { channel?: string; ts?: strin
  * マイページの決済画面を表示するための情報（Squareの公開設定・金額・初回引き落とし日・現在の契約）。
  */
 export const getSquareBillingInfo = onCall(async (request) => {
+  await refreshGroupSettings(); // 会の設定（料金など）を最新にする
   const memberId = requireMember(request);
   const snap = await db().doc(`members/${memberId}`).get();
   if (!snap.exists) throw new HttpsError("not-found", "会員情報が見つかりません。");
@@ -489,6 +482,7 @@ export const getSquareBillingInfo = onCall(async (request) => {
 export const startSquareSubscription = onCall<{ token: string; startMonth?: string }>(
   { secrets: [squareAccessToken, slackBotTokenForSquare] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const memberId = requireMember(request);
     const token = request.data?.token;
     if (typeof token !== "string" || token.length < 10) {
@@ -710,6 +704,7 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
 export const updateSquareSubscriptionCard = onCall<{ token: string }>(
   { secrets: [squareAccessToken] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const memberId = requireMember(request);
     const token = request.data?.token;
     if (typeof token !== "string" || token.length < 10) {
@@ -795,6 +790,7 @@ export const squareWebhook = onRequest(
   // Squareのサーバーから呼ばれるため、誰でも呼び出せる（公開）設定にする。本物かどうかは署名で確認する
   { secrets: [squareWebhookSignatureKey, slackBotTokenForSquare, squareAccessToken], invoker: "public" },
   async (req, res) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     if (req.method !== "POST") {
       res.status(405).send("method not allowed");
       return;
@@ -1027,6 +1023,7 @@ async function findLegacySquare(email: string, excludeSubscriptionIds: string[])
 export const listLegacySquareMembers = onCall(
   { secrets: [squareAccessToken], timeoutSeconds: 300 },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     requireHonbu(request);
     const [membersSnap, subsSnap] = await Promise.all([
       db().collection("members").where("status", "==", "在籍").get(),
@@ -1039,7 +1036,7 @@ export const listLegacySquareMembers = onCall(
 
     const targets = membersSnap.docs
       .map((d) => ({ id: d.id, ...(d.data() as MemberDoc & { isTestAccount?: boolean }) }))
-      .filter((m) => TARGET_GROUPS.includes(m.group ?? "") && m.paymentMethod !== "都度払い" && !m.isTestAccount)
+      .filter((m) => isCardAutoPayGroup(m.group) && m.paymentMethod !== "都度払い" && !m.isTestAccount)
       .filter((m) => !liveMemberIds.has(m.id) && hasLegacyLink(m));
 
     const rows: any[] = [];
@@ -1133,6 +1130,7 @@ async function processLegacyCancellation(memberId: string): Promise<string> {
 export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: string; legacySubscriptionIds: string[] }>(
   { secrets: [squareAccessToken, slackBotTokenForSquare] },
   async (request) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     requireHonbu(request);
     const { memberId, cardId } = request.data ?? ({} as any);
     const legacyIds: string[] = Array.isArray(request.data?.legacySubscriptionIds) ? request.data.legacySubscriptionIds : [];
@@ -1142,7 +1140,7 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
     const subRef = db().doc(`memberSubscriptions/${memberId}`);
     const m = (await memberRef.get()).data() as MemberDoc | undefined;
     if (!m) throw new HttpsError("not-found", "会員が見つかりません。");
-    if (!m.group || !TARGET_GROUPS.includes(m.group) || m.paymentMethod === "都度払い" || m.status !== "在籍") {
+    if (!m.group || !isCardAutoPayGroup(m.group) || m.paymentMethod === "都度払い" || m.status !== "在籍") {
       throw new HttpsError("failed-precondition", "カード自動払いの対象ではない会員です。");
     }
     const fee = await monthlyFeeFor(m);
@@ -1235,6 +1233,7 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
 export const processLegacySquareCancellations = onSchedule(
   { schedule: "every day 06:00", timeZone: "Asia/Tokyo", secrets: [squareAccessToken] },
   async () => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const q = await db().collection("memberSubscriptions").where("legacyCancelStatus", "==", "pending").get();
     for (const d of q.docs) {
       const r = await processLegacyCancellation(d.id);
@@ -1348,7 +1347,7 @@ async function stopSquareBillingForLeave(memberId: string, type: string): Promis
     const mSnap = await db().doc(`members/${memberId}`).get();
     const m = mSnap.data() as MemberDoc | undefined;
     const email = (m?.email ?? "").trim();
-    if (email && !NO_LEGACY_LINK_GROUPS.includes(m?.group ?? "")) {
+    if (email && !isNoLegacyLinkGroup(m?.group)) {
       try {
         const allOurs = (await db().collection("memberSubscriptions").get()).docs
           .map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId)
@@ -1409,7 +1408,7 @@ async function resumeSquareBillingForReturn(memberId: string): Promise<{ lines: 
   const guide = "マイページの「お支払い」からカードを登録していただくようご案内ください。";
   if (!rec?.squareSubscriptionId || !rec.squareCustomerId) {
     // このシステムでのカード自動払いの記録がない（決済リンクのみ・都度払いなど）
-    if (!TARGET_GROUPS.includes(m.group ?? "") || m.paymentMethod === "都度払い") return { lines: [], needsCheck: false };
+    if (!isCardAutoPayGroup(m.group) || m.paymentMethod === "都度払い") return { lines: [], needsCheck: false };
     return { lines: [`カード自動払いの登録がありません。${guide}`], needsCheck: true };
   }
 
@@ -1445,7 +1444,7 @@ async function resumeSquareBillingForReturn(memberId: string): Promise<{ lines: 
   if (!stopped) return { lines: [], needsCheck: false };
 
   // 2. 停止済み → 登録済みのカードで契約し直す
-  if (m.squareBillingAllowed === false || m.paymentMethod === "都度払い" || !TARGET_GROUPS.includes(m.group ?? "")) {
+  if (m.squareBillingAllowed === false || m.paymentMethod === "都度払い" || !isCardAutoPayGroup(m.group)) {
     return { lines: ["カード自動払いの対象外の設定のため、再開していません"], needsCheck: false };
   }
   const fee = await monthlyFeeFor(m);
@@ -1567,6 +1566,7 @@ function cardLabelText(c: any): string {
 export const onLeaveRequestApprovedSquare = onDocumentUpdated(
   { document: "leaveRequests/{requestId}", secrets: [squareAccessToken, slackBotTokenForSquare] },
   async (event) => {
+    await refreshGroupSettings(); // 会の設定（料金など）を最新にする
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!before || !after || !event.data) return;
