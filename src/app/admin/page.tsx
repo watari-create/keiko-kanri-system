@@ -42,6 +42,7 @@ import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import AdminSubscriptionStatus from "@/components/AdminSubscriptionStatus";
+import SquareInvoiceInfo from "@/components/SquareInvoiceInfo";
 import OperationRules from "@/components/OperationRules";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
@@ -67,8 +68,12 @@ import type {
 type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "運用ルール";
 const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "運用ルール"];
 
-// 経理タブの対象グループ（名月会・Gマダムの茶の湯講座・新月会）
-const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座", "新月会"];
+// 経理タブの対象グループ（名月会・Gマダムの茶の湯講座・新月会・茶道教室）
+const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座", "新月会", "茶道教室"];
+// 入会金の請求書を送る会と金額（functions/src/squareInvoice.ts の ENTRY_FEE_INVOICE と同じ）
+const ENTRY_FEE_BY_GROUP: Record<string, number> = { "名月会": 33000, "茶道教室": 15000 };
+// 茶道教室の入会金は、Square請求書の自動送信を始めた日以降の入会者から経理タブに表示する
+const CHADO_ENTRY_FEE_FROM = "2026-10-10";
 
 // エリアごとの対象グループ。経理・スタッフ管理はグループ選択なし（下のコードで分岐）。
 const AREA_GROUPS: Record<string, string[]> = {
@@ -87,7 +92,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
     "名月会・茶道教室・G1マダムの茶の湯講座・新月会が対象。管理画面（本部・世話人向け）とお客様ページ（生徒向け）の2面構成です。",
   "UCI":
     "侘び数寄道が対象。宗徧流稽古と同じく、CSVで名簿を管理し出席を記録します（許状申請・経理は対象外）。",
-  "経理": "名月会・G1マダムの茶の湯講座・新月会が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。",
+  "経理": "名月会・G1マダムの茶の湯講座・新月会・茶道教室が対象。出席ごとの月謝・許状代金・入会金の入金状況を確認できます。許状代金と入会金はSquareの請求書を自動で送り、入金されると自動で「済」になります。",
   "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
   "運用ルール": "お稽古の形態整理と新規開講ルール、記入用テンプレート、現行の各会の登録シート（担当者・料金・運営ルール）を確認できます。",
@@ -538,8 +543,34 @@ export default function AdminPage() {
   const entryFeeMembers = useMemo(() => {
     const meigetsukai = members.filter((m) => m.group === "名月会" && !m.isTestAccount);
     const yoshii = meigetsukai.find((m) => m.name.includes("吉井"));
-    return yoshii ? meigetsukai.filter((m) => m.joinDate >= yoshii.joinDate) : meigetsukai;
+    const meigetsuTargets = yoshii ? meigetsukai.filter((m) => m.joinDate >= yoshii.joinDate) : meigetsukai;
+    const chado = members.filter(
+      (m) =>
+        m.group === "茶道教室" &&
+        !m.isTestAccount &&
+        (m.joinDate >= CHADO_ENTRY_FEE_FROM || !!m.entryFeeInvoice || !!m.entryFeeInvoiceError)
+    );
+    return [...meigetsuTargets, ...chado];
   }, [members]);
+
+  // 経理タブ：Squareの請求書を手動で送る（自動送信できなかった場合や、自動送信を始める前の申請・入会者）
+  const [invoiceSending, setInvoiceSending] = useState<string | null>(null);
+  async function sendInvoiceManually(kind: "license" | "entryFee", id: string, label: string) {
+    if (!window.confirm(`${label}\nSquareの請求書を会員のメールアドレスに送ります。よろしいですか？`)) return;
+    setInvoiceSending(`${kind}:${id}`);
+    try {
+      const call = httpsCallable<{ kind: string; id: string }, { number: string | null; dueDate: string }>(
+        getFunctions(),
+        "sendSquareInvoiceManually"
+      );
+      const res = await call({ kind, id });
+      window.alert(`請求書を送りました（請求書番号：${res.data.number ?? "-"}、お支払い期日：${res.data.dueDate}）`);
+    } catch (err) {
+      window.alert(`請求書を送れませんでした：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setInvoiceSending(null);
+    }
+  }
 
   async function updateMemberField<K extends keyof Member>(
     memberId: string,
@@ -1278,7 +1309,8 @@ export default function AdminPage() {
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">許状代金の入金確認</h2>
             <p className="text-xs text-muted mb-3">
-              請求書を発行し「発行手続き中」以降に進んだ申請が対象です（請求書発行依頼・お渡し済・完了・取消は含みません）。ここでの入金確認は許状の進行状況とは別に、経理側で個別に管理します。
+              「請求書発行依頼」にすると、Squareの請求書が会員のメールに自動で送られ、申請は「発行手続き中」に進みます。入金されると自動で「済」になります（現金などでお支払いの場合は「入金済にする」を押してください）。
+              「発行手続き中」〜「発行済」の申請が対象です（請求書発行依頼・お渡し済・完了・取消は含みません）。ここでの入金確認は許状の進行状況とは別に、経理側で個別に管理します。
             </p>
             <div className="space-y-3">
               {requests
@@ -1298,6 +1330,15 @@ export default function AdminPage() {
                       <div className="text-xs text-muted">
                         {r.licenseName}　合計：¥{r.fee.toLocaleString()}　申請月：{formatYearMonth(r.issueMonth)}
                       </div>
+                      <SquareInvoiceInfo
+                        invoice={r.squareInvoice}
+                        error={r.squareInvoiceError}
+                        paid={r.accountingPaymentStatus === "済"}
+                        sending={invoiceSending === `license:${r.id}`}
+                        onSend={() =>
+                          sendInvoiceManually("license", r.id, `${r.memberName}様　${r.licenseName}　¥${r.fee.toLocaleString()}`)
+                        }
+                      />
                     </div>
                     {r.accountingPaymentStatus === "済" ? (
                       <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
@@ -1331,12 +1372,15 @@ export default function AdminPage() {
 
           {/* セクション3：入会金の入金確認（名月会のみ） */}
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
-            <h2 className="font-bold mb-1">入会金の入金確認（名月会のみ）</h2>
-            <p className="text-xs text-muted mb-3">入会金は一律 ¥33,000（G1マダムの茶の湯講座は対象外）</p>
+            <h2 className="font-bold mb-1">入会金の入金確認（名月会・茶道教室）</h2>
+            <p className="text-xs text-muted mb-3">
+              入会金は名月会 ¥33,000・茶道教室 ¥15,000（G1マダムの茶の湯講座・新月会は対象外）。新規入会があると、Squareの請求書が会員のメールに自動で送られ、入金されると自動で「済」になります。
+            </p>
             <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className="text-left text-muted border-b border-line">
                   <th className="py-2 pr-3">会員名</th>
+                  <th className="pr-3">会</th>
                   <th className="pr-3">入会日</th>
                   <th className="pr-3">入会金</th>
                   <th>入金状況</th>
@@ -1345,10 +1389,11 @@ export default function AdminPage() {
               <tbody>
                 {entryFeeMembers.map((m) => (
                     <tr key={m.id} className="border-b border-line">
-                      <td className="py-2 pr-3 font-semibold">{m.name}</td>
-                      <td className="pr-3">{m.joinDate}</td>
-                      <td className="pr-3">¥33,000</td>
-                      <td>
+                      <td className="py-2 pr-3 font-semibold align-top">{m.name}</td>
+                      <td className="pr-3 align-top">{groupDisplayName(m.group)}</td>
+                      <td className="pr-3 align-top">{m.joinDate}</td>
+                      <td className="pr-3 align-top">¥{(ENTRY_FEE_BY_GROUP[m.group] ?? 0).toLocaleString()}</td>
+                      <td className="whitespace-normal">
                         {m.entryFeeStatus === "済" ? (
                           <span className="text-xs bg-matcha-pale text-matcha-deep rounded-full px-3 py-1">
                             済
@@ -1366,13 +1411,26 @@ export default function AdminPage() {
                             </button>
                           </div>
                         )}
+                        <SquareInvoiceInfo
+                          invoice={m.entryFeeInvoice}
+                          error={m.entryFeeInvoiceError}
+                          paid={m.entryFeeStatus === "済"}
+                          sending={invoiceSending === `entryFee:${m.id}`}
+                          onSend={() =>
+                            sendInvoiceManually(
+                              "entryFee",
+                              m.id,
+                              `${m.name}様　入会金（${groupDisplayName(m.group)}）¥${(ENTRY_FEE_BY_GROUP[m.group] ?? 0).toLocaleString()}`
+                            )
+                          }
+                        />
                       </td>
                     </tr>
                   ))}
                 {entryFeeMembers.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="py-4 text-center text-muted">
-                      名月会の会員がいません
+                    <td colSpan={5} className="py-4 text-center text-muted">
+                      対象の会員がいません
                     </td>
                   </tr>
                 )}

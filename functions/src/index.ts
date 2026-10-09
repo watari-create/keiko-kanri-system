@@ -6,6 +6,16 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { GoogleAuth } from "google-auth-library";
 import * as crypto from "crypto";
+import { squareAccessToken } from "./square";
+import {
+  autoInvoiceEnabled,
+  issueSquareInvoice,
+  licenseInvoiceParams,
+  describeInvoiceError,
+  cancelSquareInvoice,
+  issueEntryFeeInvoiceOnEnroll,
+  ENTRY_FEE_INVOICE,
+} from "./squareInvoice";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -551,13 +561,64 @@ function detailButtonBlocks(bodyText: string, url: string): unknown[] {
  * 下の slackEvents（✔️リアクション受信）で突き合わせに使う。
  */
 export const onLicenseRequestStatusChanged = onDocumentUpdated(
-  { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
+  { document: "licenseRequests/{requestId}", secrets: [slackBotToken, squareAccessToken] },
   async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!before || !after) return;
     if (before.status === after.status) return;
+
+    // 申請を取消にしたら、未入金のSquare請求書もキャンセルする
+    if (after.status === "取消" && after.squareInvoice?.id && after.squareInvoice.status === "UNPAID") {
+      try {
+        const canceled = await cancelSquareInvoice(after.squareInvoice.id);
+        if (canceled && event.data) {
+          await event.data.after.ref.update({ "squareInvoice.status": "CANCELED" });
+        }
+      } catch (err) {
+        console.error("許状申請の取消に伴う請求書のキャンセルに失敗しました", err);
+      }
+      return;
+    }
+
     if (after.status !== "請求書発行依頼") return;
+
+    // Squareの請求書を自動で作って会員に送る。送れたら「発行手続き中」まで自動で進める。
+    // すでに送信済み（一つ戻す→次に進めるで再び請求書発行依頼になった場合など）なら送り直さない。
+    let autoFailReason: string | null = null;
+    if (autoInvoiceEnabled()) {
+      const already = after.squareInvoice && after.squareInvoice.status !== "CANCELED";
+      try {
+        const inv = already ? after.squareInvoice : await issueSquareInvoice(licenseInvoiceParams(event.params.requestId, after));
+        if (event.data) {
+          await event.data.after.ref.update({
+            squareInvoice: inv,
+            squareInvoiceError: admin.firestore.FieldValue.delete(),
+            status: "発行手続き中",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        const token = slackBotToken.value();
+        const channel = slackLicenseChannel.value();
+        if (token && channel && !already) {
+          await postSlackMessage(
+            token,
+            channel,
+            `📄 許状代金の請求書をSquareから自動で送りました\n` +
+              `会員：${after.memberName}様（${groupDisplayName(after.group)}）\n` +
+              `許状：${after.licenseName}\n` +
+              `合計：¥${after.fee?.toLocaleString?.() ?? after.fee}\n` +
+              `請求書番号：${inv.number ?? "-"}　お支払い期日：${inv.dueDate}\n` +
+              `申請は「発行手続き中」に進みました。入金されると経理タブが自動で「入金済」になります。`
+          ).catch((err) => console.error("Slack通知の送信に失敗しました", err));
+        }
+        return;
+      } catch (err) {
+        autoFailReason = describeInvoiceError(err);
+        console.error("許状代金の請求書の自動発行に失敗しました", event.params.requestId, err);
+        await event.data?.after.ref.update({ squareInvoiceError: autoFailReason }).catch(() => undefined);
+      }
+    }
 
     const token = slackBotToken.value();
     if (!token) {
@@ -574,6 +635,7 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
     const text =
       mentionPrefix +
+      (autoFailReason ? `⚠️ Squareの請求書を自動で送れませんでした（${autoFailReason}）\n` : "") +
       `請求書発行のご依頼です\n` +
       `会員：${after.memberName}様（${groupDisplayName(after.group)}）\n` +
       `許状：${after.licenseName}\n` +
@@ -778,7 +840,7 @@ async function decrementNyumonSetInventory(gender: unknown, birthDate: unknown):
 }
 
 export const onMemberCreated = onDocumentCreated(
-  { document: "members/{memberId}", secrets: [slackBotToken] },
+  { document: "members/{memberId}", secrets: [slackBotToken, squareAccessToken] },
   async (event) => {
     const data = event.data?.data();
     if (!data) return;
@@ -823,29 +885,10 @@ export const onMemberCreated = onDocumentCreated(
       }
     }
 
-    // 名月会の新規入会なら、入会金（¥33,000）の請求書発行依頼を経理チャンネルに送る（大谷さん宛）。
-    // 経理タブでの入金確認（entryFeeStatus）とは連動しない、あくまで発行依頼の合図。
-    if (data.group === MEIGETSUKAI_GROUP) {
-      const entryFeeChannel = slackLicenseChannel.value();
-      if (!entryFeeChannel) {
-        console.warn(
-          "SLACK_LICENSE_CHANNEL が未設定のため、入会金請求書発行依頼のSlack通知をスキップしました。"
-        );
-      } else {
-        const mentionUserId = slackEntryFeeMentionUserId.value();
-        const mentionPrefix = mentionUserId ? `<@${mentionUserId}> ` : "";
-        const entryFeeText =
-          mentionPrefix +
-          `入会金の請求書発行のご依頼です\n` +
-          `会員：${data.name ?? ""}様（名月会）\n` +
-          `会員No：${event.params.memberId}\n` +
-          `入会金：¥33,000`;
-        try {
-          await postSlackMessage(token, entryFeeChannel, entryFeeText);
-        } catch (err) {
-          console.error("入会金請求書発行依頼のSlack通知に失敗しました", err);
-        }
-      }
+    // 入会金のある会（名月会 ¥33,000・茶道教室 ¥15,000）の新規入会なら、Squareの請求書を自動で送り、
+    // 結果を経理チャンネル（請求書-経理全般）に知らせる（大谷さん宛）。送れなかった場合は手動での発行を依頼する。
+    if (data.isTestAccount !== true && ENTRY_FEE_INVOICE[data.group as string]) {
+      await issueEntryFeeInvoiceOnEnroll(event.params.memberId, data);
     }
 
     await db.collection("notifications").add({
@@ -2610,6 +2653,9 @@ export {
   processLegacySquareCancellations,
   onLeaveRequestApprovedSquare,
 } from "./square";
+
+// Squareの請求書（許状代金・入会金）。詳細は squareInvoice.ts を参照
+export { checkOverdueSquareInvoices, sendSquareInvoiceManually } from "./squareInvoice";
 
 // 新月会の開催日をGoogleカレンダーへ書き込む。詳細は shingetsuCalendar.ts を参照
 export { syncShingetsuSessionToCalendar } from "./shingetsuCalendar";

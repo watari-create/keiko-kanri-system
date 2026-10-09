@@ -25,11 +25,11 @@ import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret, defineString } from "firebase-functions/params";
 import * as crypto from "crypto";
 
-const squareAccessToken = defineSecret("SQUARE_ACCESS_TOKEN");
+export const squareAccessToken = defineSecret("SQUARE_ACCESS_TOKEN");
 const squareWebhookSignatureKey = defineSecret("SQUARE_WEBHOOK_SIGNATURE_KEY");
-const squareEnvironment = defineString("SQUARE_ENVIRONMENT", { default: "sandbox" });
+export const squareEnvironment = defineString("SQUARE_ENVIRONMENT", { default: "sandbox" });
 const squareApplicationId = defineString("SQUARE_APPLICATION_ID");
-const squareLocationId = defineString("SQUARE_LOCATION_ID");
+export const squareLocationId = defineString("SQUARE_LOCATION_ID");
 const squareWebhookUrl = defineString("SQUARE_WEBHOOK_URL", { default: "" });
 const squareBillingFrom = defineString("SQUARE_BILLING_FROM", { default: "2026-11-01" });
 // 決済リンク（従来のSquareサブスク）でお支払い中の会員が、この仕組みに切り替える最初の月（YYYY-MM）。
@@ -62,13 +62,13 @@ function squareBase(): string {
     : "https://connect.squareupsandbox.com";
 }
 
-class SquareApiError extends Error {
+export class SquareApiError extends Error {
   constructor(public status: number, public errors: { code?: string; detail?: string; category?: string }[]) {
     super(errors.map((e) => `${e.code}: ${e.detail}`).join(" / ") || `HTTP ${status}`);
   }
 }
 
-async function square<T = any>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+export async function square<T = any>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${squareBase()}${path}`, {
     method,
     headers: {
@@ -104,15 +104,15 @@ function friendlyCardError(err: unknown): string {
 }
 
 // ---- 日付（日本時間） ----
-function todayJst(): string {
+export function todayJst(): string {
   return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
-function ymd(y: number, m: number, d: number): string {
+export function ymd(y: number, m: number, d: number): string {
   // m は 1〜12（範囲外は繰り上げ・繰り下げ）
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.toISOString().slice(0, 10);
 }
-interface MemberDoc {
+export interface MemberDoc {
   name?: string;
   email?: string;
   phone?: string;
@@ -311,7 +311,7 @@ const ACTIVE_STATUSES = ["CREATING", "PENDING", "ACTIVE", "PAUSED"];
 
 // ---- Square上のオブジェクトの作成・取得 ----
 
-async function ensureCustomer(memberId: string, m: MemberDoc, existingId?: string): Promise<string> {
+export async function ensureCustomer(memberId: string, m: MemberDoc, existingId?: string): Promise<string> {
   if (existingId) return existingId;
   // 同じ会員番号の顧客がすでにSquareにいれば再利用する
   const found = await square<{ customers?: { id: string }[] }>("POST", "/v2/customers/search", {
@@ -725,7 +725,7 @@ async function findSubscriptionDoc(subscriptionId: string | undefined) {
  */
 export const squareWebhook = onRequest(
   // Squareのサーバーから呼ばれるため、誰でも呼び出せる（公開）設定にする。本物かどうかは署名で確認する
-  { secrets: [squareWebhookSignatureKey, slackBotTokenForSquare], invoker: "public" },
+  { secrets: [squareWebhookSignatureKey, slackBotTokenForSquare, squareAccessToken], invoker: "public" },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("method not allowed");
@@ -762,7 +762,11 @@ export const squareWebhook = onRequest(
         }
       }
 
-      if (type === "invoice.payment_made") {
+      if (type === "invoice.payment_made" && !obj.invoice?.subscription_id) {
+        // 許状代金・入会金の請求書（squareInvoice.ts で発行したもの）。循環importを避けるため遅延読み込み
+        const { handleOneOffInvoicePaid } = await import("./squareInvoice");
+        await handleOneOffInvoicePaid(obj.invoice);
+      } else if (type === "invoice.payment_made") {
         const invoice = obj.invoice ?? {};
         const doc = await findSubscriptionDoc(invoice.subscription_id);
         const amount =

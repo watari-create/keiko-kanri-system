@@ -94,6 +94,9 @@ export interface Member {
   shingetsuChoice?: Record<string, string>;
   // 入会金の入金状況（名月会のみ対象、一律¥33,000。経理タブで管理）
   entryFeeStatus?: "済" | "未納";
+  // 入会金のSquare請求書（入会時に自動送信）と、送れなかったときの理由
+  entryFeeInvoice?: SquareInvoiceSummary;
+  entryFeeInvoiceError?: string;
   // 都度払い会員の、出席した月ごとの月謝入金状況（キーはattendanceと同じ会計年度の月）。経理タブで管理
   sessionPayments?: Record<string, "済" | "未納">;
   email: string;
@@ -131,6 +134,18 @@ export interface StaffAccount {
   authUid?: string;
 }
 
+// Squareの請求書（許状代金・入会金）。Cloud Functions（functions/src/squareInvoice.ts）が自動で送り、ここに記録する
+export interface SquareInvoiceSummary {
+  id: string;
+  number: string | null;
+  url: string | null; // Squareの請求書ページ（会員が支払う画面）
+  amount: number;
+  dueDate: string; // お支払い期日 YYYY-MM-DD
+  status: "UNPAID" | "PAID" | "CANCELED";
+  sentAt: string;
+  paidAt?: string;
+}
+
 export type LicenseStatus =
   | "受付"
   | "請求書発行依頼"
@@ -166,6 +181,9 @@ export interface LicenseRequest {
   updatedBy?: string; // 更新した人のUIDまたは会員番号
   // 経理タブ用の入金確認（許状の進行ステータスとは独立して経理側で管理する）
   accountingPaymentStatus?: "済" | "未納";
+  // Squareの請求書（自動送信）と、送れなかったときの理由
+  squareInvoice?: SquareInvoiceSummary;
+  squareInvoiceError?: string;
 }
 
 export type LeaveRequestType = "休会" | "退会" | "復会";
