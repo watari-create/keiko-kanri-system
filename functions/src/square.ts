@@ -690,7 +690,8 @@ async function findSubscriptionDoc(subscriptionId: string | undefined) {
  *   invoice.payment_made / invoice.scheduled_charge_failed / subscription.created / subscription.updated / payment.updated
  */
 export const squareWebhook = onRequest(
-  { secrets: [squareWebhookSignatureKey, slackBotTokenForSquare] },
+  // Squareのサーバーから呼ばれるため、誰でも呼び出せる（公開）設定にする。本物かどうかは署名で確認する
+  { secrets: [squareWebhookSignatureKey, slackBotTokenForSquare], invoker: "public" },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("method not allowed");
