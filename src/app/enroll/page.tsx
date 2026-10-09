@@ -217,6 +217,22 @@ export default function EnrollPage() {
         }
       }
 
+      // 都度払い：この会員専用のSquareの支払いページ（今回分）を作る。入金は経理タブに自動で反映される。
+      // 作れなかったときは決済リンクは出さず「本部より別途ご案内」と表示する
+      let onetimeUrl = "";
+      if (isOneTime) {
+        try {
+          const fn = httpsCallable<{ memberId: string; returnUrl: string }, { paid: boolean; url?: string }>(
+            getFunctions(),
+            "createEnrollSessionCheckout"
+          );
+          const res = await fn({ memberId: issued, returnUrl: `${window.location.origin}/mypage/login` });
+          onetimeUrl = res.data.url ?? "";
+        } catch (err) {
+          console.error("都度払いの支払いページの作成に失敗しました", err);
+        }
+      }
+
       // カード自動払い（マイページから申込み）を使う場合は、Squareの決済リンクの代わりにマイページへ案内する。
       // Vercelの環境変数 NEXT_PUBLIC_SQUARE_BILLING_ENABLED=1 で有効になる（本番のSquare設定が済んでから）。
       const cardBilling =
@@ -240,7 +256,7 @@ export default function EnrollPage() {
           : {
               label: isOneTime ? "お支払い（都度払い・今回分）" : "お支払い（月謝・自動払い）",
               amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
-              link: isOneTime ? group.links.onetime : group.links.subscription,
+              link: isOneTime ? onetimeUrl : group.links.subscription,
             }
       ));
       setStep("confirm");

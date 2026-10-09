@@ -52,7 +52,7 @@ export const ENTRY_FEE_INVOICE: Record<string, { amount: number; note: string }>
 };
 
 const GROUP_DISPLAY: Record<string, string> = { "Gマダムの茶の湯講座": "G1マダムの茶の湯講座" };
-const groupName = (g?: string) => (g ? GROUP_DISPLAY[g] ?? g : "");
+export const groupName = (g?: string) => (g ? GROUP_DISPLAY[g] ?? g : "");
 
 export type InvoiceKind = "license" | "entryFee";
 
@@ -109,7 +109,7 @@ export function describeInvoiceError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function postKeiri(text: string): Promise<void> {
+export async function postKeiri(text: string): Promise<void> {
   try {
     const token = slackBotToken.value();
     const channel = slackKeiriChannel.value();

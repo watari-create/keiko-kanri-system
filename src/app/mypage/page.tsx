@@ -11,7 +11,7 @@ import { signInWithCustomToken } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { currentMonthKey } from "@/lib/fiscalMonths";
-import { getOnetimeLinkForGroup } from "@/lib/enrollGroups";
+import SessionPaymentBox from "@/components/SessionPaymentBox";
 import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
 import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
 import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME, CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
@@ -38,6 +38,9 @@ export default function MyPage() {
   const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string; group: string }[]>([]);
   const [switchingFamily, setSwitchingFamily] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  // 都度払い：作成したSquareの支払いページ（タブが開けなかったときのボタン用）と処理中フラグ
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
 
   useEffect(() => {
     if (!loading && role !== "member") router.replace("/mypage/login");
@@ -45,6 +48,12 @@ export default function MyPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const sessionPaid = params.get("sessionPaid");
+    if (sessionPaid) {
+      setSavedMsg("お支払いありがとうございました。反映まで少し時間がかかる場合があります。");
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
     const linked = params.get("lineLinked");
     if (linked === "success") {
       setSavedMsg("公式LINEとの連携が完了しました。");
@@ -139,6 +148,39 @@ export default function MyPage() {
     setSavedMsg("連絡先情報を更新しました。");
   }
 
+  // 都度払い：Squareの支払いページを開く。ポップアップがブロックされないよう、先に空のタブを開いてから移動する
+  async function openSessionCheckout(monthKey: string, prefix = "") {
+    setCheckoutBusy(true);
+    setCheckoutUrl(null);
+    const win = window.open("", "_blank");
+    try {
+      const fn = httpsCallable<
+        { monthKey: string; returnUrl: string },
+        { paid: boolean; url?: string; amount?: number }
+      >(getFunctions(), "createSessionCheckout");
+      const res = await fn({ monthKey, returnUrl: `${window.location.origin}/mypage?sessionPaid=${monthKey}` });
+      if (res.data.paid || !res.data.url) {
+        win?.close();
+        setSavedMsg(`${prefix}${monthKey.slice(5).replace(/^0/, "")}月分はお支払い済みです。`);
+        return;
+      }
+      setCheckoutUrl(res.data.url);
+      if (win) {
+        win.location.href = res.data.url;
+        setSavedMsg(`${prefix}お支払いページを別タブで開きました。そちらからお手続きください。`);
+      } else {
+        setSavedMsg(`${prefix}下の「お支払いページを開く」からお手続きください。`);
+      }
+    } catch (err) {
+      win?.close();
+      console.error(err);
+      const msg = (err as { message?: string })?.message;
+      setSavedMsg(`${prefix}${msg || "お支払いページを用意できませんでした。本部より別途ご連絡します。"}`);
+    } finally {
+      setCheckoutBusy(false);
+    }
+  }
+
   async function updateRsvp(value: "出席" | "欠席") {
     if (!memberId || !member) return;
     const monthKey = currentMonthKey();
@@ -155,16 +197,21 @@ export default function MyPage() {
         : prev
     );
 
-    // 都度払いの会員が「出席する」を押したときは、その場でSquareの支払いページを開く
-    if (value === "出席" && member.paymentMethod === "都度払い") {
-      const link = getOnetimeLinkForGroup(member.group);
-      if (link) {
-        window.open(link, "_blank", "noopener,noreferrer");
-        setSavedMsg("出席で登録しました。お支払いページを別タブで開きましたので、そちらからお手続きください。");
-      } else {
-        setSavedMsg("出席で登録しました。お支払いリンクが未設定のため、本部より別途ご連絡します。");
+    // 都度払いの会員が「出席する」を押したときは、その場でSquareの支払いページ（この会員・この月専用）を開く
+    if (member.paymentMethod === "都度払い") {
+      const paid = member.sessionPayments?.[monthKey] === "済";
+      if (value === "出席") {
+        if (paid) {
+          setSavedMsg("出席で登録しました。今月分はお支払い済みです。");
+        } else {
+          await openSessionCheckout(monthKey, "出席で登録しました。");
+        }
+        return;
       }
-      return;
+      if (paid) {
+        setSavedMsg("欠席で登録しました。お支払い済みの今月分の扱いは、本部よりご連絡いたします。");
+        return;
+      }
     }
 
     setSavedMsg(`次回のお稽古を「${value}」で登録しました。`);
@@ -333,6 +380,14 @@ export default function MyPage() {
                 {member.rsvp === "欠席" ? "✓ 欠席する" : "欠席する"}
               </button>
             </div>
+            {member.paymentMethod === "都度払い" && (
+              <SessionPaymentBox
+                member={member}
+                busy={checkoutBusy}
+                checkoutUrl={checkoutUrl}
+                onPay={(mk) => openSessionCheckout(mk)}
+              />
+            )}
           </div>
         ))}
 

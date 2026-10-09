@@ -812,12 +812,16 @@ export const squareWebhook = onRequest(
       } else if (type === "payment.updated" && obj.payment?.status === "COMPLETED") {
         // 決済リンク等を含むSquareの全入金の記録（従来どおり）
         const payment = obj.payment;
+        // 都度払いの支払いページ（squareSessionCheckout.ts で作ったもの）なら経理を自動で「済」に
+        const { handleSessionCheckoutPaid } = await import("./squareSessionCheckout");
+        const matched = await handleSessionCheckoutPaid(payment);
         await db().collection("paymentEvents").add({
           amount: payment.amount_money?.amount ?? null,
           squarePaymentId: payment.id,
           customerId: payment.customer_id ?? null,
+          orderId: payment.order_id ?? null,
           receivedAt: new Date().toISOString(),
-          matched: false,
+          matched,
         });
       }
       res.status(200).send("ok");

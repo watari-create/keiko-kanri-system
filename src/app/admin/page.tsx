@@ -1242,7 +1242,7 @@ export default function AdminPage() {
           <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
             <h2 className="font-bold mb-1">都度払い会員の月謝（出席回ごと）</h2>
             <p className="text-xs text-muted mb-3">
-              出席簿と同じ形式です。セルをクリックして入金済/未納を切り替えます（出席していない月は「－」）
+              出席簿と同じ形式です。マイページの支払いページで払われた月は自動で「済」になります。それ以外はセルをクリックして入金済/未納を切り替えます（出席していない月は「－」）
             </p>
             <table className="text-sm border-collapse">
               <thead>
@@ -1282,8 +1282,16 @@ export default function AdminPage() {
                             key={mk}
                             className={`w-9 h-9 text-center border border-line cursor-pointer hover:bg-matcha-pale/40 ${colorClass}`}
                             onClick={() => setSessionPayment(m.id, mk, val === "済" ? "未納" : "済")}
+                            title={
+                              val === "済" && m.sessionPaymentsSquare?.[mk]
+                                ? `Squareで入金 ¥${m.sessionPaymentsSquare[mk].amount.toLocaleString("ja-JP")}（${m.sessionPaymentsSquare[mk].paidAt.slice(0, 10)}）`
+                                : undefined
+                            }
                           >
                             {val === "済" ? "済" : "未"}
+                            {val === "済" && m.sessionPaymentsSquare?.[mk] && (
+                              <span className="block text-[9px] font-normal leading-none">Square</span>
+                            )}
                           </td>
                         );
                       })}
@@ -1299,7 +1307,7 @@ export default function AdminPage() {
               </tbody>
             </table>
             <div className="flex gap-4 mt-2 text-xs text-muted">
-              <span>済　入金あり</span>
+              <span>済　入金あり（「Square」はマイページの支払いページで入金、自動で反映）</span>
               <span>未　出席したが未納</span>
               <span>－　未出席・対象外</span>
             </div>

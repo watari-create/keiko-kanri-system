@@ -99,6 +99,8 @@ export interface Member {
   entryFeeInvoiceError?: string;
   // 都度払い会員の、出席した月ごとの月謝入金状況（キーはattendanceと同じ会計年度の月）。経理タブで管理
   sessionPayments?: Record<string, "済" | "未納">;
+  // 都度払いの支払いページ（Square）で入金された月の記録（Cloud Functionsが書き込む）
+  sessionPaymentsSquare?: Record<string, { amount: number; paidAt: string }>;
   email: string;
   phone?: string;
   address?: string;

@@ -2657,5 +2657,13 @@ export {
 // Squareの請求書（許状代金・入会金）。詳細は squareInvoice.ts を参照
 export { checkOverdueSquareInvoices, sendSquareInvoiceManually } from "./squareInvoice";
 
+// 都度払い会員の支払いページ（会員・月ごと）。詳細は squareSessionCheckout.ts を参照
+export {
+  createSessionCheckout,
+  createEnrollSessionCheckout,
+  onSessionPaidThenAbsent,
+  checkUnpaidSessionPayments,
+} from "./squareSessionCheckout";
+
 // 新月会の開催日をGoogleカレンダーへ書き込む。詳細は shingetsuCalendar.ts を参照
 export { syncShingetsuSessionToCalendar } from "./shingetsuCalendar";
