@@ -2433,8 +2433,16 @@ export default function AdminPage() {
                       <option value="off">表示しない</option>
                     </select>
                     <p className="text-[11px] text-muted mt-1">
-                      従来のSquare決済リンクでお支払い中の会員は「自動」のままにしてください（二重のお引き落とし防止）。
+                      「自動」：新しく入会した会員と、決済リンクからの切り替え会員（切り替え月の前月から）に表示します。
                     </p>
+                    <label className="flex items-center gap-2 text-xs mt-2">
+                      <input
+                        type="checkbox"
+                        checked={draft.legacySquareCanceled === true}
+                        onChange={(e) => setDraft({ ...draft, legacySquareCanceled: e.target.checked })}
+                      />
+                      旧契約（決済リンクのサブスク）をSquareで解約済み
+                    </label>
                   </Field>
                   <Field label="カード自動払いの状況">
                     <AdminSubscriptionStatus memberId={selectedMember.id} />

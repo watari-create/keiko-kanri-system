@@ -253,6 +253,12 @@ export default function PaymentPage() {
               )}
               <Row label="以降のお引き落とし" value={`毎月${info.billingDay}日に翌月分`} />
               <Row label="お支払い方法" value="クレジットカード" />
+              {info.migration && schedule && (
+                <p className="text-xs text-matcha-deep bg-matcha-pale rounded p-3 mt-3 leading-relaxed">
+                  これまでの決済リンク（Square）でのお支払いは、{formatYm(schedule.startMonth)}分の前月分までで終了します。
+                  旧契約の解約は本部でお手続きしますので、お客様のお手続きは不要です。
+                </p>
+              )}
               <ul className="text-xs text-muted list-disc pl-4 mt-3 space-y-1">
                 <li>お月謝は前払いです。毎月{info.billingDay}日に、翌月分をご登録のカードから自動でお引き落としします。</li>
                 <li>参加開始月の分は、お申込み時（または参加開始月の前月{info.billingDay}日）にお引き落としします。</li>

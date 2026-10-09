@@ -49,6 +49,13 @@ export default function MyPagePaymentCard() {
       {!info && !failed && <p className="text-xs text-muted">読み込み中…</p>}
       {(failed || (info && !sub && !info.eligible)) && <LegacyNotice />}
 
+      {info && !sub && info.eligible && info.migration && info.schedules[0] && (
+        <p className="text-xs text-matcha-deep bg-matcha-pale rounded-md p-3 mb-3 leading-relaxed">
+          {Number(info.schedules[0].startMonth.slice(5, 7))}月分から、お月謝のお支払い方法が新しくなります（毎月25日に翌月分をカードで自動払い）。
+          お手数ですが、下のボタンからカードのご登録をお願いいたします。
+        </p>
+      )}
+
       {info && sub && (
         <>
           <div className="text-sm space-y-1 mb-3">

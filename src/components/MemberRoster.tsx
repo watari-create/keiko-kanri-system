@@ -65,6 +65,24 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   const [keyword, setKeyword] = useState("");
   const [familyOnly, setFamilyOnly] = useState(false);
   const [includeTest, setIncludeTest] = useState(false);
+  // カード自動払い（Square）の契約状況。doc id = 会員番号
+  const [subs, setSubs] = useState<Record<string, { status: string; migratedFromLink?: boolean }>>({});
+  const [cardFilter, setCardFilter] = useState("すべて");
+
+  useEffect(() => {
+    return onSnapshot(
+      collection(db, "memberSubscriptions"),
+      (snap) => {
+        const next: Record<string, { status: string; migratedFromLink?: boolean }> = {};
+        snap.forEach((d) => {
+          const data = d.data() as { status?: string; migratedFromLink?: boolean };
+          if (data.status && data.status !== "CREATING") next[d.id] = { status: data.status, migratedFromLink: data.migratedFromLink };
+        });
+        setSubs(next);
+      },
+      () => setSubs({})
+    );
+  }, []);
 
   useEffect(() => {
     return onSnapshot(collection(db, "members"), (snap) => {
@@ -97,6 +115,15 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
       });
   }
 
+  // 対象の会（月謝払い）の会員のカード自動払いの状況
+  function cardStatus(m: Member): "対象外" | "未登録" | "登録済み" | "旧契約の解約待ち" {
+    if (!["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
+    const sub = subs[m.id];
+    if (!sub || !["PENDING", "ACTIVE", "PAUSED"].includes(sub.status)) return "未登録";
+    if (sub.migratedFromLink && !m.legacySquareCanceled) return "旧契約の解約待ち";
+    return "登録済み";
+  }
+
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
     return all
@@ -110,6 +137,14 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           const f = byId.get(id);
           return f && f.status === "在籍";
         });
+      })
+      .filter((m) => {
+        if (cardFilter === "すべて") return true;
+        const st = cardStatus(m);
+        if (cardFilter === "未登録") return st === "未登録";
+        if (cardFilter === "登録済み") return st === "登録済み" || st === "旧契約の解約待ち";
+        if (cardFilter === "旧契約の解約待ち") return st === "旧契約の解約待ち";
+        return true;
       })
       .filter((m) => {
         if (!kw) return true;
@@ -126,7 +161,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           a.id.localeCompare(b.id)
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [all, byId, groupFilter, keyword, familyOnly, includeTest]);
+  }, [all, byId, groupFilter, keyword, familyOnly, includeTest, cardFilter, subs]);
 
   // 会ごとの人数（絞り込み後）
   const countsByGroup = useMemo(() => {
@@ -206,6 +241,17 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
+        <select
+          className="border border-line rounded px-2 py-1.5 text-xs"
+          value={cardFilter}
+          onChange={(e) => setCardFilter(e.target.value)}
+          title="カード自動払い（Square）"
+        >
+          <option value="すべて">カード自動払い：すべて</option>
+          <option value="未登録">カード自動払い：未登録</option>
+          <option value="登録済み">カード自動払い：登録済み</option>
+          <option value="旧契約の解約待ち">旧契約（決済リンク）の解約待ち</option>
+        </select>
         <label className="flex items-center gap-1 text-xs">
           <input type="checkbox" checked={familyOnly} onChange={(e) => setFamilyOnly(e.target.checked)} />
           ご家族がいる会員のみ
@@ -291,6 +337,19 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
                         {fee.label}
                         {m.paymentStatus === "未納" && <span className="ml-1 text-hanko">未納</span>}
                       </div>
+                      {cardStatus(m) !== "対象外" && (
+                        <div
+                          className={`text-[11px] ${
+                            cardStatus(m) === "登録済み"
+                              ? "text-matcha-deep"
+                              : cardStatus(m) === "旧契約の解約待ち"
+                              ? "text-hanko"
+                              : "text-muted"
+                          }`}
+                        >
+                          カード自動払い：{cardStatus(m) === "旧契約の解約待ち" ? "登録済み・旧契約の解約待ち" : cardStatus(m)}
+                        </div>
+                      )}
                       {entryFee !== null && (
                         <div className="text-[11px] text-muted">
                           入会金 {formatYen(entryFee)}

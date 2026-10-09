@@ -34,7 +34,8 @@ export interface SquareBillingInfo {
   reason: string | null;
   amount: number | null;
   label: string;
-  schedules: BillingSchedule[]; // 選べる参加開始月ごとのスケジュール（新規募集クラスは1つ）
+  schedules: BillingSchedule[];
+  migration: boolean; // 決済リンク（従来の方式）からの切り替え会員 // 選べる参加開始月ごとのスケジュール（新規募集クラスは1つ）
   billingDay: number;
   memberName: string;
   email: string;

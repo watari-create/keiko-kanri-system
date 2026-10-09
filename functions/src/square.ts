@@ -29,7 +29,10 @@ const squareEnvironment = defineString("SQUARE_ENVIRONMENT", { default: "sandbox
 const squareApplicationId = defineString("SQUARE_APPLICATION_ID");
 const squareLocationId = defineString("SQUARE_LOCATION_ID");
 const squareWebhookUrl = defineString("SQUARE_WEBHOOK_URL", { default: "" });
-const squareBillingFrom = defineString("SQUARE_BILLING_FROM", { default: "2026-10-15" });
+const squareBillingFrom = defineString("SQUARE_BILLING_FROM", { default: "2026-11-01" });
+// 決済リンク（従来のSquareサブスク）でお支払い中の会員が、この仕組みに切り替える最初の月（YYYY-MM）。
+// 入会日が SQUARE_BILLING_FROM より前の会員は「切り替え会員」として扱い、参加開始月をこの月（過ぎていれば翌月）に固定する。
+const squareMigrationMonth = defineString("SQUARE_MIGRATION_MONTH", { default: "2026-12" });
 // 引き落とし失敗などの通知先（既存の本部稽古boチャンネル）
 const slackBotTokenForSquare = defineSecret("SLACK_BOT_TOKEN");
 const slackHqChannelForSquare = defineString("SLACK_HQ_CHANNEL");
@@ -230,12 +233,23 @@ function nextBillingDateAfter(dateStr: string): string {
   return d < BILLING_DAY ? ymd(y, m, BILLING_DAY) : ymd(y, m + 1, BILLING_DAY);
 }
 
-/** 選べる参加開始月。新規募集クラスは開講月に固定、それ以外は今月・来月から選ぶ */
-function startMonthOptions(cohortStartDate?: string): string[] {
+/** 決済リンク（従来の方式）から切り替える会員か：入会日が SQUARE_BILLING_FROM より前で、新規募集クラスの会員ではない */
+function isMigrationMember(m: MemberDoc): boolean {
+  return !m.chadoCohortId && (m.joinDate ?? "") < squareBillingFrom.value();
+}
+
+/** 選べる参加開始月。新規募集クラスは開講月、切り替え会員は切り替え月（過ぎていれば翌月）に固定、それ以外は今月・来月から選ぶ */
+function startMonthOptions(cohortStartDate: string | undefined, migration: boolean): string[] {
   const cur = todayJst().slice(0, 7);
   if (cohortStartDate && /^\d{4}-\d{2}-\d{2}$/.test(cohortStartDate)) {
     const cm = cohortStartDate.slice(0, 7);
     return [cm < cur ? cur : cm];
+  }
+  if (migration) {
+    // 今月分は決済リンクで支払い済みのため、早くても翌月分から
+    const next = addMonths(cur, 1);
+    const mm = squareMigrationMonth.value();
+    return [mm > next ? mm : next];
   }
   return [cur, addMonths(cur, 1)];
 }
@@ -249,11 +263,12 @@ function eligibility(m: MemberDoc): { ok: boolean; reason?: string } {
   if (m.squareBillingAllowed === true) return { ok: true };
   // テスト環境（sandbox）の間は、管理画面で「マイページに表示する」にした会員（テスト用）だけに表示する
   if (squareEnvironment.value() !== "production") return { ok: false, reason: "テスト中" };
-  // 既存のSquare決済リンクで月謝をお支払い中の会員に重ねて申し込まれないよう、
-  // 既定では「SQUARE_BILLING_FROM 以降に入会した会員」だけに表示する。
-  // それ以前の会員でも、管理画面で「カード自動払いの案内を表示」をオンにすれば表示される。
-  if ((m.joinDate ?? "") >= squareBillingFrom.value()) return { ok: true };
-  return { ok: false, reason: "従来のお支払い方法の会員" };
+  // 本番：新しく入会した会員はそのまま、決済リンクでお支払い中の会員（切り替え会員）は
+  // 切り替え月の前月1日から表示する（例：12月分から切り替え → 11/1から表示）
+  if (!isMigrationMember(m)) return { ok: true };
+  const openFrom = addMonths(squareMigrationMonth.value(), -1);
+  if (todayJst().slice(0, 7) >= openFrom) return { ok: true };
+  return { ok: false, reason: "切り替え前" };
 }
 
 function requireMember(request: { auth?: { token?: Record<string, unknown> } }): string {
@@ -419,7 +434,8 @@ export const getSquareBillingInfo = onCall(async (request) => {
     reason: fee.amount === null ? "お月謝が未設定" : elig.reason ?? null,
     amount: fee.amount,
     label: fee.label,
-    schedules: startMonthOptions(fee.cohortStartDate).map(buildSchedule),
+    schedules: startMonthOptions(fee.cohortStartDate, isMigrationMember(m)).map(buildSchedule),
+    migration: isMigrationMember(m),
     billingDay: BILLING_DAY,
     memberName: m.name ?? "",
     email: m.email ?? "",
@@ -487,7 +503,8 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
         throw new HttpsError("invalid-argument", friendlyCardError(err));
       }
       const planVariationId = await ensurePlanVariation(fee.amount);
-      const options = startMonthOptions(fee.cohortStartDate);
+      const migration = isMigrationMember(m);
+      const options = startMonthOptions(fee.cohortStartDate, migration);
       const requested = typeof request.data?.startMonth === "string" ? request.data.startMonth : options[0];
       const schedule = buildSchedule(options.includes(requested) ? requested : options[0]);
       const startDate = schedule.subscriptionStartDate;
@@ -545,7 +562,7 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
         createdAt: now,
         updatedAt: now,
       };
-      await subRef.set({ ...record, startMonth: schedule.startMonth });
+      await subRef.set({ ...record, startMonth: schedule.startMonth, migratedFromLink: migration });
       if (oneTimePaymentId) {
         await subRef.collection("payments").add({
           kind: "入金",
@@ -561,6 +578,11 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
           `月額¥${fee.amount.toLocaleString("ja-JP")}　参加開始：${monthLabel(schedule.startMonth).replace("分", "")}\n` +
           (schedule.nowCount ? `お申込み時に引き落とし：${schedule.nowItems.join("・")}\n` : "") +
           `次回：${schedule.nextDate}（${schedule.nextMonth}）` +
+          (migration
+            ? `\n⚠️ 決済リンクからの切り替えです。Squareのダッシュボードで、この方の決済リンクのサブスクリプションを解約してください` +
+              `（${monthLabel(addMonths(schedule.startMonth, -1))}の引き落としまで。メール：${m.email}）。` +
+              `解約したら管理画面の会員詳細で「旧契約（決済リンク）を解約済み」にチェックしてください。`
+            : "") +
           (squareEnvironment.value() === "production" ? "" : "\n（テスト環境）")
       );
       return { ok: true, schedule, amount: fee.amount, cardBrand: card.card_brand ?? null, cardLast4: card.last_4 ?? null };

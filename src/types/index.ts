@@ -85,6 +85,8 @@ export interface Member {
   // お月謝のカード自動払い（Square）の申込みボタンをマイページに表示するか。未設定なら、入会日が
   // SQUARE_BILLING_FROM（functions側の設定）以降の会員にだけ表示する。true＝表示、false＝表示しない、null／未設定＝入会日で自動判定。
   squareBillingAllowed?: boolean | null;
+  // 決済リンク（従来のSquareサブスク）の旧契約を、本部がSquareのダッシュボードで解約したか（切り替え会員の管理用）
+  legacySquareCanceled?: boolean;
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
