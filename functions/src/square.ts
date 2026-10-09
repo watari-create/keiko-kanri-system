@@ -1136,11 +1136,8 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
       await memberRef.update({ nextBillingDate: schedule.nextDate, squareBillingAllowed: true });
       const cancelState = legacyIds.length ? await processLegacyCancellation(memberId) : "旧契約なし";
 
-      await notifySlack(
-        `🔁 決済リンクからカード自動払いに切り替えました（本部操作）\n${m.name ?? ""}様（${memberId}・${m.group ?? ""}）\n` +
-          `月額¥${fee.amount.toLocaleString("ja-JP")}　${monthLabel(schedule.startMonth)}から／初回 ${schedule.nextDate}\n` +
-          `カード：${card.card_brand ?? ""} **** ${card.last_4 ?? ""}　旧契約：${cancelState}`
-      );
+      // 本部が自分で操作した切り替えなので、Slackには通知しない（結果は管理画面に表示）
+      console.log("決済リンクから切り替え", memberId, schedule.startMonth, cancelState);
       return { ok: true, startMonth: schedule.startMonth, nextDate: schedule.nextDate, cancelState };
     } catch (err) {
       if (previous) await subRef.set(previous);
