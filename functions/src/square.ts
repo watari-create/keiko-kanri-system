@@ -124,6 +124,8 @@ interface MemberDoc {
   chadoMonthlyQuota?: number;
   chadoCohortId?: string;
   squareBillingAllowed?: boolean;
+  // 休会・退会でカード自動払いを解約した会員（復会後は決済リンクからの切り替え扱いにしない）
+  squareRejoin?: boolean;
 }
 
 /** お月謝の金額と表示名 */
@@ -237,7 +239,7 @@ function nextBillingDateAfter(dateStr: string): string {
 
 /** 決済リンク（従来の方式）から切り替える会員か：入会日が SQUARE_BILLING_FROM より前で、新規募集クラスの会員ではない */
 function isMigrationMember(m: MemberDoc): boolean {
-  return !m.chadoCohortId && (m.joinDate ?? "") < squareBillingFrom.value();
+  return !m.chadoCohortId && !m.squareRejoin && (m.joinDate ?? "") < squareBillingFrom.value();
 }
 
 /** 選べる参加開始月。新規募集クラスは開講月、切り替え会員は切り替え月（過ぎていれば翌月）に固定、それ以外は今月・来月から選ぶ */
@@ -1173,7 +1175,19 @@ type LeaveRecord = SubscriptionRecord & {
   legacyCancelStatus?: string;
   cancelScheduledDate?: string | null;
   cancelRequestedAt?: string;
+  paidThroughMonth?: string;
 };
+
+/**
+ * その日の時点で何月分まで支払い済みか（毎月25日に翌月分を前払いする前提）。
+ * 例）11/10 → 11月分まで（10/25に11月分）、11/26 → 12月分まで（11/25に12月分）。
+ * サブスク開始前（初回の25日より前）なら、開始日の月（＝初回で払う月の前月）まで。
+ */
+function paidThroughMonthAt(date: string, subscriptionStartDate?: string): string {
+  if (subscriptionStartDate && date < subscriptionStartDate) return subscriptionStartDate.slice(0, 7);
+  const cur = date.slice(0, 7);
+  return Number(date.slice(8, 10)) >= BILLING_DAY ? addMonths(cur, 1) : cur;
+}
 
 /** Squareのサブスクを解約する（支払い済み期間の終わりで停止＝次の25日以降は引き落とされない） */
 async function cancelSquareSubscription(id: string): Promise<{ result: "canceled" | "already"; endDate: string | null; chargedThrough: string | null }> {
@@ -1198,6 +1212,7 @@ async function stopSquareBillingForLeave(memberId: string, type: string): Promis
   const subSnap = await subRef.get();
   const rec = subSnap.exists ? (subSnap.data() as LeaveRecord) : null;
   const ourIds: string[] = [];
+  await db().doc(`members/${memberId}`).update({ squareRejoin: true }).catch(() => undefined);
 
   // 1. カード自動払い（このシステムで作った契約）
   if (rec?.squareSubscriptionId) {
@@ -1209,6 +1224,7 @@ async function stopSquareBillingForLeave(memberId: string, type: string): Promis
           cancelScheduledDate: r.endDate,
           cancelReason: `${type}申請の承認`,
           cancelRequestedAt: now,
+          paidThroughMonth: paidThroughMonthAt(todayJst(), rec.startDate),
           updatedAt: now,
         });
         lines.push(
@@ -1301,32 +1317,171 @@ async function stopSquareBillingForLeave(memberId: string, type: string): Promis
   return { lines, needsCheck };
 }
 
-/** 復会：休会時に解約予約したカード自動払いが、まだ停止前なら解約予約を取り消す */
-async function resumeSquareBillingForReturn(memberId: string): Promise<string[]> {
+/**
+ * 復会：
+ *  ・休会時に解約したカード自動払いがまだ停止前なら、解約予約を取り消す（そのまま続く）
+ *  ・すでに停止していれば、Squareに登録済みのカードで新しく契約し直す。
+ *    休会前に支払い済みの月の翌月から（早くても復会した月から）お月謝をいただき、
+ *    すでに過ぎている分（復会した月の分など）は承認時にすぐ引き落とす。
+ */
+async function resumeSquareBillingForReturn(memberId: string): Promise<{ lines: string[]; needsCheck: boolean }> {
   const subRef = db().doc(`memberSubscriptions/${memberId}`);
   const snap = await subRef.get();
   const rec = snap.exists ? (snap.data() as LeaveRecord) : null;
-  if (!rec?.squareSubscriptionId || !rec.cancelRequestedAt) return [];
+  const memberRef = db().doc(`members/${memberId}`);
+  const m = ((await memberRef.get()).data() ?? {}) as MemberDoc;
+  const guide = "マイページの「お支払い」からカードを登録していただくようご案内ください。";
+  if (!rec?.squareSubscriptionId || !rec.squareCustomerId) {
+    // このシステムでのカード自動払いの記録がない（決済リンクのみ・都度払いなど）
+    if (!TARGET_GROUPS.includes(m.group ?? "") || m.paymentMethod === "都度払い") return { lines: [], needsCheck: false };
+    return { lines: [`カード自動払いの登録がありません。${guide}`], needsCheck: true };
+  }
+
+  // 1. まだ停止前なら、解約予約を取り消す
+  let stopped = !ACTIVE_STATUSES.includes(rec.status);
   try {
     const { subscription: s, actions } = await square<{ subscription: any; actions?: any[] }>(
       "GET",
       `/v2/subscriptions/${rec.squareSubscriptionId}?include=actions`
     );
+    const active = ["ACTIVE", "PENDING", "PAUSED"].includes(s.status);
     const cancelAction = (actions ?? s.actions ?? []).find((a: any) => a.type === "CANCEL");
-    if (ACTIVE_STATUSES.includes(s.status) && cancelAction) {
+    if (active && cancelAction && (!s.canceled_date || s.canceled_date > todayJst())) {
       await square("DELETE", `/v2/subscriptions/${rec.squareSubscriptionId}/actions/${cancelAction.id}`);
       await subRef.update({
+        status: s.status,
         cancelScheduledDate: null,
         cancelReason: admin.firestore.FieldValue.delete(),
         cancelRequestedAt: admin.firestore.FieldValue.delete(),
+        paidThroughMonth: admin.firestore.FieldValue.delete(),
         updatedAt: new Date().toISOString(),
       });
-      return ["カード自動払い：休会時の解約予約を取り消しました（これまでどおり毎月25日に引き落とし）"];
+      return { lines: ["カード自動払い：休会時の解約を取り消しました（これまでどおり毎月25日に翌月分を引き落とし）"], needsCheck: false };
+    }
+    if (active && !s.canceled_date && !cancelAction) {
+      return { lines: ["カード自動払い：解約されていないため、そのまま継続しています"], needsCheck: false };
+    }
+    stopped = true;
+  } catch (err) {
+    console.error("復会時の契約確認エラー", memberId, err);
+    return { lines: [`⚠️ Squareの契約を確認できませんでした。Squareのダッシュボードで確認のうえ、必要なら${guide}`], needsCheck: true };
+  }
+  if (!stopped) return { lines: [], needsCheck: false };
+
+  // 2. 停止済み → 登録済みのカードで契約し直す
+  if (m.squareBillingAllowed === false || m.paymentMethod === "都度払い" || !TARGET_GROUPS.includes(m.group ?? "")) {
+    return { lines: ["カード自動払いの対象外の設定のため、再開していません"], needsCheck: false };
+  }
+  const fee = await monthlyFeeFor(m);
+  if (!fee.amount) return { lines: [`⚠️ お月謝が未設定のためカード自動払いを再開できませんでした。お月謝を設定のうえ、${guide}`], needsCheck: true };
+
+  // 使えるカード（前回のカード→無ければ同じ顧客の別のカード）
+  const nowJ = new Date(Date.now() + 9 * 3600 * 1000);
+  const usable = (c: any) =>
+    c &&
+    c.enabled !== false &&
+    !(typeof c.exp_year === "number" && typeof c.exp_month === "number" &&
+      (c.exp_year < nowJ.getUTCFullYear() || (c.exp_year === nowJ.getUTCFullYear() && c.exp_month < nowJ.getUTCMonth() + 1)));
+  let card: any = null;
+  try {
+    if (rec.squareCardId) {
+      const r = await square<{ card: any }>("GET", `/v2/cards/${rec.squareCardId}`).catch(() => null);
+      if (usable(r?.card)) card = r!.card;
+    }
+    if (!card) {
+      const r = await square<{ cards?: any[] }>("GET", `/v2/cards?customer_id=${encodeURIComponent(rec.squareCustomerId)}`);
+      card = (r.cards ?? []).find(usable) ?? null;
     }
   } catch (err) {
-    console.error("復会時の解約取り消しエラー", memberId, err);
+    console.error("復会時のカード確認エラー", memberId, err);
   }
-  return ["カード自動払いは停止済みです。マイページの「お支払い」からカードを登録し直していただくようご案内ください。"];
+  if (!card) return { lines: [`⚠️ 登録済みのカードが無効または期限切れのため、カード自動払いを再開できませんでした。${guide}`], needsCheck: true };
+
+  // 何月分からいただくか：休会前に払い済みの月の翌月（早くても今月）
+  const cur = todayJst().slice(0, 7);
+  const paidThrough = rec.paidThroughMonth ?? addMonths(cur, -1);
+  const startMonth = addMonths(paidThrough, 1) > cur ? addMonths(paidThrough, 1) : cur;
+  const schedule = buildSchedule(startMonth);
+  const now = new Date().toISOString();
+
+  try {
+    let oneTimePaymentId: string | null = null;
+    if (schedule.oneTimeMonth) {
+      const pay = await square<{ payment: { id: string } }>("POST", "/v2/payments", {
+        idempotency_key: crypto.randomUUID(),
+        source_id: card.id,
+        customer_id: rec.squareCustomerId,
+        location_id: squareLocationId.value(),
+        amount_money: { amount: fee.amount, currency: "JPY" },
+        autocomplete: true,
+        reference_id: memberId,
+        note: `お月謝 ${monthLabel(schedule.oneTimeMonth)}（復会・会員番号 ${memberId}）`,
+      });
+      oneTimePaymentId = pay.payment.id;
+    }
+    const planVariationId = await ensurePlanVariation(fee.amount);
+    const created = await square<{ subscription: { id: string; status: string } }>("POST", "/v2/subscriptions", {
+      idempotency_key: crypto.randomUUID(),
+      location_id: squareLocationId.value(),
+      plan_variation_id: planVariationId,
+      customer_id: rec.squareCustomerId,
+      card_id: card.id,
+      start_date: schedule.subscriptionStartDate,
+      timezone: "Asia/Tokyo",
+      source: { name: "お稽古管理システム" },
+    });
+    await subRef.update({
+      status: created.subscription.status ?? "PENDING",
+      amount: fee.amount,
+      label: fee.label,
+      startDate: schedule.subscriptionStartDate,
+      startMonth: schedule.startMonth,
+      squareSubscriptionId: created.subscription.id,
+      planVariationId,
+      squareCardId: card.id,
+      cardBrand: card.card_brand ?? null,
+      cardLast4: card.last_4 ?? null,
+      cardExpMonth: card.exp_month ?? null,
+      cardExpYear: card.exp_year ?? null,
+      previousSubscriptionIds: admin.firestore.FieldValue.arrayUnion(rec.squareSubscriptionId),
+      resumedAt: now,
+      cancelScheduledDate: null,
+      cancelReason: admin.firestore.FieldValue.delete(),
+      cancelRequestedAt: admin.firestore.FieldValue.delete(),
+      paidThroughMonth: admin.firestore.FieldValue.delete(),
+      lastFailureAt: admin.firestore.FieldValue.delete(),
+      updatedAt: now,
+    });
+    if (oneTimePaymentId) {
+      await subRef.collection("payments").add({
+        kind: "入金",
+        amount: fee.amount,
+        note: `${monthLabel(schedule.oneTimeMonth!)}（復会時の単発決済）`,
+        squarePaymentId: oneTimePaymentId,
+        receivedAt: now,
+      });
+    }
+    await memberRef.update({ nextBillingDate: schedule.nextDate }).catch(() => undefined);
+    return {
+      lines: [
+        `カード自動払いを再開しました（${cardLabelText(card)}・月額¥${fee.amount.toLocaleString("ja-JP")}）`,
+        `休会前のお支払い：${monthLabel(paidThrough)}まで`,
+        schedule.nowCount ? `承認時に引き落とし：${schedule.nowItems.join("・")}` : "承認時の引き落とし：なし",
+        `次回：${schedule.nextDate}（${schedule.nextMonth}）`,
+      ],
+      needsCheck: false,
+    };
+  } catch (err) {
+    console.error("復会時の再契約エラー", memberId, err);
+    return {
+      lines: [`⚠️ カードでの引き落としまたは契約に失敗したため、カード自動払いを再開できませんでした。${guide}`],
+      needsCheck: true,
+    };
+  }
+}
+
+function cardLabelText(c: any): string {
+  return `${c?.card_brand ?? "カード"}${c?.last_4 ? ` 末尾${c.last_4}` : ""}`;
 }
 
 /**
@@ -1352,7 +1507,9 @@ export const onLeaveRequestApprovedSquare = onDocumentUpdated(
         lines = r.lines;
         needsCheck = r.needsCheck;
       } else if (after.type === "復会") {
-        lines = await resumeSquareBillingForReturn(memberId);
+        const r = await resumeSquareBillingForReturn(memberId);
+        lines = r.lines;
+        needsCheck = r.needsCheck;
       }
     } catch (err) {
       console.error("休会・退会・復会時のSquare処理エラー", memberId, err);

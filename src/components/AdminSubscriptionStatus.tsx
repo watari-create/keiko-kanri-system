@@ -27,6 +27,7 @@ interface SubDoc {
   cancelRequestedAt?: string;
   cancelScheduledDate?: string | null;
   cancelReason?: string;
+  resumedAt?: string;
 }
 interface PaymentDoc {
   id: string;
@@ -70,6 +71,9 @@ export default function AdminSubscriptionStatus({ memberId }: { memberId: string
         {sub.label}：{yen(sub.amount)}／月（前払い・毎月25日に翌月分）{sub.startMonth ? `　${sub.startMonth.replace("-", "年")}月から参加` : ""}
       </div>
       <div>カード：{cardLabel(sub.cardBrand, sub.cardLast4)}</div>
+      {sub.resumedAt && !sub.cancelRequestedAt && (
+        <div className="text-muted">復会により登録済みのカードで再開（{formatJpDate(sub.resumedAt)}）</div>
+      )}
       {sub.cancelRequestedAt && (
         <div className="text-hanko">
           {sub.cancelReason ?? "解約"}により解約済み（{formatJpDate(sub.cancelRequestedAt)}）
