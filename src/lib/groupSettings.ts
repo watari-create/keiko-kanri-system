@@ -15,7 +15,7 @@ import { ENROLL_GROUPS, type EnrollField } from "@/lib/enrollGroups";
 
 export type GroupArea = "本部稽古" | "宗徧流稽古" | "UCI";
 
-// 運用ルールの「記入用テンプレート」から発足した会の登録シート（運用ルールタブの「現行の会の登録シート」に表示）
+// 運用ルールの「記入用テンプレート」から発足した会の登録シート（会の設定タブの会の一覧「登録シート」に表示）
 export type SheetRow = { label: string; value: string };
 export interface RegistrationSheet {
   staff: SheetRow[];

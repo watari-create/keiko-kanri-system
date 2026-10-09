@@ -45,7 +45,6 @@ import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
 import AdminSubscriptionStatus from "@/components/AdminSubscriptionStatus";
 import SquareInvoiceInfo from "@/components/SquareInvoiceInfo";
-import OperationRules from "@/components/OperationRules";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
 import { memberFee, formatYen, entryFeeFor } from "@/lib/memberFees";
@@ -68,10 +67,10 @@ import type {
   ChadoRecruitClass,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "会の設定" | "運用ルール";
-const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "会の設定", "運用ルール"];
+type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "会の設定";
+const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "会の設定"];
 // 会員・申請の購読をしないタブ
-const NO_MEMBER_AREAS: Area[] = ["スタッフ管理", "会員名簿", "会の設定", "運用ルール"];
+const NO_MEMBER_AREAS: Area[] = ["スタッフ管理", "会員名簿", "会の設定"];
 
 // 経理タブの対象グループ（本部稽古の会。削除済みの会も入金の確認のため含める）。入会金の金額は「会の設定」
 function keiriGroups(): string[] {
@@ -107,8 +106,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "会員名簿": "すべての会の会員を横断して一覧表示します。年齢・入会日・クラス／組と、別の会に所属するご家族を確認できます。",
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
   "会の設定":
-    "会ごとの料金（お月謝・都度払い・入会金）と入会の申し込み（受付中／停止・案内文・入力項目）を変更します。新しい会の発足・会の削除もここで行います。",
-  "運用ルール": "お稽古の形態整理と新規開講ルール、記入用テンプレート、現行の各会の登録シート（担当者・料金・運営ルール）を確認できます。",
+    "会ごとの料金（お月謝・都度払い・入会金）と入会の申し込み（受付中／停止・案内文・入力項目）を変更します。新しい会の発足（運用ルールの記入用テンプレートから）・会の削除、各会の登録シート（担当者・運営ルール）の確認もここで行います。",
 };
 
 const LICENSE_STAGES: LicenseStatus[] = [
@@ -1492,7 +1490,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "会の設定" && area !== "運用ルール" && (
+      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "会の設定" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
@@ -2164,7 +2162,6 @@ export default function AdminPage() {
       {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} />}
 
       {area === "会の設定" && <GroupSettingsPanel />}
-      {area === "運用ルール" && <OperationRules />}
 
       {area === "スタッフ管理" && (
         <section className="bg-paper border border-line rounded-md p-5">

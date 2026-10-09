@@ -1,10 +1,12 @@
 "use client";
 
-// 運用ルール（本部の管理画面「運用ルール」タブ）。
-// 「お稽古の形態整理と新規開講ルール」と、記入用テンプレートに沿った現行の各会の登録シートを表示する。
-// 内容は静的データ（下のSHEETS等）。担当者や料金が変わったら、このファイルを直接書き換えてpushする。
+// 運用ルール（稽古形態の分類・新規開講の記入用テンプレート・各会の登録シート）。
+// 管理画面「会の設定」タブ（GroupSettingsPanel）の中で使う部品をまとめている：
+//   RulesOverview・TemplateCopy・LaunchFromTemplate（新しい会を発足する）、sheetFor・SheetView（会の一覧の「登録シート」）。
+// 既存の会の登録シートは下のSHEETS（担当者や料金が変わったらここを書き換えてpush）。
+// テンプレートから発足した会の登録シートは Firestore の groupSettings/{会}.registrationSheet。
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   newGroupSetting,
   saveGroupSetting,
@@ -15,7 +17,7 @@ import {
 } from "@/lib/groupSettings";
 
 type Row = [label: string, value: string];
-type Sheet = {
+export type Sheet = {
   name: string;
   tab: string;
   staff: Row[];
@@ -390,9 +392,8 @@ const numOrNull = (v: string): number | null => {
   return v.trim() && Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 };
 
-function LaunchFromTemplate({ onCreated }: { onCreated: (displayName: string) => void }) {
+export function LaunchFromTemplate({ onCreated }: { onCreated: (displayName: string) => void }) {
   const settings = useGroupSettings();
-  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<LaunchDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -456,20 +457,9 @@ function LaunchFromTemplate({ onCreated }: { onCreated: (displayName: string) =>
   const input = "border border-line rounded px-2 py-1 text-sm bg-white";
 
   return (
-    <div className="mt-5 border-t border-line pt-4">
+    <div>
       {message && <p className="text-sm bg-matcha-pale border border-line rounded p-3 mb-3">{message}</p>}
-      {!open ? (
-        <button className="text-sm bg-matcha-deep text-white rounded px-3 py-1.5" onClick={() => setOpen(true)}>
-          記入した内容から会を発足する
-        </button>
-      ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-bold text-sm">記入した内容から会を発足する</h3>
-            <button className="text-xs text-muted underline" onClick={() => { setOpen(false); setDraft(null); }}>
-              閉じる
-            </button>
-          </div>
           <p className="text-sm text-muted">
             発足者が記入したテンプレート（Slackに貼られたもの）をそのまま貼り付けて「読み取る」を押してください。会の名前・タブ・料金を読み取り、担当者や運営ルールは登録シートとして保存します。
           </p>
@@ -557,7 +547,6 @@ function LaunchFromTemplate({ onCreated }: { onCreated: (displayName: string) =>
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
@@ -596,42 +585,11 @@ function SheetTable({ title, rows }: { title: string; rows: Row[] }) {
   );
 }
 
-export default function OperationRules() {
-  const [selected, setSelected] = useState(SHEETS[0].name);
-  const [copied, setCopied] = useState(false);
-  const groupSettings = useGroupSettings();
-  // 静的な登録シート＋「記入した内容から会を発足する」で発足した会の登録シート
-  const sheets = useMemo<Sheet[]>(() => {
-    const extra = groupSettings
-      .filter((g) => g.active && g.registrationSheet && !SHEETS.some((s) => s.name === g.name || s.name === g.displayName))
-      .map((g) => ({
-        name: g.displayName,
-        tab: `${g.area}タブ`,
-        staff: g.registrationSheet!.staff.map((r) => [r.label, r.value] as Row),
-        settings: g.registrationSheet!.settings.map((r) => [r.label, r.value] as Row),
-        common: g.registrationSheet!.common.map((r) => [r.label, r.value] as Row),
-      }));
-    return [...SHEETS, ...extra];
-  }, [groupSettings]);
-  const sheet = sheets.find((s) => s.name === selected) ?? sheets[0];
-
-  async function copyTemplate() {
-    try {
-      await navigator.clipboard.writeText(TEMPLATE);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* クリップボードが使えない環境では何もしない */
-    }
-  }
-
+/** 稽古形態の分類（新しく発足する会をどのタブに置くかのルール） */
+export function RulesOverview() {
   return (
-    <div className="space-y-6">
-      {/* 1. 稽古形態の分類 */}
-      <section className="bg-paper border border-line rounded-md p-5">
-        <h2 className="font-bold mb-1">1. 稽古形態の分類</h2>
-        <p className="text-xs text-muted mb-4">{UPDATED}更新</p>
-        <div className="grid md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <div className="grid md:grid-cols-2 gap-4 text-sm">
           <div className="border border-line rounded-md p-4">
             <h3 className="font-bold text-matcha-deep mb-2">本部稽古タブ（宗徧流タイプ）</h3>
             <ul className="list-disc pl-5 space-y-1">
@@ -658,54 +616,58 @@ export default function OperationRules() {
         <p className="text-sm mt-4">
           新しく発足する会は「本部稽古タブ」または「UCIタブ」に登録します。宗徧流稽古タブは、紙名簿から移行した既存の会（直門・萌芽会・紅月会）を管理するためのものです。
         </p>
-      </section>
+      <p className="text-xs text-muted mt-2">{UPDATED}更新</p>
+    </div>
+  );
+}
 
-      {/* 2. 新規開講テンプレート */}
-      <section className="bg-paper border border-line rounded-md p-5">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-bold">2. 新規お稽古の会：記入用テンプレート</h2>
-          <button
-            className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5"
-            onClick={copyTemplate}
-          >
-            {copied ? "コピーしました" : "テンプレートをコピー"}
-          </button>
-        </div>
-        <p className="text-sm text-muted mb-3">
-          新しい会を発足するときは、発足者にこの項目を記入してもらいます（Slackにそのまま貼れます）。記入済みの内容を下の「記入した内容から会を発足する」に貼り付けると、そのまま会を発足できます。
-        </p>
-        <pre className="text-xs bg-matcha-pale border border-line rounded p-4 whitespace-pre-wrap">{TEMPLATE}</pre>
-        <LaunchFromTemplate onCreated={(n) => setSelected(n)} />
-      </section>
+/** 記入用テンプレート（コピーしてSlackで発足者に送る） */
+export function TemplateCopy() {
+  const [copied, setCopied] = useState(false);
+  const [show, setShow] = useState(false);
+  async function copyTemplate() {
+    try {
+      await navigator.clipboard.writeText(TEMPLATE);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* クリップボードが使えない環境では何もしない */
+    }
+  }
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5" onClick={copyTemplate}>
+          {copied ? "コピーしました" : "テンプレートをコピー"}
+        </button>
+        <button className="text-xs text-muted underline" onClick={() => setShow(!show)}>
+          {show ? "項目を閉じる" : "記入する項目を見る"}
+        </button>
+      </div>
+      {show && (
+        <pre className="text-xs bg-white border border-line rounded p-4 mt-2 whitespace-pre-wrap">{TEMPLATE}</pre>
+      )}
+    </div>
+  );
+}
 
-      {/* 3. 現行の会の登録シート */}
-      <section className="bg-paper border border-line rounded-md p-5">
-        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-          <h2 className="font-bold">3. 現行の会の登録シート</h2>
-          <div className="flex gap-2 flex-wrap">
-            {sheets.map((s) => (
-              <button
-                key={s.name}
-                className={`text-sm rounded-md px-3 py-1.5 border ${
-                  selected === s.name
-                    ? "bg-matcha-deep text-white border-matcha-deep"
-                    : "bg-paper text-ink border-line"
-                }`}
-                onClick={() => setSelected(s.name)}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p className="text-sm mb-4">
-          <span className="font-bold">{sheet.name}</span>　／　{sheet.tab}
-        </p>
-        <SheetTable title="担当者" rows={sheet.staff} />
-        <SheetTable title="設定" rows={sheet.settings} />
-        <SheetTable title="共通" rows={sheet.common} />
-        <p className="text-xs text-muted">赤字は未確定の項目です。</p>
-      </section>
+/** 会の登録シート（既存の会はこのファイルのSHEETS、テンプレートから発足した会はFirestoreに保存したもの） */
+export function sheetFor(g: GroupSetting): Sheet | null {
+  const fixed = SHEETS.find((s) => s.name === g.name || s.name === g.displayName);
+  if (fixed) return fixed;
+  const r = g.registrationSheet;
+  if (!r) return null;
+  const rows = (xs: { label: string; value: string }[]) => xs.map((x) => [x.label, x.value] as Row);
+  return { name: g.displayName, tab: `${g.area}タブ`, staff: rows(r.staff), settings: rows(r.settings), common: rows(r.common) };
+}
+
+export function SheetView({ sheet }: { sheet: Sheet }) {
+  return (
+    <div>
+      <SheetTable title="担当者" rows={sheet.staff} />
+      <SheetTable title="設定" rows={sheet.settings} />
+      <SheetTable title="共通" rows={sheet.common} />
+      <p className="text-xs text-muted">赤字は未確定の項目です。</p>
     </div>
   );
 }

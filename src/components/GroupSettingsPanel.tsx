@@ -2,10 +2,10 @@
 
 // 管理画面「会の設定」タブ。
 // 会ごとの料金（お月謝・都度払い・入会金）と、入会の申し込み（受付中／停止・案内文・入力項目）を変更する。
-// 新しい会の発足・会の削除（非表示化）もここで行う。保存先は Firestore の groupSettings/{会の名前}。
+// 新しい会の発足（運用ルールの記入用テンプレートから）・会の削除（非表示化）、各会の登録シートの確認もここで行う。保存先は Firestore の groupSettings/{会の名前}。
 // 既定値・型は src/lib/groupSettings.ts。サーバー側は functions/src/groupSettings.ts が同じドキュメントを読む。
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { collection, doc, getCountFromServer, query, setDoc, where } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -20,6 +20,7 @@ import {
   type GroupSetting,
 } from "@/lib/groupSettings";
 import type { EnrollField, EnrollFieldType } from "@/lib/enrollGroups";
+import { LaunchFromTemplate, RulesOverview, SheetView, TemplateCopy, sheetFor } from "@/components/OperationRules";
 
 const yen = (n: number | null | undefined) => (typeof n === "number" ? `¥${n.toLocaleString()}` : "—");
 const FIELD_TYPE_LABEL: Record<EnrollFieldType, string> = {
@@ -57,6 +58,8 @@ export default function GroupSettingsPanel() {
   const [showDeleted, setShowDeleted] = useState(false);
   const [creating, setCreating] = useState<{ name: string; area: GroupArea } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showLaunch, setShowLaunch] = useState(false); // 新しい会を発足する（テンプレートから）
+  const [openSheet, setOpenSheet] = useState<string | null>(null); // 登録シートを開いている会
   const [message, setMessage] = useState<string | null>(null);
 
   const visible = settings.filter((s) => showDeleted || s.active);
@@ -154,7 +157,10 @@ export default function GroupSettingsPanel() {
           <h2 className="font-bold">会の一覧</h2>
           <button
             className="text-sm bg-matcha-deep text-white rounded px-3 py-1.5"
-            onClick={() => setCreating({ name: "", area: "本部稽古" })}
+            onClick={() => {
+              setCreating(null);
+              setShowLaunch(true);
+            }}
           >
             ＋ 新しい会を発足する
           </button>
@@ -171,6 +177,48 @@ export default function GroupSettingsPanel() {
           ご家族割引など会員ごとに違う金額は、会員詳細の「お月謝（個別設定）」で設定してください。
         </p>
         {message && <p className="text-sm text-matcha-deep bg-matcha-pale rounded px-3 py-2 mb-3">{message}</p>}
+
+        {showLaunch && (
+          <div className="border border-matcha-deep rounded p-4 mb-4 bg-matcha-pale space-y-5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">新しい会を発足する</h3>
+              <button className="text-xs text-muted underline" onClick={() => setShowLaunch(false)}>
+                閉じる
+              </button>
+            </div>
+            <div>
+              <p className="font-bold text-sm mb-2">① どのタブの会かを決める</p>
+              <RulesOverview />
+            </div>
+            <div>
+              <p className="font-bold text-sm mb-1">② 発足者に記入用テンプレートを記入してもらう</p>
+              <p className="text-xs text-muted mb-2">コピーしてSlackで発足者に送り、記入して返してもらいます。</p>
+              <TemplateCopy />
+            </div>
+            <div>
+              <p className="font-bold text-sm mb-2">③ 記入された内容を貼り付けて発足する</p>
+              <LaunchFromTemplate
+                onCreated={(displayName) => {
+                  setShowLaunch(false);
+                  const created = settings.find((g) => g.displayName === displayName);
+                  setOpenSheet(created ? created.name : null);
+                  setMessage(
+                    `「${displayName}」を発足しました（入会の受付は停止中）。入会フォームを公開するときは、「編集」で案内文・入力項目を確認してから「停止中」を押して受付を開始してください。`
+                  );
+                }}
+              />
+            </div>
+            <button
+              className="text-xs text-muted underline"
+              onClick={() => {
+                setShowLaunch(false);
+                setCreating({ name: "", area: "本部稽古" });
+              }}
+            >
+              テンプレートを使わず、名前だけで発足する
+            </button>
+          </div>
+        )}
 
         {creating && (
           <div className="border border-matcha-deep rounded p-4 mb-4 bg-matcha-pale">
@@ -232,8 +280,12 @@ export default function GroupSettingsPanel() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((s) => (
-                <tr key={s.name} className={`border-b border-line ${s.active ? "" : "opacity-50"}`}>
+              {visible.map((s) => {
+                const sheet = sheetFor(s);
+                const sheetOpen = openSheet === s.name && sheet;
+                return (
+                <Fragment key={s.name}>
+                <tr className={`border-b border-line ${s.active ? "" : "opacity-50"}`}>
                   <td className="py-2 pr-3">
                     <div className="font-semibold">{s.displayName}</div>
                     {s.displayName !== s.name && <div className="text-[11px] text-muted">内部名：{s.name}</div>}
@@ -262,6 +314,16 @@ export default function GroupSettingsPanel() {
                     )}
                   </td>
                   <td className="text-right whitespace-nowrap">
+                    {sheet && (
+                      <button
+                        className={`text-xs border rounded px-3 py-1 mr-2 ${
+                          sheetOpen ? "bg-matcha-deep text-white border-matcha-deep" : "bg-white border-line"
+                        }`}
+                        onClick={() => setOpenSheet(sheetOpen ? null : s.name)}
+                      >
+                        登録シート
+                      </button>
+                    )}
                     {s.active ? (
                       <button className="text-xs border border-line rounded px-3 py-1 bg-white" onClick={() => setEditing(s)}>
                         編集
@@ -277,7 +339,19 @@ export default function GroupSettingsPanel() {
                     )}
                   </td>
                 </tr>
-              ))}
+                {sheetOpen && (
+                  <tr className="border-b border-line">
+                    <td colSpan={8} className="py-4 px-2 bg-matcha-pale/40">
+                      <p className="text-sm mb-3">
+                        <span className="font-bold">{sheet.name}</span>　／　{sheet.tab}
+                      </p>
+                      <SheetView sheet={sheet} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
