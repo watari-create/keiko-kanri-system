@@ -21,6 +21,7 @@
 import * as admin from "firebase-admin";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret, defineString } from "firebase-functions/params";
 import * as crypto from "crypto";
 
@@ -67,7 +68,7 @@ class SquareApiError extends Error {
   }
 }
 
-async function square<T = any>(method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<T> {
+async function square<T = any>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${squareBase()}${path}`, {
     method,
     headers: {
@@ -396,7 +397,7 @@ async function ensurePlanVariation(amount: number): Promise<string> {
   return planVariationId;
 }
 
-async function notifySlack(text: string) {
+async function notifySlack(text: string, thread?: { channel?: string; ts?: string }) {
   // テスト環境（sandbox）の間はSlackに通知しない
   if (squareEnvironment.value() !== "production") {
     console.log("（テスト環境のためSlack通知を省略）", text);
@@ -409,7 +410,9 @@ async function notifySlack(text: string) {
     await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ channel, text }),
+      body: JSON.stringify(
+        thread?.ts ? { channel: thread.channel || channel, thread_ts: thread.ts, text } : { channel, text }
+      ),
     });
   } catch (err) {
     console.error("Slack通知に失敗しました", err);
@@ -491,7 +494,8 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
     const previous = await db().runTransaction(async (tx) => {
       const s = await tx.get(subRef);
       const data = s.exists ? (s.data() as SubscriptionRecord) : null;
-      if (data && ACTIVE_STATUSES.includes(data.status)) {
+      // 休会・退会で解約予約済みの契約は、復会後に申し込み直せるようにする
+      if (data && ACTIVE_STATUSES.includes(data.status) && !(data as LeaveRecord).cancelRequestedAt) {
         const stale = data.status === "CREATING" && data.updatedAt && Date.now() - Date.parse(data.updatedAt) > 5 * 60 * 1000;
         if (!stale) throw new HttpsError("already-exists", "すでにお申込み済みです。");
       }
@@ -1158,5 +1162,210 @@ export const processLegacySquareCancellations = onSchedule(
       const r = await processLegacyCancellation(d.id);
       console.log("旧契約の解約チェック", d.id, r);
     }
+  }
+);
+
+// ---- 休会・退会の承認でカード自動払いを止める／復会で再開する ----
+
+type LeaveRecord = SubscriptionRecord & {
+  legacySubscriptionIds?: string[];
+  legacyCanceledIds?: string[];
+  legacyCancelStatus?: string;
+  cancelScheduledDate?: string | null;
+  cancelRequestedAt?: string;
+};
+
+/** Squareのサブスクを解約する（支払い済み期間の終わりで停止＝次の25日以降は引き落とされない） */
+async function cancelSquareSubscription(id: string): Promise<{ result: "canceled" | "already"; endDate: string | null; chargedThrough: string | null }> {
+  const { subscription: s } = await square<{ subscription: any }>("GET", `/v2/subscriptions/${id}`);
+  if (!["ACTIVE", "PENDING", "PAUSED"].includes(s.status) || s.canceled_date) {
+    return { result: "already", endDate: s.canceled_date ?? null, chargedThrough: s.charged_through_date ?? null };
+  }
+  const res = await square<{ subscription: any }>("POST", `/v2/subscriptions/${id}/cancel`);
+  return {
+    result: "canceled",
+    endDate: res.subscription?.canceled_date ?? null,
+    chargedThrough: res.subscription?.charged_through_date ?? s.charged_through_date ?? null,
+  };
+}
+
+/** 休会・退会：このシステムの契約と決済リンクの旧契約を解約する。結果の説明文を返す */
+async function stopSquareBillingForLeave(memberId: string, type: string): Promise<{ lines: string[]; needsCheck: boolean }> {
+  const lines: string[] = [];
+  let needsCheck = false;
+  const now = new Date().toISOString();
+  const subRef = db().doc(`memberSubscriptions/${memberId}`);
+  const subSnap = await subRef.get();
+  const rec = subSnap.exists ? (subSnap.data() as LeaveRecord) : null;
+  const ourIds: string[] = [];
+
+  // 1. カード自動払い（このシステムで作った契約）
+  if (rec?.squareSubscriptionId) {
+    ourIds.push(rec.squareSubscriptionId);
+    if (ACTIVE_STATUSES.includes(rec.status)) {
+      try {
+        const r = await cancelSquareSubscription(rec.squareSubscriptionId);
+        await subRef.update({
+          cancelScheduledDate: r.endDate,
+          cancelReason: `${type}申請の承認`,
+          cancelRequestedAt: now,
+          updatedAt: now,
+        });
+        lines.push(
+          r.result === "canceled"
+            ? `カード自動払い：解約しました（${r.chargedThrough ? `${r.chargedThrough}まで支払い済み・` : ""}以降の引き落としはありません）`
+            : `カード自動払い：すでに解約済みでした${r.endDate ? `（${r.endDate}で停止）` : ""}`
+        );
+      } catch (err) {
+        console.error("休会・退会時の解約エラー", memberId, err);
+        needsCheck = true;
+        lines.push("⚠️ カード自動払いの解約に失敗しました。Squareのダッシュボードで解約してください。");
+      }
+    } else {
+      lines.push(`カード自動払い：停止済み（${rec.status}）`);
+    }
+  }
+
+  // 2. 切り替え時に見つかった決済リンクの旧契約（解約待ちのもの）は待たずに解約する
+  if (rec?.legacySubscriptionIds?.length && rec.legacyCancelStatus !== "done") {
+    const canceled = new Set(rec.legacyCanceledIds ?? []);
+    let failed = false;
+    for (const id of rec.legacySubscriptionIds) {
+      if (canceled.has(id)) continue;
+      try {
+        await cancelSquareSubscription(id);
+        canceled.add(id);
+      } catch (err) {
+        console.error("休会・退会時の旧契約解約エラー", memberId, id, err);
+        failed = true;
+      }
+    }
+    await subRef.update({
+      legacyCanceledIds: Array.from(canceled),
+      legacyCancelStatus: failed ? "pending" : "done",
+      legacyCancelNote: `${type}申請の承認により解約${failed ? "（一部失敗・毎朝再試行）" : ""}`,
+      updatedAt: now,
+    });
+    if (!failed) await db().doc(`members/${memberId}`).update({ legacySquareCanceled: true }).catch(() => undefined);
+    if (failed) needsCheck = true;
+    lines.push(failed ? "⚠️ 決済リンクの旧契約：一部の解約に失敗しました。Squareで確認してください。" : "決済リンクの旧契約：解約しました");
+  }
+
+  // 3. まだ切り替えていない会員：同じメールアドレスの決済リンクの契約を探す
+  if (!rec?.squareSubscriptionId || !ACTIVE_STATUSES.includes(rec?.status ?? "")) {
+    const mSnap = await db().doc(`members/${memberId}`).get();
+    const m = mSnap.data() as MemberDoc | undefined;
+    const email = (m?.email ?? "").trim();
+    if (email) {
+      try {
+        const allOurs = (await db().collection("memberSubscriptions").get()).docs
+          .map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId)
+          .filter(Boolean);
+        const found = await findLegacySquare(email, [...allOurs, ...(rec?.legacySubscriptionIds ?? [])]);
+        if (found.subscriptions.length) {
+          // ご家族などが同じメールアドレスで在籍中なら、誰の契約か分からないので自動では解約しない
+          const sameEmail = await db().collection("members").where("email", "==", email).get();
+          const others = sameEmail.docs.filter((d) => d.id !== memberId && (d.data() as MemberDoc).status === "在籍");
+          if (others.length) {
+            needsCheck = true;
+            lines.push(
+              `⚠️ 同じメールアドレスの決済リンクの契約が${found.subscriptions.length}件ありますが、` +
+                `${others.map((d) => (d.data() as MemberDoc).name ?? d.id).join("・")}様も同じメールアドレスで在籍中のため自動解約していません。` +
+                `Squareのダッシュボードでどの契約か確認して解約してください。`
+            );
+          } else {
+            const done: string[] = [];
+            for (const sub of found.subscriptions) {
+              try {
+                await cancelSquareSubscription(sub.id);
+                done.push(`${sub.planName ?? "契約"}${typeof sub.amount === "number" ? ` ¥${sub.amount.toLocaleString("ja-JP")}` : ""}`);
+              } catch (err) {
+                console.error("休会・退会時の決済リンク解約エラー", memberId, sub.id, err);
+                needsCheck = true;
+                lines.push(`⚠️ 決済リンクの契約（${sub.id}）の解約に失敗しました。Squareで解約してください。`);
+              }
+            }
+            if (done.length) {
+              lines.push(`決済リンクの契約：解約しました（${done.join("、")}）`);
+              await db().doc(`members/${memberId}`).update({ legacySquareCanceled: true }).catch(() => undefined);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("休会・退会時の決済リンク検索エラー", memberId, err);
+        needsCheck = true;
+        lines.push("⚠️ 決済リンクの契約の確認に失敗しました。Squareのダッシュボードで確認してください。");
+      }
+    }
+  }
+  return { lines, needsCheck };
+}
+
+/** 復会：休会時に解約予約したカード自動払いが、まだ停止前なら解約予約を取り消す */
+async function resumeSquareBillingForReturn(memberId: string): Promise<string[]> {
+  const subRef = db().doc(`memberSubscriptions/${memberId}`);
+  const snap = await subRef.get();
+  const rec = snap.exists ? (snap.data() as LeaveRecord) : null;
+  if (!rec?.squareSubscriptionId || !rec.cancelRequestedAt) return [];
+  try {
+    const { subscription: s, actions } = await square<{ subscription: any; actions?: any[] }>(
+      "GET",
+      `/v2/subscriptions/${rec.squareSubscriptionId}?include=actions`
+    );
+    const cancelAction = (actions ?? s.actions ?? []).find((a: any) => a.type === "CANCEL");
+    if (ACTIVE_STATUSES.includes(s.status) && cancelAction) {
+      await square("DELETE", `/v2/subscriptions/${rec.squareSubscriptionId}/actions/${cancelAction.id}`);
+      await subRef.update({
+        cancelScheduledDate: null,
+        cancelReason: admin.firestore.FieldValue.delete(),
+        cancelRequestedAt: admin.firestore.FieldValue.delete(),
+        updatedAt: new Date().toISOString(),
+      });
+      return ["カード自動払い：休会時の解約予約を取り消しました（これまでどおり毎月25日に引き落とし）"];
+    }
+  } catch (err) {
+    console.error("復会時の解約取り消しエラー", memberId, err);
+  }
+  return ["カード自動払いは停止済みです。マイページの「お支払い」からカードを登録し直していただくようご案内ください。"];
+}
+
+/**
+ * 休会・退会・復会の申請が承認されたら（管理画面の承認・Slackの✔️リアクションのどちらでも）、
+ * お月謝のカード自動払い（Square）を止める／再開する。結果はSlackの申請メッセージのスレッドに返信する。
+ */
+export const onLeaveRequestApprovedSquare = onDocumentUpdated(
+  { document: "leaveRequests/{requestId}", secrets: [squareAccessToken, slackBotTokenForSquare] },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after || !event.data) return;
+    if (!(before.status === "pending" && after.status === "approved")) return;
+    if (after.squareHandledAt) return;
+    const memberId: string = after.memberId;
+    if (!memberId) return;
+
+    let lines: string[] = [];
+    let needsCheck = false;
+    try {
+      if (after.type === "休会" || after.type === "退会") {
+        const r = await stopSquareBillingForLeave(memberId, after.type);
+        lines = r.lines;
+        needsCheck = r.needsCheck;
+      } else if (after.type === "復会") {
+        lines = await resumeSquareBillingForReturn(memberId);
+      }
+    } catch (err) {
+      console.error("休会・退会・復会時のSquare処理エラー", memberId, err);
+      lines = ["⚠️ Squareの処理中にエラーが発生しました。Squareのダッシュボードで確認してください。"];
+      needsCheck = true;
+    }
+    await event.data.after.ref
+      .update({ squareHandledAt: new Date().toISOString(), squareResult: lines.join("\n") || "対象なし" })
+      .catch(() => undefined);
+    if (!lines.length) return;
+    await notifySlack(
+      `${needsCheck ? "⚠️" : "💳"} ${after.memberName ?? memberId}様（${memberId}）の${after.type}に伴うお月謝の自動払い\n` + lines.join("\n"),
+      { channel: after.slackChannel, ts: after.slackTs }
+    );
   }
 );

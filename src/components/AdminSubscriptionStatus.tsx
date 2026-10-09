@@ -24,6 +24,9 @@ interface SubDoc {
   lastPaymentAt?: string;
   lastFailureAt?: string;
   createdAt?: string;
+  cancelRequestedAt?: string;
+  cancelScheduledDate?: string | null;
+  cancelReason?: string;
 }
 interface PaymentDoc {
   id: string;
@@ -67,6 +70,12 @@ export default function AdminSubscriptionStatus({ memberId }: { memberId: string
         {sub.label}：{yen(sub.amount)}／月（前払い・毎月25日に翌月分）{sub.startMonth ? `　${sub.startMonth.replace("-", "年")}月から参加` : ""}
       </div>
       <div>カード：{cardLabel(sub.cardBrand, sub.cardLast4)}</div>
+      {sub.cancelRequestedAt && (
+        <div className="text-hanko">
+          {sub.cancelReason ?? "解約"}により解約済み（{formatJpDate(sub.cancelRequestedAt)}）
+          {sub.cancelScheduledDate ? `　${sub.cancelScheduledDate}で停止・以降の引き落としなし` : "　以降の引き落としなし"}
+        </div>
+      )}
       {sub.migratedFromLink && (
         <div className={sub.legacyCancelStatus === "pending" ? "text-hanko" : "text-muted"}>
           決済リンクの旧契約：

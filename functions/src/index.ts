@@ -2608,6 +2608,7 @@ export {
   listLegacySquareMembers,
   migrateLegacySquareMember,
   processLegacySquareCancellations,
+  onLeaveRequestApprovedSquare,
 } from "./square";
 
 // 新月会の開催日をGoogleカレンダーへ書き込む。詳細は shingetsuCalendar.ts を参照
