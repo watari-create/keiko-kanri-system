@@ -47,7 +47,7 @@ npx -y firebase-tools@latest functions:secrets:set SQUARE_WEBHOOK_SIGNATURE_KEY 
 SQUARE_ENVIRONMENT=sandbox
 SQUARE_APPLICATION_ID=sandbox-sq0idb-xxxxxxxx
 SQUARE_LOCATION_ID=Lxxxxxxxx
-SQUARE_WEBHOOK_URL=https://us-central1-sohenryu-okeiko-management.cloudfunctions.net/squareWebhook
+SQUARE_WEBHOOK_URL=https://squarewebhook-azyyg5u2jq-uc.a.run.app
 SQUARE_BILLING_FROM=2026-11-01
 ```
 - `SQUARE_WEBHOOK_URL` は手順3のデプロイ後に表示される squareWebhook のURLと完全に同じにする
