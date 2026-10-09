@@ -4,7 +4,15 @@
 // 「お稽古の形態整理と新規開講ルール」と、記入用テンプレートに沿った現行の各会の登録シートを表示する。
 // 内容は静的データ（下のSHEETS等）。担当者や料金が変わったら、このファイルを直接書き換えてpushする。
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  newGroupSetting,
+  saveGroupSetting,
+  useGroupSettings,
+  type GroupArea,
+  type GroupSetting,
+  type RegistrationSheet,
+} from "@/lib/groupSettings";
 
 type Row = [label: string, value: string];
 type Sheet = {
@@ -187,6 +195,373 @@ const TEMPLATE = `会の名前：
 運営ルール（頻度・振替・キャンセルポリシー・進級条件）：
 開始予定日：`;
 
+// ---- 記入した内容から会を発足する ----
+// 記入用テンプレート（Slackに記入されたもの）を貼り付けると、会の名前・タブ・料金を読み取り、
+// 会の設定（groupSettings）に新しい会として保存する。担当者・運営ルールなどは登録シートとして一緒に保存し、
+// 下の「現行の会の登録シート」に表示する。入会の受付は停止中のまま（会の設定タブで開始する）。
+
+type Entry = { section: string; label: string; value: string };
+
+const SEC_STAFF = "担当者";
+const SEC_HONBU = "本部稽古タブの場合";
+const SEC_UCI = "UCIタブの場合";
+const SEC_COMMON = "共通";
+
+const toHalf = (s: string) =>
+  s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/，/g, ",");
+const labelBase = (s: string) => s.split("（")[0].split("(")[0].trim();
+
+function parseLines(text: string, canon?: (label: string) => string | null): Entry[] {
+  const out: Entry[] = [];
+  let section = "";
+  for (const raw of text.replace(/\r/g, "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const sec = line.match(/^【(.+?)】$/);
+    if (sec) {
+      section = sec[1];
+      continue;
+    }
+    const m = line.match(/^([^：:]{1,40})[：:](.*)$/);
+    const label = m ? m[1].replace(/^[\s　\-－ー・]+/, "").trim() : "";
+    const known = m ? (canon ? canon(label) : label) : null;
+    if (m && known) {
+      out.push({ section, label: known, value: m[2].trim() });
+    } else if (out.length) {
+      // 「頻度：月1回」のような、項目の中身の続きの行
+      const last = out[out.length - 1];
+      last.value = last.value ? `${last.value}\n${line}` : line;
+    }
+  }
+  return out;
+}
+
+const TEMPLATE_ENTRIES = parseLines(TEMPLATE);
+const KNOWN_LABELS = [...new Set(TEMPLATE_ENTRIES.map((e) => e.label))];
+const L = (prefix: string) => KNOWN_LABELS.find((k) => k.startsWith(prefix)) ?? prefix;
+
+function canonicalLabel(label: string): string | null {
+  if (label.length < 2) return null;
+  return (
+    KNOWN_LABELS.find((k) => k === label) ??
+    KNOWN_LABELS.find((k) => labelBase(k) === labelBase(label)) ??
+    KNOWN_LABELS.find((k) => k.startsWith(label)) ??
+    null
+  );
+}
+
+// テンプレートのまま（未記入）の値は空にする
+function cleanValue(e: Entry): string {
+  const def =
+    TEMPLATE_ENTRIES.find((t) => t.label === e.label && t.section === e.section)?.value ??
+    TEMPLATE_ENTRIES.find((t) => t.label === e.label)?.value ??
+    "";
+  const v = e.value.trim();
+  if (!v || v === def) return "";
+  if (/（[\s　]*円）/.test(v) && !/[0-9０-９]/.test(v)) return "";
+  return v;
+}
+
+function yenIn(v: string): number | null {
+  const m = toHalf(v).match(/(\d[\d,]*(?:\.\d+)?)\s*(万)?\s*円/);
+  if (!m) return null;
+  const n = Math.round(parseFloat(m[1].replace(/,/g, "")) * (m[2] ? 10000 : 1));
+  return n > 0 ? n : null;
+}
+
+// 「固定制（12,000円／月）・都度払い（15,000円／回）」などから月額と1回あたりを読み取る
+function parseFees(v: string): { monthly: number | null; session: number | null } {
+  const s = toHalf(v);
+  let monthly: number | null = null;
+  let session: number | null = null;
+  const re = /(\d[\d,]*(?:\.\d+)?)\s*(万)?\s*円/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const n = Math.round(parseFloat(m[1].replace(/,/g, "")) * (m[2] ? 10000 : 1));
+    if (!(n > 0)) continue;
+    const after = s.slice(re.lastIndex, re.lastIndex + 4);
+    const before = s.slice(Math.max(0, m.index - 12), m.index);
+    let isSession: boolean;
+    if (/^[\s）)]*[／/]?\s*回/.test(after)) isSession = true;
+    else if (/^[\s）)]*[／/]?\s*月/.test(after)) isSession = false;
+    else {
+      const iS = Math.max(before.lastIndexOf("都度"), before.lastIndexOf("1回"));
+      const iM = Math.max(before.lastIndexOf("固定"), before.lastIndexOf("月謝"), before.lastIndexOf("月額"), before.lastIndexOf("会費"));
+      isSession = iS > iM;
+    }
+    if (isSession) session ??= n;
+    else monthly ??= n;
+  }
+  return { monthly, session };
+}
+
+type LaunchDraft = {
+  name: string;
+  displayName: string;
+  area: GroupArea;
+  monthlyFee: number | null;
+  sessionFee: number | null;
+  entryFee: number | null;
+  cardAutoPay: boolean;
+  enrollKey: string;
+  sheet: RegistrationSheet;
+  warnings: string[];
+  text: string;
+};
+
+function buildDraft(text: string, forceArea?: GroupArea): LaunchDraft {
+  const entries = parseLines(text, canonicalLabel).map((e) => ({ ...e, value: cleanValue(e) }));
+  const get = (label: string, section?: string) => {
+    const hit =
+      (section !== undefined && entries.find((e) => e.label === label && e.section === section && e.value)) ||
+      entries.find((e) => e.label === label && (section === undefined || e.section === "") && e.value);
+    return hit ? hit.value : "";
+  };
+  const orTbd = (v: string) => v || TBD;
+  const warnings: string[] = [];
+
+  const name = get(L("会の名前")).split("\n")[0].trim();
+  if (!name) warnings.push("会の名前が読み取れませんでした。下の欄に入力してください。");
+  const tab = get(L("タブ"));
+  const area: GroupArea = forceArea ?? (/UCI/i.test(tab) ? "UCI" : "本部稽古");
+  if (forceArea) {
+    /* タブを画面で選び直したときは警告を出さない */
+  } else if (!tab) warnings.push("タブが未記入のため「本部稽古」にしています。");
+  else if (/UCI/i.test(tab) && /本部/.test(tab)) warnings.push("タブに本部稽古とUCIの両方が書かれています。どちらか確認してください。");
+
+  const sec = area === "UCI" ? SEC_UCI : SEC_HONBU;
+  const feeText = area === "UCI" ? get(L("会費"), SEC_UCI) : get(L("月謝"), SEC_HONBU);
+  const fees = parseFees(feeText);
+  const entryText = get(L("入会金"), sec);
+  const entryFee = /[0-9０-９]/.test(entryText) ? yenIn(entryText) : null;
+  if (feeText && fees.monthly === null && fees.session === null)
+    warnings.push(`料金の金額を読み取れませんでした（記入：${feeText}）。下の欄に入力してください。`);
+  if (/有/.test(entryText) && entryFee === null) warnings.push("入会金「有」ですが金額が読み取れませんでした。");
+
+  const staffLabels = TEMPLATE_ENTRIES.filter((e) => e.section === SEC_STAFF).map((e) => e.label);
+  const staff = staffLabels.map((label) => ({ label, value: orTbd(get(label, SEC_STAFF)) }));
+  if (!get(L("責任者"), SEC_STAFF)) warnings.push("責任者が未記入です。");
+
+  const settings =
+    area === "本部稽古"
+      ? [
+          ...HONBU_FIXED.map(([label, value]) => ({ label, value })),
+          { label: "経理（入金管理）", value: "対象" },
+          { label: "－月謝", value: orTbd(feeText) },
+          { label: "－許状代金の入金確認", value: orTbd(get(L("許状代金"), SEC_HONBU)) },
+          { label: "－入会金", value: orTbd(entryText) },
+          { label: "スタッフ画面の公開範囲", value: orTbd(get(L("スタッフ画面"), SEC_HONBU)) },
+          { label: "生徒向け専用ページの要否", value: orTbd(get(L("生徒向け"), SEC_HONBU)) },
+        ]
+      : [
+          { label: "会員区分", value: "山田家の会員（宗徧会会員番号は発行しない・宗徧流の許状は出さない）" },
+          ...TEMPLATE_ENTRIES.filter((e) => e.section === SEC_UCI).map((e) => ({
+            label: e.label === L("会費") || e.label === L("入会金") ? `－${e.label}` : e.label,
+            value: orTbd(get(e.label, SEC_UCI)),
+          })),
+        ];
+
+  const common = [
+    { label: "必要なマニュアル", value: orTbd(get(L("必要なマニュアル"), SEC_COMMON)) },
+    { label: "運営ルール", value: orTbd(get(L("運営ルール"), SEC_COMMON)) },
+    { label: "開始", value: orTbd(get(L("開始予定日"), SEC_COMMON)) },
+  ];
+
+  const tbdCount = [...staff, ...settings, ...common].filter((r) => r.value === TBD).length;
+  if (tbdCount) warnings.push(`未記入の項目が${tbdCount}件あります（登録シートに赤字で「${TBD}」と表示されます。あとから書き足せます）。`);
+
+  return {
+    name,
+    displayName: name,
+    area,
+    monthlyFee: fees.monthly,
+    sessionFee: fees.session,
+    entryFee,
+    cardAutoPay: area === "本部稽古" && fees.monthly !== null,
+    enrollKey: "",
+    sheet: { staff, settings, common },
+    warnings,
+    text,
+  };
+}
+
+const numOrNull = (v: string): number | null => {
+  const n = Number(toHalf(v).replace(/[,円\s]/g, ""));
+  return v.trim() && Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+};
+
+function LaunchFromTemplate({ onCreated }: { onCreated: (displayName: string) => void }) {
+  const settings = useGroupSettings();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [draft, setDraft] = useState<LaunchDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const set = <K extends keyof LaunchDraft>(k: K, v: LaunchDraft[K]) => setDraft((d) => (d ? { ...d, [k]: v } : d));
+
+  function read() {
+    if (!text.trim()) return window.alert("記入済みのテンプレートを貼り付けてください。");
+    setDraft(buildDraft(text));
+    setMessage(null);
+  }
+
+  async function launch() {
+    if (!draft) return;
+    const name = draft.name.trim();
+    const displayName = draft.displayName.trim() || name;
+    if (!name) return window.alert("会の名前を入力してください。");
+    if (/[/]/.test(name)) return window.alert("会の名前に「/」は使えません。");
+    if (settings.some((s) => [s.name, s.displayName].includes(name) || [s.name, s.displayName].includes(displayName)))
+      return window.alert("同じ名前の会がすでにあります（削除済みの会を含みます）。");
+    const key = draft.enrollKey.trim();
+    if (key && !/^[a-z0-9-]+$/.test(key)) return window.alert("入会ページのURLの識別子は半角英小文字・数字・ハイフンで入力してください。");
+    if (key && settings.some((s) => s.enrollKey === key)) return window.alert(`識別子「${key}」はほかの会で使われています。`);
+    if (
+      !window.confirm(
+        `「${displayName}」（${draft.area}タブ）を発足します。\n\n` +
+          `お月謝：${draft.monthlyFee ? `${draft.monthlyFee.toLocaleString()}円` : "なし"}／都度払い：${draft.sessionFee ? `${draft.sessionFee.toLocaleString()}円` : "なし"}／入会金：${draft.entryFee ? `${draft.entryFee.toLocaleString()}円` : "なし"}\n\n` +
+          "会の名前は会員データと結びつくため、あとから変更できません（表示名は変更できます）。入会の受付は停止中のまま発足します。よろしいですか？"
+      )
+    )
+      return;
+    const maxOrder = Math.max(0, ...settings.filter((s) => s.area === draft.area).map((s) => s.order));
+    const s: GroupSetting = {
+      ...newGroupSetting(name, draft.area, maxOrder + 10),
+      displayName,
+      monthlyFee: draft.monthlyFee,
+      sessionFee: draft.sessionFee,
+      entryFee: draft.entryFee,
+      cardAutoPay: draft.cardAutoPay,
+      allowSessionPay: draft.sessionFee !== null,
+      enrollKey: key,
+      registrationSheet: draft.sheet,
+      registrationText: draft.text,
+    };
+    setBusy(true);
+    try {
+      await saveGroupSetting(s);
+      setMessage(
+        `「${displayName}」を発足しました。${draft.area}タブに表示されます。入会フォームを公開するときは「会の設定」タブで案内文・入力項目を確認して「受付を開始」してください。`
+      );
+      setDraft(null);
+      setText("");
+      onCreated(displayName);
+    } catch (e) {
+      window.alert(`保存できませんでした：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const input = "border border-line rounded px-2 py-1 text-sm bg-white";
+
+  return (
+    <div className="mt-5 border-t border-line pt-4">
+      {message && <p className="text-sm bg-matcha-pale border border-line rounded p-3 mb-3">{message}</p>}
+      {!open ? (
+        <button className="text-sm bg-matcha-deep text-white rounded px-3 py-1.5" onClick={() => setOpen(true)}>
+          記入した内容から会を発足する
+        </button>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-bold text-sm">記入した内容から会を発足する</h3>
+            <button className="text-xs text-muted underline" onClick={() => { setOpen(false); setDraft(null); }}>
+              閉じる
+            </button>
+          </div>
+          <p className="text-sm text-muted">
+            発足者が記入したテンプレート（Slackに貼られたもの）をそのまま貼り付けて「読み取る」を押してください。会の名前・タブ・料金を読み取り、担当者や運営ルールは登録シートとして保存します。
+          </p>
+          <textarea
+            className="w-full h-64 border border-line rounded p-3 text-xs font-mono bg-white"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={TEMPLATE}
+          />
+          <div className="flex gap-2">
+            <button className="text-sm bg-matcha-deep text-white rounded px-3 py-1.5" onClick={read}>
+              読み取る
+            </button>
+            <button className="text-sm border border-line rounded px-3 py-1.5" onClick={() => setText(TEMPLATE)}>
+              空のテンプレートを入れる
+            </button>
+          </div>
+
+          {draft && (
+            <div className="border border-line rounded-md p-4 space-y-4 bg-white">
+              <h4 className="font-bold text-sm">読み取った内容（発足前に確認・修正できます）</h4>
+              {draft.warnings.length > 0 && (
+                <ul className="text-sm text-red-700 list-disc pl-5 space-y-1">
+                  {draft.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="grid md:grid-cols-2 gap-3 text-sm">
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">会の名前（内部名・発足後は変更不可）</span>
+                  <input className={`${input} w-full`} value={draft.name} onChange={(e) => set("name", e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">表示名</span>
+                  <input className={`${input} w-full`} value={draft.displayName} onChange={(e) => set("displayName", e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">タブ</span>
+                  <select
+                    className={`${input} w-full`}
+                    value={draft.area}
+                    onChange={(e) => {
+                      const area = e.target.value as GroupArea;
+                      setDraft((d) =>
+                        d ? { ...buildDraft(d.text, area), name: d.name, displayName: d.displayName, enrollKey: d.enrollKey } : d
+                      );
+                    }}
+                  >
+                    <option value="本部稽古">本部稽古</option>
+                    <option value="UCI">UCI</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">入会ページのURL（/enroll?group=○○・任意・あとで設定可）</span>
+                  <input className={`${input} w-full`} value={draft.enrollKey} placeholder="例：hougakai" onChange={(e) => set("enrollKey", e.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">お月謝（月額・円）</span>
+                  <input className={`${input} w-full`} inputMode="numeric" value={draft.monthlyFee ?? ""} onChange={(e) => set("monthlyFee", numOrNull(e.target.value))} />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">都度払い（1回・円）</span>
+                  <input className={`${input} w-full`} inputMode="numeric" value={draft.sessionFee ?? ""} onChange={(e) => set("sessionFee", numOrNull(e.target.value))} />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-muted mb-1">入会金（円・なしは空欄）</span>
+                  <input className={`${input} w-full`} inputMode="numeric" value={draft.entryFee ?? ""} onChange={(e) => set("entryFee", numOrNull(e.target.value))} />
+                </label>
+                <label className="flex items-center gap-2 mt-5">
+                  <input type="checkbox" checked={draft.cardAutoPay} onChange={(e) => set("cardAutoPay", e.target.checked)} />
+                  <span>お月謝をカード自動払い（毎月25日に翌月分）の対象にする</span>
+                </label>
+              </div>
+              <SheetTable title="担当者" rows={draft.sheet.staff.map((r) => [r.label, r.value] as Row)} />
+              <SheetTable title="設定" rows={draft.sheet.settings.map((r) => [r.label, r.value] as Row)} />
+              <SheetTable title="共通" rows={draft.sheet.common.map((r) => [r.label, r.value] as Row)} />
+              <button
+                className="text-sm bg-matcha-deep text-white rounded px-4 py-2 disabled:opacity-50"
+                disabled={busy}
+                onClick={launch}
+              >
+                {busy ? "発足しています…" : "この内容で会を発足する"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Value({ text }: { text: string }) {
   return (
     <>
@@ -224,7 +599,21 @@ function SheetTable({ title, rows }: { title: string; rows: Row[] }) {
 export default function OperationRules() {
   const [selected, setSelected] = useState(SHEETS[0].name);
   const [copied, setCopied] = useState(false);
-  const sheet = SHEETS.find((s) => s.name === selected) ?? SHEETS[0];
+  const groupSettings = useGroupSettings();
+  // 静的な登録シート＋「記入した内容から会を発足する」で発足した会の登録シート
+  const sheets = useMemo<Sheet[]>(() => {
+    const extra = groupSettings
+      .filter((g) => g.active && g.registrationSheet && !SHEETS.some((s) => s.name === g.name || s.name === g.displayName))
+      .map((g) => ({
+        name: g.displayName,
+        tab: `${g.area}タブ`,
+        staff: g.registrationSheet!.staff.map((r) => [r.label, r.value] as Row),
+        settings: g.registrationSheet!.settings.map((r) => [r.label, r.value] as Row),
+        common: g.registrationSheet!.common.map((r) => [r.label, r.value] as Row),
+      }));
+    return [...SHEETS, ...extra];
+  }, [groupSettings]);
+  const sheet = sheets.find((s) => s.name === selected) ?? sheets[0];
 
   async function copyTemplate() {
     try {
@@ -283,9 +672,10 @@ export default function OperationRules() {
           </button>
         </div>
         <p className="text-sm text-muted mb-3">
-          新しい会を発足するときは、発足者にこの項目を記入してもらいます（Slackにそのまま貼れます）。
+          新しい会を発足するときは、発足者にこの項目を記入してもらいます（Slackにそのまま貼れます）。記入済みの内容を下の「記入した内容から会を発足する」に貼り付けると、そのまま会を発足できます。
         </p>
         <pre className="text-xs bg-matcha-pale border border-line rounded p-4 whitespace-pre-wrap">{TEMPLATE}</pre>
+        <LaunchFromTemplate onCreated={(n) => setSelected(n)} />
       </section>
 
       {/* 3. 現行の会の登録シート */}
@@ -293,7 +683,7 @@ export default function OperationRules() {
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <h2 className="font-bold">3. 現行の会の登録シート</h2>
           <div className="flex gap-2 flex-wrap">
-            {SHEETS.map((s) => (
+            {sheets.map((s) => (
               <button
                 key={s.name}
                 className={`text-sm rounded-md px-3 py-1.5 border ${

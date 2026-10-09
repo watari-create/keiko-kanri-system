@@ -9,11 +9,19 @@
 // 公開の入会フォームの受付可否は firestore.rules でも同じドキュメントを見て判定している。
 
 import { useSyncExternalStore } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import { ENROLL_GROUPS, type EnrollField } from "@/lib/enrollGroups";
 
 export type GroupArea = "本部稽古" | "宗徧流稽古" | "UCI";
+
+// 運用ルールの「記入用テンプレート」から発足した会の登録シート（運用ルールタブの「現行の会の登録シート」に表示）
+export type SheetRow = { label: string; value: string };
+export interface RegistrationSheet {
+  staff: SheetRow[];
+  settings: SheetRow[];
+  common: SheetRow[];
+}
 export const GROUP_AREAS: GroupArea[] = ["本部稽古", "宗徧流稽古", "UCI"];
 
 export interface GroupSetting {
@@ -42,6 +50,8 @@ export interface GroupSetting {
   guideLabel: string; // そのボタンの文言
   enrollFields: EnrollField[]; // 入力項目（お支払い方法は allowSessionPay から自動で付く）
 
+  registrationSheet?: RegistrationSheet; // 記入用テンプレートから発足した会のみ
+  registrationText?: string; // 発足時に貼り付けた記入内容（原文）
   legacyLink?: boolean; // 決済リンク（従来のSquareサブスク）を使っていた会か（サーバー側の切り替え処理用・画面では編集しない）
   createdAt?: string;
   updatedAt?: string;
@@ -188,6 +198,17 @@ export function newGroupSetting(name: string, area: GroupArea, order: number): G
     enrollKey: "",
     enrollFields: ADULT_FIELDS,
     createdAt: new Date().toISOString(),
+  });
+}
+
+/** 会の設定を保存する（groupSettings/{会の名前}） */
+export async function saveGroupSetting(s: GroupSetting) {
+  const { name, ...rest } = s;
+  const clean = JSON.parse(JSON.stringify(rest)); // undefined を取り除く（Firestoreは undefined を保存できない）
+  await setDoc(doc(db, "groupSettings", name), {
+    ...clean,
+    updatedAt: new Date().toISOString(),
+    updatedBy: auth.currentUser?.email ?? "",
   });
 }
 
