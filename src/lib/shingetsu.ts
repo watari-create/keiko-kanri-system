@@ -14,6 +14,7 @@ export interface ShingetsuSession {
   id: string; // = date（YYYY-MM-DD）
   date: string;
   place: string;
+  calendarEventId?: string; // 本部のGoogleカレンダーに書き込んだ予定のID（Cloud Functionsが設定）
 }
 
 export type ShingetsuChoice = string; // "YYYY-MM-DD" または "欠席"

@@ -578,7 +578,7 @@ export default function StaffPage() {
         <h2 className="font-bold mb-2">出席簿</h2>
         {group === SHINGETSU_GROUP ? (
           // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
-          <ShingetsuAttendanceGrid members={members} editable />
+          <ShingetsuAttendanceGrid members={members} editable canEditSessions />
         ) : (
         <AttendanceGrid
           members={members}
