@@ -396,6 +396,11 @@ async function ensurePlanVariation(amount: number): Promise<string> {
 }
 
 async function notifySlack(text: string) {
+  // テスト環境（sandbox）の間はSlackに通知しない
+  if (squareEnvironment.value() !== "production") {
+    console.log("（テスト環境のためSlack通知を省略）", text);
+    return;
+  }
   try {
     const token = slackBotTokenForSquare.value();
     const channel = slackHqChannelForSquare.value();
