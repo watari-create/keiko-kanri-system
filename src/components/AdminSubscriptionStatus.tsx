@@ -14,6 +14,9 @@ interface SubDoc {
   label?: string;
   startDate?: string;
   startMonth?: string;
+  migratedFromLink?: boolean;
+  legacyCancelStatus?: string;
+  legacyCancelNote?: string;
   cardBrand?: string;
   cardLast4?: string;
   squareSubscriptionId?: string;
@@ -64,6 +67,17 @@ export default function AdminSubscriptionStatus({ memberId }: { memberId: string
         {sub.label}：{yen(sub.amount)}／月（前払い・毎月25日に翌月分）{sub.startMonth ? `　${sub.startMonth.replace("-", "年")}月から参加` : ""}
       </div>
       <div>カード：{cardLabel(sub.cardBrand, sub.cardLast4)}</div>
+      {sub.migratedFromLink && (
+        <div className={sub.legacyCancelStatus === "pending" ? "text-hanko" : "text-muted"}>
+          決済リンクの旧契約：
+          {sub.legacyCancelStatus === "done"
+            ? "解約済み（または見つからず）"
+            : sub.legacyCancelStatus === "pending"
+            ? "前月分の引き落とし後に自動解約（毎朝確認）"
+            : "Squareで確認してください"}
+          {sub.legacyCancelNote && <div className="whitespace-pre-wrap text-muted">{sub.legacyCancelNote}</div>}
+        </div>
+      )}
       {sub.lastFailureAt && (!sub.lastPaymentAt || sub.lastFailureAt > sub.lastPaymentAt) && (
         <div className="text-hanko">⚠️ 直近の引き落としに失敗（{formatJpDate(sub.lastFailureAt)}）</div>
       )}

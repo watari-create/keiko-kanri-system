@@ -20,6 +20,7 @@
  */
 import * as admin from "firebase-admin";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import * as crypto from "crypto";
 
@@ -567,7 +568,33 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
         createdAt: now,
         updatedAt: now,
       };
-      await subRef.set({ ...record, startMonth: schedule.startMonth, migratedFromLink: migration });
+      // 決済リンクからの切り替え会員は、同じメールアドレスの旧契約を探して自動解約を予約する
+      let legacyIds: string[] = [];
+      if (migration && m.email) {
+        try {
+          const ours = (await db().collection("memberSubscriptions").get()).docs
+            .map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId)
+            .filter(Boolean);
+          const found = await findLegacySquare(m.email, [...ours, created.subscription.id]);
+          legacyIds = found.subscriptions.map((x) => x.id);
+        } catch (e) {
+          console.warn("旧契約の検索に失敗", memberId, e);
+        }
+      }
+      await subRef.set({
+        ...record,
+        startMonth: schedule.startMonth,
+        migratedFromLink: migration,
+        ...(migration
+          ? {
+              legacySubscriptionIds: legacyIds,
+              legacyCancelAfter: lastDayOfMonth(addMonths(schedule.startMonth, -1)),
+              legacyCanceledIds: [],
+              legacyCancelStatus: legacyIds.length ? "pending" : "done",
+            }
+          : {}),
+      });
+      const legacyState = migration && legacyIds.length ? await processLegacyCancellation(memberId) : null;
       if (oneTimePaymentId) {
         await subRef.collection("payments").add({
           kind: "入金",
@@ -584,9 +611,10 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
           (schedule.nowCount ? `お申込み時に引き落とし：${schedule.nowItems.join("・")}\n` : "") +
           `次回：${schedule.nextDate}（${schedule.nextMonth}）` +
           (migration
-            ? `\n⚠️ 決済リンクからの切り替えです。Squareのダッシュボードで、この方の決済リンクのサブスクリプションを解約してください` +
-              `（${monthLabel(addMonths(schedule.startMonth, -1))}の引き落としまで。メール：${m.email}）。` +
-              `解約したら管理画面の会員詳細で「旧契約（決済リンク）を解約済み」にチェックしてください。`
+            ? legacyState
+              ? `\n決済リンクの旧契約：${legacyState}（${monthLabel(addMonths(schedule.startMonth, -1))}の引き落とし後に自動で解約します）`
+              : `\n⚠️ 決済リンクからの切り替えですが、同じメールアドレスの旧契約が見つかりませんでした。` +
+                `Squareのダッシュボードで確認し、残っていれば解約して、管理画面の会員詳細で「旧契約（決済リンク）を解約済み」にチェックしてください。`
             : "") +
           (squareEnvironment.value() === "production" ? "" : "\n（テスト環境）")
       );
@@ -786,6 +814,352 @@ export const squareWebhook = onRequest(
     } catch (err) {
       console.error("Square Webhook処理エラー", type, err);
       res.status(500).send("error");
+    }
+  }
+);
+
+// ============================================================================
+// 決済リンク（従来のSquareサブスク）からの切り替え（本部の管理画面から）
+// ----------------------------------------------------------------------------
+// 会員がSquareに登録済みのカードを使って、本部が新しい契約（毎月25日・前払い）を作る。
+// 旧契約は「切り替え前月分の引き落としが済んだら」自動で解約する（毎日のチェックで実行）。
+//   例）12月分から切り替え → 旧契約の11月分の引き落としが済んだ時点で解約（12月以降は旧契約で引き落とされない）
+// ============================================================================
+
+function requireHonbu(request: { auth?: { token?: Record<string, unknown> } }) {
+  if (request.auth?.token?.role !== "honbu") {
+    throw new HttpsError("permission-denied", "本部アカウントでログインしてください。");
+  }
+}
+
+interface LegacySub {
+  id: string;
+  status: string;
+  customerId: string;
+  cardId: string | null;
+  amount: number | null;
+  planName: string | null;
+  startDate: string | null;
+  chargedThroughDate: string | null;
+}
+
+interface LegacyCard {
+  id: string;
+  customerId: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  expired: boolean;
+}
+
+function lastDayOfMonth(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/** メールアドレスでSquareの顧客を探し、登録済みカードと進行中のサブスク（このシステムで作ったもの以外）を返す */
+async function findLegacySquare(email: string, excludeSubscriptionIds: string[]): Promise<{
+  customerIds: string[];
+  cards: LegacyCard[];
+  subscriptions: LegacySub[];
+}> {
+  const found = await square<{ customers?: { id: string }[] }>("POST", "/v2/customers/search", {
+    query: { filter: { email_address: { exact: email.trim() } } },
+    limit: 10,
+  });
+  const customerIds = (found.customers ?? []).map((c) => c.id);
+  if (!customerIds.length) return { customerIds, cards: [], subscriptions: [] };
+
+  // 次の引き落としに使えるかの判定は、切り替え月の初回（前月25日）時点で期限内か
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const cards: LegacyCard[] = [];
+  for (const cid of customerIds) {
+    const res = await square<{ cards?: any[] }>("GET", `/v2/cards?customer_id=${encodeURIComponent(cid)}`);
+    for (const c of res.cards ?? []) {
+      if (c.enabled === false) continue;
+      const expired =
+        typeof c.exp_year === "number" && typeof c.exp_month === "number"
+          ? c.exp_year < now.getUTCFullYear() || (c.exp_year === now.getUTCFullYear() && c.exp_month < now.getUTCMonth() + 1)
+          : false;
+      cards.push({
+        id: c.id,
+        customerId: cid,
+        brand: c.card_brand ?? null,
+        last4: c.last_4 ?? null,
+        expMonth: c.exp_month ?? null,
+        expYear: c.exp_year ?? null,
+        expired,
+      });
+    }
+  }
+
+  const subsRes = await square<{ subscriptions?: any[] }>("POST", "/v2/subscriptions/search", {
+    query: { filter: { customer_ids: customerIds } },
+    limit: 50,
+  });
+  const live = (subsRes.subscriptions ?? []).filter(
+    (s) => ["ACTIVE", "PENDING", "PAUSED"].includes(s.status) && !excludeSubscriptionIds.includes(s.id) && !s.canceled_date
+  );
+
+  // 金額とプラン名（プランバリエーションから取得）
+  const variationIds = Array.from(new Set(live.map((s) => s.plan_variation_id).filter(Boolean)));
+  const variationInfo: Record<string, { amount: number | null; name: string | null }> = {};
+  if (variationIds.length) {
+    const cat = await square<{ objects?: any[]; related_objects?: any[] }>("POST", "/v2/catalog/batch-retrieve", {
+      object_ids: variationIds,
+      include_related_objects: true,
+    });
+    const plans: Record<string, string> = {};
+    for (const o of cat.related_objects ?? []) {
+      if (o.type === "SUBSCRIPTION_PLAN") plans[o.id] = o.subscription_plan_data?.name ?? "";
+    }
+    for (const o of cat.objects ?? []) {
+      const d = o.subscription_plan_variation_data ?? {};
+      const phase = (d.phases ?? [])[(d.phases ?? []).length - 1] ?? {};
+      const amount = phase.pricing?.price?.amount ?? phase.pricing?.price_money?.amount ?? phase.recurring_price_money?.amount ?? null;
+      variationInfo[o.id] = {
+        amount: typeof amount === "number" ? amount : null,
+        name: [plans[d.subscription_plan_id], d.name].filter(Boolean).join("／") || null,
+      };
+    }
+  }
+
+  const subscriptions: LegacySub[] = live.map((s) => ({
+    id: s.id,
+    status: s.status,
+    customerId: s.customer_id,
+    cardId: s.card_id ?? null,
+    amount:
+      typeof s.price_override_money?.amount === "number"
+        ? s.price_override_money.amount
+        : variationInfo[s.plan_variation_id]?.amount ?? null,
+    planName: variationInfo[s.plan_variation_id]?.name ?? null,
+    startDate: s.start_date ?? null,
+    chargedThroughDate: s.charged_through_date ?? null,
+  }));
+  return { customerIds, cards, subscriptions };
+}
+
+/** 本部用：切り替え対象の会員と、Square上の旧契約・登録済みカードの一覧 */
+export const listLegacySquareMembers = onCall(
+  { secrets: [squareAccessToken], timeoutSeconds: 300 },
+  async (request) => {
+    requireHonbu(request);
+    const [membersSnap, subsSnap] = await Promise.all([
+      db().collection("members").where("status", "==", "在籍").get(),
+      db().collection("memberSubscriptions").get(),
+    ]);
+    const ourSubIds = subsSnap.docs.map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId).filter(Boolean);
+    const liveMemberIds = new Set(
+      subsSnap.docs.filter((d) => ACTIVE_STATUSES.includes((d.data() as SubscriptionRecord).status)).map((d) => d.id)
+    );
+
+    const targets = membersSnap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as MemberDoc & { isTestAccount?: boolean }) }))
+      .filter((m) => TARGET_GROUPS.includes(m.group ?? "") && m.paymentMethod !== "都度払い" && !m.isTestAccount)
+      .filter((m) => !liveMemberIds.has(m.id) && isMigrationMember(m));
+
+    const rows: any[] = [];
+    // Squareの制限に配慮して少しずつ問い合わせる
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length) {
+        const m = queue.shift()!;
+        const fee = await monthlyFeeFor(m);
+        const startMonth = startMonthOptions(fee.cohortStartDate, true)[0];
+        const base = {
+          memberId: m.id,
+          name: m.name ?? "",
+          group: m.group ?? "",
+          email: m.email ?? "",
+          newAmount: fee.amount,
+          newLabel: fee.label,
+          startMonth,
+          schedule: buildSchedule(startMonth),
+        };
+        if (!m.email) {
+          rows.push({ ...base, problem: "メールアドレス未登録", cards: [], subscriptions: [] });
+          continue;
+        }
+        try {
+          const found = await findLegacySquare(m.email, ourSubIds);
+          let problem: string | null = null;
+          if (!found.customerIds.length) problem = "Squareに同じメールアドレスの顧客が見つかりません";
+          else if (!found.cards.some((c) => !c.expired)) problem = "使えるカードが登録されていません";
+          rows.push({ ...base, problem, cards: found.cards, subscriptions: found.subscriptions });
+        } catch (err) {
+          console.error("旧契約の検索エラー", m.id, err);
+          rows.push({ ...base, problem: "Squareへの問い合わせに失敗しました", cards: [], subscriptions: [] });
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    rows.sort((a, b) => (a.group + a.memberId).localeCompare(b.group + b.memberId, "ja"));
+    return { environment: squareEnvironment.value(), rows };
+  }
+);
+
+/** 旧契約のうち、切り替え前月分の引き落としが済んだものを解約する。すべて済めば legacyCancelStatus を done にする */
+async function processLegacyCancellation(memberId: string): Promise<string> {
+  const ref = db().doc(`memberSubscriptions/${memberId}`);
+  const snap = await ref.get();
+  const rec = snap.data() as SubscriptionRecord & {
+    legacySubscriptionIds?: string[];
+    legacyCancelAfter?: string;
+    legacyCanceledIds?: string[];
+    legacyCancelStatus?: string;
+  };
+  if (!rec?.legacySubscriptionIds?.length || rec.legacyCancelStatus === "done") return "対象なし";
+  const canceled = new Set(rec.legacyCanceledIds ?? []);
+  const notes: string[] = [];
+  for (const id of rec.legacySubscriptionIds) {
+    if (canceled.has(id)) continue;
+    try {
+      const { subscription: s } = await square<{ subscription: any }>("GET", `/v2/subscriptions/${id}`);
+      if (!["ACTIVE", "PENDING", "PAUSED"].includes(s.status) || s.canceled_date) {
+        canceled.add(id);
+        notes.push(`${id}：すでに停止済み`);
+        continue;
+      }
+      // 切り替え前月の月末まで支払い済み（＝前月分の引き落とし済み）なら解約する。
+      // 解約は「支払い済み期間の終わり」で有効になるので、それ以降は旧契約で引き落とされない。
+      if ((s.charged_through_date ?? "") >= (rec.legacyCancelAfter ?? "9999-12-31")) {
+        await square("POST", `/v2/subscriptions/${id}/cancel`);
+        canceled.add(id);
+        notes.push(`${id}：解約しました（${s.charged_through_date}まで支払い済み）`);
+      } else {
+        notes.push(`${id}：前月分の引き落とし待ち（現在 ${s.charged_through_date ?? "—"} まで支払い済み）`);
+      }
+    } catch (err) {
+      console.error("旧契約の解約エラー", memberId, id, err);
+      notes.push(`${id}：解約処理に失敗（翌日再試行）`);
+    }
+  }
+  const done = rec.legacySubscriptionIds.every((id) => canceled.has(id));
+  await ref.update({
+    legacyCanceledIds: Array.from(canceled),
+    legacyCancelStatus: done ? "done" : "pending",
+    legacyCancelNote: notes.join("\n"),
+    updatedAt: new Date().toISOString(),
+  });
+  if (done) await db().doc(`members/${memberId}`).update({ legacySquareCanceled: true }).catch(() => undefined);
+  return done ? "解約済み" : "解約待ち";
+}
+
+/** 本部用：会員の登録済みカードで新しい契約を作り、旧契約を解約予約する */
+export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: string; legacySubscriptionIds: string[] }>(
+  { secrets: [squareAccessToken, slackBotTokenForSquare] },
+  async (request) => {
+    requireHonbu(request);
+    const { memberId, cardId } = request.data ?? ({} as any);
+    const legacyIds: string[] = Array.isArray(request.data?.legacySubscriptionIds) ? request.data.legacySubscriptionIds : [];
+    if (typeof memberId !== "string" || typeof cardId !== "string") throw new HttpsError("invalid-argument", "パラメータが不正です。");
+
+    const memberRef = db().doc(`members/${memberId}`);
+    const subRef = db().doc(`memberSubscriptions/${memberId}`);
+    const m = (await memberRef.get()).data() as MemberDoc | undefined;
+    if (!m) throw new HttpsError("not-found", "会員が見つかりません。");
+    if (!m.group || !TARGET_GROUPS.includes(m.group) || m.paymentMethod === "都度払い" || m.status !== "在籍") {
+      throw new HttpsError("failed-precondition", "カード自動払いの対象ではない会員です。");
+    }
+    const fee = await monthlyFeeFor(m);
+    if (!fee.amount) throw new HttpsError("failed-precondition", "お月謝が設定されていません。");
+
+    const previous = await db().runTransaction(async (tx) => {
+      const s = await tx.get(subRef);
+      const data = s.exists ? (s.data() as SubscriptionRecord) : null;
+      if (data && ACTIVE_STATUSES.includes(data.status)) throw new HttpsError("already-exists", "すでにカード自動払いの契約があります。");
+      tx.set(subRef, { status: "CREATING", memberId, updatedAt: new Date().toISOString() }, { merge: true });
+      return data;
+    });
+
+    try {
+      // カードがこの会員のメールアドレスの顧客のものか確認
+      const { card } = await square<{ card: any }>("GET", `/v2/cards/${cardId}`);
+      const found = await square<{ customers?: { id: string }[] }>("POST", "/v2/customers/search", {
+        query: { filter: { email_address: { exact: (m.email ?? "").trim() } } },
+        limit: 10,
+      });
+      if (!card?.enabled || !(found.customers ?? []).some((c) => c.id === card.customer_id)) {
+        throw new HttpsError("failed-precondition", "このカードは会員のメールアドレスの顧客に登録されたものではないか、無効になっています。");
+      }
+      const customerId = card.customer_id as string;
+      // 会員番号をSquareの顧客に記録（以後の検索用）
+      await square("PUT", `/v2/customers/${customerId}`, { reference_id: memberId }).catch(() => undefined);
+
+      const startMonth = startMonthOptions(fee.cohortStartDate, true)[0];
+      const schedule = buildSchedule(startMonth);
+      const planVariationId = await ensurePlanVariation(fee.amount);
+      const created = await square<{ subscription: { id: string; status: string } }>("POST", "/v2/subscriptions", {
+        idempotency_key: crypto.randomUUID(),
+        location_id: squareLocationId.value(),
+        plan_variation_id: planVariationId,
+        customer_id: customerId,
+        card_id: card.id,
+        start_date: schedule.subscriptionStartDate,
+        timezone: "Asia/Tokyo",
+        source: { name: "お稽古管理システム" },
+      });
+
+      const now = new Date().toISOString();
+      const record: SubscriptionRecord = {
+        memberId,
+        memberName: m.name ?? "",
+        group: m.group ?? "",
+        environment: squareEnvironment.value(),
+        status: created.subscription.status ?? "PENDING",
+        amount: fee.amount,
+        label: fee.label,
+        startDate: schedule.subscriptionStartDate,
+        squareCustomerId: customerId,
+        squareCardId: card.id,
+        squareSubscriptionId: created.subscription.id,
+        planVariationId,
+        cardBrand: card.card_brand,
+        cardLast4: card.last_4,
+        cardExpMonth: card.exp_month,
+        cardExpYear: card.exp_year,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await subRef.set({
+        ...record,
+        startMonth: schedule.startMonth,
+        migratedFromLink: true,
+        migratedBy: "honbu",
+        legacySubscriptionIds: legacyIds,
+        legacyCancelAfter: lastDayOfMonth(addMonths(schedule.startMonth, -1)),
+        legacyCanceledIds: [],
+        legacyCancelStatus: legacyIds.length ? "pending" : "done",
+      });
+      await memberRef.update({ nextBillingDate: schedule.nextDate, squareBillingAllowed: true });
+      const cancelState = legacyIds.length ? await processLegacyCancellation(memberId) : "旧契約なし";
+
+      await notifySlack(
+        `🔁 決済リンクからカード自動払いに切り替えました（本部操作）\n${m.name ?? ""}様（${memberId}・${m.group ?? ""}）\n` +
+          `月額¥${fee.amount.toLocaleString("ja-JP")}　${monthLabel(schedule.startMonth)}から／初回 ${schedule.nextDate}\n` +
+          `カード：${card.card_brand ?? ""} **** ${card.last_4 ?? ""}　旧契約：${cancelState}`
+      );
+      return { ok: true, startMonth: schedule.startMonth, nextDate: schedule.nextDate, cancelState };
+    } catch (err) {
+      if (previous) await subRef.set(previous);
+      else await subRef.delete();
+      if (err instanceof HttpsError) throw err;
+      console.error("切り替えエラー", memberId, err);
+      throw new HttpsError("internal", `切り替えに失敗しました：${(err as Error).message}`);
+    }
+  }
+);
+
+/** 毎日6:00（日本時間）：旧契約の解約待ちを確認し、前月分の引き落としが済んだものを解約する */
+export const processLegacySquareCancellations = onSchedule(
+  { schedule: "every day 06:00", timeZone: "Asia/Tokyo", secrets: [squareAccessToken] },
+  async () => {
+    const q = await db().collection("memberSubscriptions").where("legacyCancelStatus", "==", "pending").get();
+    for (const d of q.docs) {
+      const r = await processLegacyCancellation(d.id);
+      console.log("旧契約の解約チェック", d.id, r);
     }
   }
 );

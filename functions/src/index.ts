@@ -2600,7 +2600,15 @@ export const keikoNoteGuestLogin = onCall<{ code: string }>(
 );
 
 // Square決済（お月謝のカード自動払い）。詳細は square.ts を参照
-export { getSquareBillingInfo, startSquareSubscription, updateSquareSubscriptionCard, squareWebhook } from "./square";
+export {
+  getSquareBillingInfo,
+  startSquareSubscription,
+  updateSquareSubscriptionCard,
+  squareWebhook,
+  listLegacySquareMembers,
+  migrateLegacySquareMember,
+  processLegacySquareCancellations,
+} from "./square";
 
 // 新月会の開催日をGoogleカレンダーへ書き込む。詳細は shingetsuCalendar.ts を参照
 export { syncShingetsuSessionToCalendar } from "./shingetsuCalendar";

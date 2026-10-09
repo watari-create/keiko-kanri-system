@@ -13,6 +13,7 @@ import { db } from "@/lib/firebase";
 import { groupDisplayName, HONBU_KEIKO_GROUPS, SOHENRYU_KEIKO_GROUPS, UCI_GROUPS } from "@/lib/areas";
 import { memberFee, entryFeeFor, formatYen } from "@/lib/memberFees";
 import type { Member } from "@/types";
+import LegacySquareMigration from "@/components/LegacySquareMigration";
 
 // 表示順（宗徧流稽古 → 本部稽古 → UCI → その他）
 const GROUP_ORDER = [...SOHENRYU_KEIKO_GROUPS, ...HONBU_KEIKO_GROUPS, ...UCI_GROUPS];
@@ -213,6 +214,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
 
   return (
     <section className="bg-paper border border-line rounded-md p-5 mb-6 member-roster">
+      <LegacySquareMigration />
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-bold">
           会員名簿<span className="text-sm text-muted font-normal">　{rows.length}名</span>
