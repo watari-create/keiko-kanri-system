@@ -435,7 +435,11 @@ export const getSquareBillingInfo = onCall(async (request) => {
   const subSnap = await db().doc(`memberSubscriptions/${memberId}`).get();
   const sub = subSnap.exists ? (subSnap.data() as SubscriptionRecord) : null;
   const elig = eligibility(m);
+  // 入会金がまだなら、カード登録時にお月謝と一緒に引き落とす（entryFee.ts）
+  const { pendingEntryFee } = await import("./entryFee");
+  const entry = sub && ACTIVE_STATUSES.includes(sub.status) && !(sub as LeaveRecord).cancelRequestedAt ? null : pendingEntryFee(snap.data());
   return {
+    entryFee: entry ? { amount: entry.amount, label: entry.title } : null,
     square: {
       applicationId: squareApplicationId.value(),
       locationId: squareLocationId.value(),
@@ -505,6 +509,10 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
       return data;
     });
 
+    // 入会金（カード登録時にお月謝と一緒にいただく）。途中で失敗したら返金する
+    const entryFeeLib = await import("./entryFee");
+    let entryFee: { amount: number; title: string } | null = null;
+    let entryFeePaymentId: string | null = null;
     try {
       const customerId = await ensureCustomer(memberId, m, previous?.squareCustomerId);
       let card: SquareCard;
@@ -520,6 +528,28 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
       const requested = typeof request.data?.startMonth === "string" ? request.data.startMonth : options[0];
       const schedule = buildSchedule(options.includes(requested) ? requested : options[0]);
       const startDate = schedule.subscriptionStartDate;
+
+      // 入会金がまだなら、このカードで先に引き落とす（失敗したらここで中止）
+      entryFee = await entryFeeLib.resolvePendingEntryFee(memberId, memberSnap.data()!);
+      if (entryFee) {
+        try {
+          const pay = await square<{ payment: { id: string; status: string } }>("POST", "/v2/payments", {
+            idempotency_key: crypto.randomUUID(),
+            source_id: card.id,
+            customer_id: customerId,
+            location_id: squareLocationId.value(),
+            amount_money: { amount: entryFee.amount, currency: "JPY" },
+            autocomplete: true,
+            reference_id: memberId,
+            note: `${entryFee.title}（会員番号 ${memberId}）`,
+          });
+          entryFeePaymentId = pay.payment.id;
+        } catch (err) {
+          console.error("入会金の決済エラー", memberId, err);
+          await square("POST", `/v2/cards/${card.id}/disable`).catch(() => undefined);
+          throw new HttpsError("invalid-argument", friendlyCardError(err));
+        }
+      }
 
       // 25日以降に今月から参加する場合：今月分を単発で先に決済（失敗したらここで中止）
       let oneTimePaymentId: string | null = null;
@@ -611,10 +641,25 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
         });
       }
       await memberRef.update({ nextBillingDate: schedule.nextDate });
+      if (entryFee && entryFeePaymentId) {
+        await subRef.collection("payments").add({
+          kind: "入金",
+          amount: entryFee.amount,
+          note: `${entryFee.title}（お申込み時）`,
+          squarePaymentId: entryFeePaymentId,
+          receivedAt: now,
+        });
+        const paidId = entryFeePaymentId;
+        entryFeePaymentId = null; // ここから先で失敗しても返金しない（入会金はいただいた）
+        await entryFeeLib
+          .markEntryFeePaid(memberId, { amount: entryFee.amount, method: "カード登録時", squarePaymentId: paidId })
+          .catch((e) => console.error("入会金の記録に失敗しました", memberId, e));
+      }
       await notifySlack(
         `💳 カード自動払いのお申込みがありました\n${m.name ?? ""}様（${memberId}・${m.group ?? ""}）\n` +
           `月額¥${fee.amount.toLocaleString("ja-JP")}　参加開始：${monthLabel(schedule.startMonth).replace("分", "")}\n` +
           (schedule.nowCount ? `お申込み時に引き落とし：${schedule.nowItems.join("・")}\n` : "") +
+          (entryFee ? `入会金：¥${entryFee.amount.toLocaleString("ja-JP")}（お申込み時に引き落とし済み）\n` : "") +
           `次回：${schedule.nextDate}（${schedule.nextMonth}）` +
           (migration
             ? legacyState
@@ -624,8 +669,19 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
             : "") +
           (squareEnvironment.value() === "production" ? "" : "\n（テスト環境）")
       );
-      return { ok: true, schedule, amount: fee.amount, cardBrand: card.card_brand ?? null, cardLast4: card.last_4 ?? null };
+      return {
+        ok: true,
+        schedule,
+        amount: fee.amount,
+        entryFee: entryFee ? { amount: entryFee.amount, label: entryFee.title } : null,
+        cardBrand: card.card_brand ?? null,
+        cardLast4: card.last_4 ?? null,
+      };
     } catch (err) {
+      // 入会金だけ引き落としてその後で失敗した場合は返金する
+      if (entryFee && entryFeePaymentId) {
+        await entryFeeLib.refundEntryFeePayment(memberId, entryFeePaymentId, entryFee.amount);
+      }
       // 失敗時は申込み中の印を戻す（以前の記録があればそれに戻す）
       if (previous) await subRef.set(previous);
       else await subRef.delete();

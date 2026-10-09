@@ -135,11 +135,11 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
     // 月謝はプランで決まる（下の plans）。amounts/links は plans を持つ会では使わない。
     amounts: { subscription: "¥15,000", onetime: "¥15,000" },
     links: { subscription: "", onetime: "" },
-    // 入会金は月謝のSquareリンクとは別に、経理からSquareの請求書で発行する
+    // 入会金はカード登録時にお月謝と一緒にいただく（functions/src/entryFee.ts）。金額は src/lib/memberFees.ts の ENTRY_FEES
     extraFeeNote: {
       label: "入会金（初回のみ）",
       amount: "¥15,000",
-      body: "入会費・宗徧会費・入門許状代・扇子代を含みます。入会金は月謝とは別に、後日経理よりSquareの請求書をメールでお送りいたしますので、そちらからお支払いください。",
+      body: "入会費・宗徧会費・入門許状代・扇子代を含みます。",
     },
     plans: {
       fieldId: "plan",

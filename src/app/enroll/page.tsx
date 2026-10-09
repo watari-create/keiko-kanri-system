@@ -16,6 +16,7 @@ import { db } from "@/lib/firebase";
 import { ENROLL_GROUPS, MEMBER_COUNTER_START } from "@/lib/enrollGroups";
 import type { ChadoClassLedgerEntry, ChadoRecruitClass, PaymentMethod } from "@/types";
 import { formatYenNum, recruitTimeLabel } from "@/lib/chadoRecruit";
+import { entryFeeFor } from "@/lib/memberFees";
 import { chadoEnrollOptionLabel, mergeChadoLedger } from "@/lib/chadoClassLedger";
 
 type Step = "form" | "confirm";
@@ -26,6 +27,8 @@ export default function EnrollPage() {
   const [step, setStep] = useState<Step>("form");
   const [issuedNo, setIssuedNo] = useState<string | null>(null);
   const [payInfo, setPayInfo] = useState<{ label: string; amount: string; link: string; cardBilling?: boolean } | null>(null);
+  // 入会金を最初のお支払い（カード登録・都度払いの支払いページ）に含めたか。含めない場合は後日Squareの請求書
+  const [entryFeeWithFirstPayment, setEntryFeeWithFirstPayment] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,15 +222,18 @@ export default function EnrollPage() {
 
       // 都度払い：この会員専用のSquareの支払いページ（今回分）を作る。入金は経理タブに自動で反映される。
       // 作れなかったときは決済リンクは出さず「本部より別途ご案内」と表示する
+      // 入会金のある会は、入会金の明細も同じ支払いページに入る（functions/src/entryFee.ts）
       let onetimeUrl = "";
+      let onetimeEntryFee = 0;
       if (isOneTime) {
         try {
-          const fn = httpsCallable<{ memberId: string; returnUrl: string }, { paid: boolean; url?: string }>(
-            getFunctions(),
-            "createEnrollSessionCheckout"
-          );
+          const fn = httpsCallable<
+            { memberId: string; returnUrl: string },
+            { paid: boolean; url?: string; entryFee?: number }
+          >(getFunctions(), "createEnrollSessionCheckout");
           const res = await fn({ memberId: issued, returnUrl: `${window.location.origin}/mypage/login` });
           onetimeUrl = res.data.url ?? "";
+          onetimeEntryFee = onetimeUrl ? res.data.entryFee ?? 0 : 0;
         } catch (err) {
           console.error("都度払いの支払いページの作成に失敗しました", err);
         }
@@ -240,6 +246,7 @@ export default function EnrollPage() {
         !isOneTime &&
         ["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(group.title);
       const withCard = <T extends object>(info: T) => ({ ...info, cardBilling });
+      setEntryFeeWithFirstPayment(cardBilling || onetimeEntryFee > 0);
       setPayInfo(withCard(
         selectedRecruit
           ? {
@@ -255,7 +262,11 @@ export default function EnrollPage() {
             }
           : {
               label: isOneTime ? "お支払い（都度払い・今回分）" : "お支払い（月謝・自動払い）",
-              amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
+              amount: isOneTime
+                ? onetimeEntryFee > 0
+                  ? `${group.amounts.onetime}＋入会金 ${formatYenNum(onetimeEntryFee)}`
+                  : group.amounts.onetime
+                : group.amounts.subscription,
               link: isOneTime ? onetimeUrl : group.links.subscription,
             }
       ));
@@ -442,7 +453,9 @@ export default function EnrollPage() {
                 {payInfo.cardBilling ? (
                   <>
                     <p className="text-xs text-muted leading-relaxed mb-3">
-                      お月謝は前払いのクレジットカード自動払いです（参加開始月の分はカード登録時、以降は毎月25日に翌月分）。上の会員番号とご登録のメールアドレスでマイページにログインし、カード情報をご登録ください。
+                      お月謝は前払いのクレジットカード自動払いです（参加開始月の分はカード登録時、以降は毎月25日に翌月分）。
+                      {entryFeeFor(group.title) !== null && "入会金もカード登録時に同じカードでお支払いいただきます。"}
+                      上の会員番号とご登録のメールアドレスでマイページにログインし、カード情報をご登録ください。
                     </p>
                     <a
                       href="/mypage/login?next=/mypage/payment"
@@ -468,11 +481,18 @@ export default function EnrollPage() {
               </div>
             )}
 
-            {group.extraFeeNote && (
+            {entryFeeFor(group.title) !== null && (
               <div className="border border-line rounded p-4 mt-3 bg-[#FCFBF8]">
-                <div className="text-xs text-muted mb-1">{group.extraFeeNote.label}</div>
-                <div className="text-lg font-bold mb-2">{group.extraFeeNote.amount}</div>
-                <p className="text-xs text-muted leading-relaxed">{group.extraFeeNote.body}</p>
+                <div className="text-xs text-muted mb-1">{group.extraFeeNote?.label ?? "入会金（初回のみ）"}</div>
+                <div className="text-lg font-bold mb-2">{formatYenNum(entryFeeFor(group.title) ?? 0)}</div>
+                <p className="text-xs text-muted leading-relaxed">
+                  {group.extraFeeNote?.body}
+                  {entryFeeWithFirstPayment
+                    ? payInfo?.cardBilling
+                      ? "マイページでカードをご登録いただく際に、お月謝と一緒にお支払いいただきます（別途のお手続きは不要です）。"
+                      : "上の支払いページで、今回分と一緒にお支払いいただけます。"
+                    : "後日、Squareの請求書をメールでお送りいたしますので、そちらからお支払いください。"}
+                </p>
               </div>
             )}
 

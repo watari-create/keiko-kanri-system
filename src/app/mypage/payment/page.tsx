@@ -69,7 +69,11 @@ export default function PaymentPage() {
   const [step, setStep] = useState<Step>("confirm");
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ schedule?: BillingSchedule; card?: string } | null>(null);
+  const [result, setResult] = useState<{
+    schedule?: BillingSchedule;
+    card?: string;
+    entryFee?: { amount: number; label: string } | null;
+  } | null>(null);
   const [startMonth, setStartMonth] = useState<string>("");
 
   useEffect(() => {
@@ -97,7 +101,7 @@ export default function PaymentPage() {
     setError(null);
     try {
       const r = await startSquareSubscription(token, startMonth);
-      setResult({ schedule: r.schedule, card: cardLabel(r.cardBrand, r.cardLast4) });
+      setResult({ schedule: r.schedule, card: cardLabel(r.cardBrand, r.cardLast4), entryFee: r.entryFee ?? null });
       setStep("done");
       fetchSquareBillingInfo().then(setInfo).catch(() => undefined);
     } catch (e) {
@@ -137,8 +141,13 @@ export default function PaymentPage() {
 
   const sub = info.subscription;
   const schedule = info.schedules.find((x) => x.startMonth === startMonth) ?? info.schedules[0];
-  const nowLabel = (sc: BillingSchedule) =>
-    sc.nowCount === 0 ? "なし" : `${yen((info.amount ?? 0) * sc.nowCount)}（${sc.nowItems.join("・")}）`;
+  // 本日のお引き落とし（入会金がまだの方は入会金も一緒に）
+  const nowLabel = (sc: BillingSchedule, entry: { amount: number } | null | undefined = info.entryFee) => {
+    const entryAmount = entry?.amount ?? 0;
+    const total = (info.amount ?? 0) * sc.nowCount + entryAmount;
+    const items = [...(entryAmount ? ["入会金"] : []), ...sc.nowItems];
+    return total === 0 ? "なし" : `${yen(total)}（${items.join("・")}）`;
+  };
   const card = (
     <div className="bg-paper border border-line rounded-md p-6 mb-4">
       {/* ---- 申込み済み：ご契約内容 ---- */}
@@ -220,6 +229,7 @@ export default function PaymentPage() {
             <>
               <Row label="お名前" value={`${info.memberName} 様`} />
               <Row label={info.label} value={`${yen(info.amount)}／月`} />
+              {info.entryFee && <Row label={`${info.entryFee.label}（初回のみ）`} value={yen(info.entryFee.amount)} />}
               {info.schedules.length > 1 ? (
                 <div className="border-b border-line py-2 text-sm">
                   <div className="text-muted mb-1">お稽古の参加開始月</div>
@@ -262,6 +272,7 @@ export default function PaymentPage() {
               <ul className="text-xs text-muted list-disc pl-4 mt-3 space-y-1">
                 <li>お月謝は前払いです。毎月{info.billingDay}日に、翌月分をご登録のカードから自動でお引き落としします。</li>
                 <li>参加開始月の分は、お申込み時（または参加開始月の前月{info.billingDay}日）にお引き落としします。</li>
+                {info.entryFee && <li>入会金は、お申込み時に同じカードからお引き落としします（初回のみ）。</li>}
                 <li>領収書（レシート）はSquareからメールでお送りします。</li>
                 <li>カードはこのマイページからいつでも変更できます。</li>
                 <li>休会・退会の際は、マイページのお申請または本部へのご連絡をお願いします。</li>
@@ -319,7 +330,7 @@ export default function PaymentPage() {
           <Row label="お支払いカード" value={result?.card} />
           {result?.schedule && (
             <>
-              <Row label="本日のお引き落とし" value={nowLabel(result.schedule)} />
+              <Row label="本日のお引き落とし" value={nowLabel(result.schedule, result.entryFee)} />
               <Row
                 label="次回のお引き落とし"
                 value={`${formatJpDate(result.schedule.nextDate)}（${result.schedule.nextMonth}）`}

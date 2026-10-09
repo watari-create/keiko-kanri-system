@@ -14,13 +14,27 @@ export default function SquareInvoiceInfo({
   paid,
   sending,
   onSend,
+  paidNote,
+  waitingNote,
 }: {
+  // 請求書ではなく、カード登録時・支払いページでいただいた場合の表示（入会金）
+  paidNote?: string;
+  // まだ請求書を送っていない理由（入会金：最初のお支払いと一緒にいただく予定）
+  waitingNote?: string;
   invoice?: SquareInvoiceSummary;
   error?: string;
   paid: boolean;
   sending: boolean;
   onSend: () => void;
 }) {
+  if (paidNote) {
+    return (
+      <div className="text-xs text-matcha-deep mt-1">
+        {paidNote}
+        {invoice?.status === "CANCELED" && <span className="text-muted">（先に送った請求書は取り消し済み）</span>}
+      </div>
+    );
+  }
   if (invoice && invoice.status !== "CANCELED") {
     const overdue = invoice.status === "UNPAID" && !paid && invoice.dueDate < todayJst();
     return (
@@ -52,7 +66,7 @@ export default function SquareInvoiceInfo({
         <span className="text-hanko">自動送信できませんでした：{error}</span>
       ) : (
         <span className="text-muted">
-          {invoice?.status === "CANCELED" ? "請求書はキャンセルされています" : "Squareの請求書は未送信です"}
+          {invoice?.status === "CANCELED" ? "請求書はキャンセルされています" : waitingNote ?? "Squareの請求書は未送信です"}
         </span>
       )}
       <button

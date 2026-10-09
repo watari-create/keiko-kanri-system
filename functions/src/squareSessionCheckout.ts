@@ -10,6 +10,7 @@
  *  - 金額：会員の「お月謝（個別設定）」（都度払いは1回あたり）があればそれ、なければ会の標準額
  *  - 同じ月の支払いページは使い回す（二重払い防止）。支払い済みの月は支払いページを作らない
  *  - 入会フォームの「都度払い・今回分」も同じ仕組み（createEnrollSessionCheckout）
+ *  - 入会金がまだの会員は、支払いページに入会金の明細も足して、1回でお支払いいただく（entryFee.ts）
  *  - 支払い後に「欠席」に変えたら経理チャンネルに知らせる（返金・次回への振替は本部判断）
  *  - 出席したのに未入金の月を、毎朝1回だけ経理チャンネルに知らせる
  *
@@ -25,6 +26,7 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import * as crypto from "crypto";
 import { square, squareAccessToken, squareLocationId, ensureCustomer, todayJst, MemberDoc } from "./square";
 import { postKeiri, groupName } from "./squareInvoice";
+import { pendingEntryFee, markEntryFeePaid } from "./entryFee";
 
 const slackBotToken = defineSecret("SLACK_BOT_TOKEN");
 const sessionUnpaidFrom = defineString("SESSION_UNPAID_FROM", { default: "2026-10" });
@@ -48,7 +50,9 @@ interface CheckoutRecord {
   memberName: string;
   group: string;
   monthKey: string;
-  amount: number;
+  amount: number; // お月謝（1回分）
+  entryFeeAmount?: number; // 一緒にいただく入会金（なければ 0／未設定）
+  entryFeeTitle?: string;
   status: "OPEN" | "PAID";
   paymentLinkId?: string;
   url?: string;
@@ -105,7 +109,7 @@ async function ensureSessionCheckout(
   memberId: string,
   monthKey: string,
   returnUrl?: string
-): Promise<{ paid: boolean; url?: string; amount?: number }> {
+): Promise<{ paid: boolean; url?: string; amount?: number; entryFee?: number }> {
   const memberSnap = await db().doc(`members/${memberId}`).get();
   if (!memberSnap.exists) throw new HttpsError("not-found", "会員が見つかりません。");
   const m = memberSnap.data() as SessionMember;
@@ -115,13 +119,19 @@ async function ensureSessionCheckout(
   const amount = sessionFeeFor(m);
   if (!amount) throw new HttpsError("failed-precondition", "お支払い金額が設定されていません。本部より別途ご連絡します。");
 
+  // 入会金がまだなら、同じ支払いページで一緒にいただく
+  const entry = pendingEntryFee(m);
+  const entryAmount = entry?.amount ?? 0;
+
   const ref = db().doc(`sessionCheckouts/${memberId}_${monthKey}`);
   const snap = await ref.get();
   const rec = snap.exists ? (snap.data() as CheckoutRecord) : null;
   if (rec?.status === "PAID") return { paid: true };
-  if (rec?.url && rec.paymentLinkId && rec.amount === amount) return { paid: false, url: rec.url, amount };
+  if (rec?.url && rec.paymentLinkId && rec.amount === amount && (rec.entryFeeAmount ?? 0) === entryAmount) {
+    return { paid: false, url: rec.url, amount, entryFee: entryAmount };
+  }
 
-  // 金額が変わった（個別設定の変更など）場合は古い支払いページを無効にして作り直す
+  // 金額が変わった（個別設定の変更・入会金を別に払われた等）場合は古い支払いページを無効にして作り直す
   if (rec?.paymentLinkId) {
     await square("DELETE", `/v2/online-checkout/payment-links/${rec.paymentLinkId}`).catch((e) =>
       console.warn("古い支払いページの削除に失敗しました", rec.paymentLinkId, e)
@@ -138,8 +148,8 @@ async function ensureSessionCheckout(
     "/v2/online-checkout/payment-links",
     {
       idempotency_key: crypto.randomUUID(),
-      description: title,
-      payment_note: `${m.name ?? ""}様（会員番号 ${memberId}）${title}`,
+      description: entry ? `${title}・${entry.title}` : title,
+      payment_note: `${m.name ?? ""}様（会員番号 ${memberId}）${title}${entry ? `・${entry.title}` : ""}`,
       order: {
         location_id: squareLocationId.value(),
         customer_id: customerId,
@@ -151,6 +161,16 @@ async function ensureSessionCheckout(
             base_price_money: { amount: Math.round(amount), currency: "JPY" },
             note: `会員番号 ${memberId}`,
           },
+          ...(entry
+            ? [
+                {
+                  name: entry.title,
+                  quantity: "1",
+                  base_price_money: { amount: Math.round(entry.amount), currency: "JPY" },
+                  note: `会員番号 ${memberId}（初回のみ）`,
+                },
+              ]
+            : []),
         ],
       },
       checkout_options: {
@@ -170,6 +190,8 @@ async function ensureSessionCheckout(
       group: m.group ?? "",
       monthKey,
       amount,
+      entryFeeAmount: entryAmount,
+      entryFeeTitle: entry?.title ?? "",
       status: "OPEN",
       paymentLinkId: link.id,
       url: link.url,
@@ -178,7 +200,7 @@ async function ensureSessionCheckout(
     } satisfies CheckoutRecord,
     { merge: true }
   );
-  return { paid: false, url: link.url, amount };
+  return { paid: false, url: link.url, amount, entryFee: entryAmount };
 }
 
 function wrapError(err: unknown): never {
@@ -247,7 +269,9 @@ export async function handleSessionCheckoutPaid(payment: any): Promise<boolean> 
   const rec = q.docs[0].data() as CheckoutRecord;
   if (rec.status === "PAID") return true;
   const now = new Date().toISOString();
-  const paidAmount = payment.amount_money?.amount ?? rec.amount;
+  const paidTotal = payment.amount_money?.amount ?? rec.amount + (rec.entryFeeAmount ?? 0);
+  const entryAmount = rec.entryFeeAmount ?? 0;
+  const paidAmount = entryAmount > 0 ? Math.max(0, paidTotal - entryAmount) : paidTotal;
   await ref.update({ status: "PAID", paidAt: now, squarePaymentId: payment.id ?? null });
   await db()
     .doc(`members/${rec.memberId}`)
@@ -263,6 +287,12 @@ export async function handleSessionCheckoutPaid(payment: any): Promise<boolean> 
     `💴 都度払いのお月謝の入金がありました（経理タブは自動で「入金済」になりました）\n` +
       `${rec.memberName}様（${groupName(rec.group)}）${monthLabel(rec.monthKey)}分　¥${Number(paidAmount).toLocaleString("ja-JP")}`
   );
+  // 支払いページに入会金も含めていた場合は、入会金も「済」に（請求書が残っていれば取り消す）
+  if (entryAmount > 0) {
+    await markEntryFeePaid(rec.memberId, { amount: entryAmount, method: "支払いページ", squarePaymentId: payment.id ?? null }).catch((e) =>
+      console.error("入会金の記録に失敗しました", rec.memberId, e)
+    );
+  }
   return true;
 }
 

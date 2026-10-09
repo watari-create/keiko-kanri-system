@@ -97,6 +97,8 @@ export interface Member {
   // 入会金のSquare請求書（入会時に自動送信）と、送れなかったときの理由
   entryFeeInvoice?: SquareInvoiceSummary;
   entryFeeInvoiceError?: string;
+  // 入会金をカード登録時・支払いページでお月謝と一緒にいただいた記録（Cloud Functionsが書き込む。functions/src/entryFee.ts）
+  entryFeePaid?: { amount: number; paidAt: string; method: string; squarePaymentId?: string | null };
   // 都度払い会員の、出席した月ごとの月謝入金状況（キーはattendanceと同じ会計年度の月）。経理タブで管理
   sessionPayments?: Record<string, "済" | "未納">;
   // 都度払いの支払いページ（Square）で入金された月の記録（Cloud Functionsが書き込む）

@@ -13,7 +13,6 @@ import {
   licenseInvoiceParams,
   describeInvoiceError,
   cancelSquareInvoice,
-  issueEntryFeeInvoiceOnEnroll,
   ENTRY_FEE_INVOICE,
 } from "./squareInvoice";
 
@@ -885,10 +884,11 @@ export const onMemberCreated = onDocumentCreated(
       }
     }
 
-    // 入会金のある会（名月会 ¥33,000・茶道教室 ¥15,000）の新規入会なら、Squareの請求書を自動で送り、
-    // 結果を経理チャンネル（請求書-経理全般）に知らせる（大谷さん宛）。送れなかった場合は手動での発行を依頼する。
-    if (data.isTestAccount !== true && ENTRY_FEE_INVOICE[data.group as string]) {
-      await issueEntryFeeInvoiceOnEnroll(event.params.memberId, data);
+    // 入会金のある会（名月会 ¥33,000・茶道教室 ¥15,000）の新規入会：入会金は請求書ではなく、
+    // カード登録時（月謝）・支払いページ（都度払い）でお月謝と一緒にいただく（entryFee.ts）。
+    // ここでは「未納」にしておくだけ。入会から数日たっても払われなければ、毎朝のチェックで請求書を自動で送る。
+    if (data.isTestAccount !== true && ENTRY_FEE_INVOICE[data.group as string] && !data.entryFeeStatus) {
+      await event.data?.ref.update({ entryFeeStatus: "未納" }).catch(() => undefined);
     }
 
     await db.collection("notifications").add({
@@ -2656,6 +2656,9 @@ export {
 
 // Squareの請求書（許状代金・入会金）。詳細は squareInvoice.ts を参照
 export { checkOverdueSquareInvoices, sendSquareInvoiceManually } from "./squareInvoice";
+
+// 入会金をカード登録時・支払いページで一緒にいただく／払われなければ請求書を送る。詳細は entryFee.ts を参照
+export { sendPendingEntryFeeInvoices } from "./entryFee";
 
 // 都度払い会員の支払いページ（会員・月ごと）。詳細は squareSessionCheckout.ts を参照
 export {

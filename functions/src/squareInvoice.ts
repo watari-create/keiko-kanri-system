@@ -4,7 +4,8 @@
  * 対象：
  *  - 許状代金：許状申請が「請求書発行依頼」になったら、申請の金額（申請料＋御礼）で請求書を作り、会員にメールで送る。
  *    送れたら申請を自動で「発行手続き中」に進める。
- *  - 入会金：本部稽古の会に新規入会があったら（名月会 ¥33,000・茶道教室 ¥15,000）、入会金の請求書を送る。
+ *  - 入会金：ふつうはカード登録時・支払いページでお月謝と一緒にいただく（entryFee.ts）。入会から数日たっても
+ *    払われていない会員にだけ、入会金の請求書を送る（名月会 ¥33,000・茶道教室 ¥15,000）。
  *
  * 流れ：Squareの顧客（会員番号で再利用）→ 注文（明細1行）→ 請求書の作成 → 送信（publish）。
  *   送れなかった場合（メールアドレス未登録など）は、経理チャンネルに「手動で発行してください」と従来どおり依頼する。
@@ -285,14 +286,18 @@ export function entryFeeInvoiceParams(memberId: string, m: FirebaseFirestore.Doc
 }
 
 /**
- * 新規入会時（index.ts の onMemberCreated から呼ぶ）：入会金の請求書を送り、結果を経理チャンネルに知らせる。
+ * 入会金の請求書を送り、結果を経理チャンネルに知らせる。
+ * 入会金はふつうカード登録時・支払いページでお月謝と一緒にいただく（entryFee.ts）。
+ * 入会から数日たっても払われていない会員にだけ、entryFee.ts の毎朝のチェックからこれを呼ぶ。
  */
-export async function issueEntryFeeInvoiceOnEnroll(memberId: string, m: FirebaseFirestore.DocumentData): Promise<void> {
+export async function issueEntryFeeInvoice(memberId: string, m: FirebaseFirestore.DocumentData, why = ""): Promise<void> {
   const params = entryFeeInvoiceParams(memberId, m);
   if (!params) return;
   const mention = slackEntryFeeMentionUserId.value() || slackKeiriMentionUserId.value();
   const mentionPrefix = mention ? `<@${mention}> ` : "";
-  const head = `会員：${m.name ?? ""}様（${groupName(m.group)}）\n会員No：${memberId}\n入会金：¥${params.amount.toLocaleString("ja-JP")}`;
+  const head =
+    (why ? `（${why}）\n` : "") +
+    `会員：${m.name ?? ""}様（${groupName(m.group)}）\n会員No：${memberId}\n入会金：¥${params.amount.toLocaleString("ja-JP")}`;
 
   if (!autoInvoiceEnabled()) {
     await postKeiri(`${mentionPrefix}入会金の請求書発行のご依頼です\n${head}`);
@@ -332,6 +337,19 @@ export async function handleOneOffInvoicePaid(invoice: any): Promise<boolean> {
   await ref.update({ status: "PAID", paidAt: now });
 
   const target = db().doc(rec.targetPath);
+  if (rec.kind === "entryFee") {
+    // カード登録時・支払いページですでに入会金をいただいていた（請求書の取り消しが間に合わなかった）場合
+    const t = (await target.get()).data() ?? {};
+    if (t.entryFeeStatus === "済" && t.entryFeePaid) {
+      await target.update({ "entryFeeInvoice.status": "PAID", "entryFeeInvoice.paidAt": now });
+      await postKeiri(
+        `⚠️ 入会金を二重にいただいた可能性があります（${t.entryFeePaid.method ?? "カード"}でお支払い済みのあと、請求書でもお支払い）\n` +
+          `${rec.memberName}様（${groupName(rec.group)}）${rec.title}　¥${rec.amount.toLocaleString("ja-JP")}　請求書番号：${rec.invoiceNumber ?? "-"}\n` +
+          `Squareでどちらかを返金してください。`
+      );
+      return true;
+    }
+  }
   if (rec.kind === "license") {
     await target.update({ accountingPaymentStatus: "済", "squareInvoice.status": "PAID", "squareInvoice.paidAt": now });
   } else {

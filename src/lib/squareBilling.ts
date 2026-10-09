@@ -29,6 +29,8 @@ export interface BillingSchedule {
 }
 
 export interface SquareBillingInfo {
+  // 入会金がまだの場合：カード登録時にお月謝と一緒に引き落とす（functions/src/entryFee.ts）
+  entryFee?: { amount: number; label: string } | null;
   square: { applicationId: string; locationId: string; environment: "sandbox" | "production" | string };
   eligible: boolean;
   reason: string | null;
@@ -50,7 +52,14 @@ export async function fetchSquareBillingInfo(): Promise<SquareBillingInfo> {
 export async function startSquareSubscription(token: string, startMonth: string) {
   const fn = httpsCallable<
     { token: string; startMonth: string },
-    { ok: boolean; schedule: BillingSchedule; amount: number; cardBrand: string | null; cardLast4: string | null }
+    {
+      ok: boolean;
+      schedule: BillingSchedule;
+      amount: number;
+      entryFee?: { amount: number; label: string } | null;
+      cardBrand: string | null;
+      cardLast4: string | null;
+    }
   >(getFunctions(), "startSquareSubscription");
   return (await fn({ token, startMonth })).data;
 }

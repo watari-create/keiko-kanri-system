@@ -74,6 +74,10 @@ const KEIRI_GROUPS = ["名月会", "Gマダムの茶の湯講座", "新月会", 
 const ENTRY_FEE_BY_GROUP: Record<string, number> = { "名月会": 33000, "茶道教室": 15000 };
 // 茶道教室の入会金は、Square請求書の自動送信を始めた日以降の入会者から経理タブに表示する
 const CHADO_ENTRY_FEE_FROM = "2026-10-10";
+// この日以降の入会者は、入会金をカード登録時・支払いページでお月謝と一緒にいただく（functions/src/entryFee.ts の
+// ENTRY_FEE_COLLECT_FROM・ENTRY_FEE_INVOICE_AFTER_DAYS と同じ値にしておくこと）
+const ENTRY_FEE_WITH_FIRST_PAYMENT_FROM = "2026-10-10";
+const ENTRY_FEE_INVOICE_AFTER_DAYS = 3;
 
 // エリアごとの対象グループ。経理・スタッフ管理はグループ選択なし（下のコードで分岐）。
 const AREA_GROUPS: Record<string, string[]> = {
@@ -548,7 +552,7 @@ export default function AdminPage() {
       (m) =>
         m.group === "茶道教室" &&
         !m.isTestAccount &&
-        (m.joinDate >= CHADO_ENTRY_FEE_FROM || !!m.entryFeeInvoice || !!m.entryFeeInvoiceError)
+        (m.joinDate >= CHADO_ENTRY_FEE_FROM || !!m.entryFeeInvoice || !!m.entryFeeInvoiceError || !!m.entryFeePaid)
     );
     return [...meigetsuTargets, ...chado];
   }, [members]);
@@ -1383,7 +1387,7 @@ export default function AdminPage() {
           <section className="bg-paper border border-line rounded-md p-5 mb-6">
             <h2 className="font-bold mb-1">入会金の入金確認（名月会・茶道教室）</h2>
             <p className="text-xs text-muted mb-3">
-              入会金は名月会 ¥33,000・茶道教室 ¥15,000（G1マダムの茶の湯講座・新月会は対象外）。新規入会があると、Squareの請求書が会員のメールに自動で送られ、入金されると自動で「済」になります。
+              入会金は名月会 ¥33,000・茶道教室 ¥15,000（G1マダムの茶の湯講座・新月会は対象外）。新規入会者は、カード登録時（月謝）・支払いページ（都度払い）でお月謝と一緒に入会金をお支払いいただき、自動で「済」になります。入会から3日たっても未払いの場合は、翌朝Squareの請求書が会員のメールに自動で送られます。
             </p>
             <table className="w-full text-sm whitespace-nowrap">
               <thead>
@@ -1424,6 +1428,16 @@ export default function AdminPage() {
                           invoice={m.entryFeeInvoice}
                           error={m.entryFeeInvoiceError}
                           paid={m.entryFeeStatus === "済"}
+                          paidNote={
+                            m.entryFeePaid
+                              ? `Squareで入金済（${m.entryFeePaid.method}・${m.entryFeePaid.paidAt.slice(0, 10)}・¥${m.entryFeePaid.amount.toLocaleString()}）`
+                              : undefined
+                          }
+                          waitingNote={
+                            m.joinDate >= ENTRY_FEE_WITH_FIRST_PAYMENT_FROM
+                              ? `カード登録・支払いページでのお支払い待ち（入会から${ENTRY_FEE_INVOICE_AFTER_DAYS}日たっても未払いなら、翌朝Squareの請求書を自動で送ります）`
+                              : undefined
+                          }
                           sending={invoiceSending === `entryFee:${m.id}`}
                           onSend={() =>
                             sendInvoiceManually(
