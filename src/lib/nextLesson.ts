@@ -4,8 +4,11 @@
 // 各画面はそのドキュメントを onSnapshot で購読するだけでよい。
 
 export interface NextLessonInfo {
-  date: string; // 終日予定なら "YYYY-MM-DD"、時刻指定なら ISO日時
+  date: string; // 終日予定なら "YYYY-MM-DD"、時刻指定なら ISO日時（管理画面で日程変更していれば変更後）
   title: string;
+  place?: string; // 開催場所（管理画面で変更した場所、なければカレンダーの「場所」欄）
+  eventId?: string; // Googleカレンダーの予定ID
+  originalDate?: string; // 管理画面で日程変更した場合の元の日付（YYYY-MM-DD）
 }
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -46,6 +49,32 @@ export function nextLessonsForGroup(
 
 export function formatNextLessons(list: { label: string; info: NextLessonInfo }[]): string {
   return list
-    .map(({ label, info }) => (label ? `${label} ` : "") + formatLessonDate(info.date))
+    .map(
+      ({ label, info }) =>
+        (label ? `${label} ` : "") + formatLessonDate(info.date) + (info.place ? `（${info.place}）` : "")
+    )
     .join("／");
+}
+
+// 管理画面の「日程・場所の変更」用：会の今後のお稽古（meta/nextLessonDates.upcoming）を一覧にする。
+// 日曜日の午前・午後のように1つの予定を複数クラスで兼ねる場合は1行にまとめ、クラス名を並べる。
+export function upcomingLessonsForGroup(
+  upcoming: Record<string, NextLessonInfo[]> | undefined,
+  group: string
+): { labels: string[]; info: NextLessonInfo }[] {
+  if (!upcoming) return [];
+  const keys =
+    group === "茶道教室"
+      ? CHADO_NEXT_LESSON_CLASSES.map((c) => ({ key: nextLessonKey(group, c), label: `${CHADO_NEXT_LESSON_LABEL[c] ?? c}クラス` }))
+      : [{ key: group, label: "" }];
+  const byEvent = new Map<string, { labels: string[]; info: NextLessonInfo }>();
+  for (const { key, label } of keys) {
+    for (const info of upcoming[key] ?? []) {
+      const id = info.eventId ?? `${key}-${info.date}`;
+      const row = byEvent.get(id) ?? { labels: [], info };
+      if (label && !row.labels.includes(label)) row.labels.push(label);
+      byEvent.set(id, row);
+    }
+  }
+  return Array.from(byEvent.values()).sort((a, b) => a.info.date.localeCompare(b.info.date));
 }

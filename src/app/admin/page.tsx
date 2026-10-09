@@ -52,6 +52,7 @@ import { memberFee, formatYen, entryFeeFor } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { CHADO_LEDGER_DEFAULTS, chadoKiLabel } from "@/lib/chadoClassLedger";
 import MonthSelect from "@/components/MonthSelect";
+import LessonScheduleEditor from "@/components/LessonScheduleEditor";
 import type {
   Member,
   LicenseRequest,
@@ -1261,6 +1262,11 @@ export default function AdminPage() {
             </span>
           )}
         </div>
+      )}
+
+      {/* 名月会・茶道教室（木曜日・日曜日）・G1：お稽古の日程変更・開催場所の変更（新月会は出席簿の開催日編集から） */}
+      {area === "本部稽古" && ["名月会", "茶道教室", "Gマダムの茶の湯講座"].includes(group) && (
+        <LessonScheduleEditor group={group} />
       )}
 
       {area === "経理" && (

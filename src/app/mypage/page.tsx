@@ -343,6 +343,7 @@ export default function MyPage() {
             {nextLesson && (
               <p className="text-xs text-matcha-deep mb-1">
                 次回：{formatLessonDate(nextLesson.date)}
+                {nextLesson.place && `　場所：${nextLesson.place}`}
               </p>
             )}
             <div className="mb-3">

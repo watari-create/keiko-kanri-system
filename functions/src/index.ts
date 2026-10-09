@@ -1129,12 +1129,12 @@ ${formatDateJp(data.date)}（午後）にご予約があります。${
   }
 
   const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
-  const dates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+  const dates = nextLessonSnap.data()?.dates as Record<string, { date: string; place?: string }> | undefined;
   const next = dates?.[nextLessonKey(member.group, member.chadoClass)];
   const rsvp = member.rsvp ?? "未回答";
   if (next) {
     return `${member.name}様
-次回のお稽古：${formatDateJp(next.date)}
+次回のお稽古：${formatDateJp(next.date)}${next.place ? `（${next.place}）` : ""}
 出欠回答：${rsvp}`;
   }
   return `${member.name}様
@@ -1346,22 +1346,57 @@ export const loginViaLine = onCall<{ idToken: string }>({ secrets: [slackBotToke
 const LESSON_GROUPS = ["名月会", "Gマダムの茶の湯講座", "茶道教室", "新月会"];
 
 interface NextLessonInfo {
-  date: string; // イベントのstart（終日なら日付のみ、時刻指定ならISO日時）
+  date: string; // イベントのstart（終日なら日付のみ、時刻指定ならISO日時）。管理画面で日程変更していれば変更後の日付
   title: string;
+  place?: string; // 開催場所（管理画面で変更した場所、なければカレンダーの「場所」欄）
+  eventId?: string; // Googleカレンダーの予定ID（管理画面の日程・場所変更で使う）
+  originalDate?: string; // 管理画面で日程変更したときの元の日付（YYYY-MM-DD）
 }
 
 /**
- * 本部の共有Googleカレンダーから、直近120日以内の予定を読み取り、
- * LESSON_GROUPS それぞれについて一番近い予定を拾う。
+ * 管理画面で行った日程・場所の変更（lessonChanges/{カレンダーの予定ID}）。
+ * カレンダーへの書き込みに成功した変更（calendarSynced）は、カレンダーにすでに反映されているので
+ * 同期では使わない（以降はカレンダーが正）。書き込みに失敗した変更だけ、ここで上書きする。
+ */
+interface LessonChangeDoc {
+  eventId: string;
+  date: string; // 変更後の日付 YYYY-MM-DD
+  place: string;
+  originalDate: string;
+  calendarSynced?: boolean;
+}
+
+/** 予定の開始（終日なら YYYY-MM-DD、時刻指定ならISO日時）の日付部分だけを newDate に置き換える */
+function replaceDatePart(start: string, newDate: string): string {
+  return start.length > 10 ? `${newDate}${start.slice(10)}` : newDate;
+}
+
+/** YYYY-MM-DD 同士の日数差（b - a） */
+function diffDateKeys(a: string, b: string): number {
+  const toUtc = (k: string) => {
+    const [y, m, d] = k.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((toUtc(b) - toUtc(a)) / 86400000);
+}
+
+interface LessonSchedule {
+  dates: Record<string, NextLessonInfo>; // 会（茶道教室はクラス）ごとの次回のお稽古
+  upcoming: Record<string, NextLessonInfo[]>; // 会ごとの今後のお稽古（管理画面の日程・場所変更用）
+}
+
+/**
+ * 本部の共有Googleカレンダーから、過去60日〜180日先の予定を読み取り、
+ * LESSON_GROUPS それぞれについて今日以降の予定を拾う（管理画面での日程・場所変更を反映したうえで）。
  *
  * 事前準備：
  * 1. Google Cloud ConsoleでCalendar APIを有効化する
  *    （gcloud services enable calendar-json.googleapis.com）
  * 2. 対象のGoogleカレンダーを、Cloud Functionsのランタイムサービスアカウント
  *    （例：69899565701-compute@developer.gserviceaccount.com）と
- *    「予定の詳細を表示する」権限で共有する
+ *    「予定の詳細を表示する」権限で共有する（管理画面からの日程変更をカレンダーにも反映するには「予定の変更」権限）
  */
-async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
+async function fetchLessonSchedule(): Promise<LessonSchedule> {
   const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/calendar.readonly"] });
   const client = await auth.getClient();
   const accessToken = await client.getAccessToken();
@@ -1370,49 +1405,84 @@ async function fetchNextLessonDates(): Promise<Record<string, NextLessonInfo>> {
   }
 
   const now = new Date();
-  const timeMin = now.toISOString();
-  const timeMax = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 120).toISOString();
+  // 過去の予定を管理画面で先の日付に動かした場合も拾えるよう、少し前から読む（表示は今日以降のみ）
+  const timeMin = new Date(now.getTime() - 1000 * 60 * 60 * 24 * 60).toISOString();
+  const timeMax = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 180).toISOString();
 
   const url =
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(hqCalendarId.value())}/events` +
     `?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}` +
-    `&singleEvents=true&orderBy=startTime&maxResults=100`;
+    `&singleEvents=true&orderBy=startTime&maxResults=250`;
 
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken.token}` } });
   if (!res.ok) {
     throw new Error(`Googleカレンダーの取得に失敗しました：${res.status} ${await res.text()}`);
   }
   const data = (await res.json()) as {
-    items?: { summary?: string; start?: { date?: string; dateTime?: string } }[];
+    items?: { id?: string; summary?: string; location?: string; start?: { date?: string; dateTime?: string } }[];
   };
   const items = data.items ?? [];
 
-  const result: Record<string, NextLessonInfo> = {};
+  // 管理画面での変更（カレンダーへ書き込めなかったもの）
+  const changesSnap = await db.collection("lessonChanges").get();
+  const changes = new Map<string, LessonChangeDoc>();
+  for (const d of changesSnap.docs) {
+    const c = d.data() as LessonChangeDoc;
+    if (!c.calendarSynced) changes.set(d.id, c);
+  }
+
+  const today = todayKeyJST();
+  const all: Record<string, NextLessonInfo[]> = {};
+  const push = (key: string, info: NextLessonInfo) => {
+    (all[key] ??= []).push(info);
+  };
   for (const ev of items) {
     const title = ev.summary ?? "";
-    const date = ev.start?.dateTime ?? ev.start?.date;
-    if (!date) continue;
+    const rawDate = ev.start?.dateTime ?? ev.start?.date;
+    if (!rawDate) continue;
+    const change = ev.id ? changes.get(ev.id) : undefined;
+    const date = change ? replaceDatePart(rawDate, change.date) : rawDate;
+    if (date.slice(0, 10) < today) continue;
+    const place = change ? change.place : (ev.location ?? "").trim();
+    const info: NextLessonInfo = {
+      date,
+      title,
+      ...(place ? { place } : {}),
+      ...(ev.id ? { eventId: ev.id } : {}),
+      ...(change && change.originalDate !== change.date ? { originalDate: change.originalDate } : {}),
+    };
     // 「名月会/茶道教室」のような合同の予定は、タイトルに含まれるすべての会の予定として扱う
     for (const group of LESSON_GROUPS.filter((g) => title.includes(g))) {
       // 茶道教室は木曜日・日曜日クラスで別々のお稽古日を持つので、クラスごとのキーに分けて保存する
       // （土曜日クラスは予約制で chadoSaturdaySessions を使うため対象外）
-      let key: string = group;
       if (group === "茶道教室") {
-        const chadoClass = chadoClassOfEvent(title, date);
+        // クラスの判定は元の日付で行う（日程変更で曜日が変わってもクラスは変わらない）
+        const chadoClass = chadoClassOfEvent(title, rawDate);
         if (!chadoClass) continue;
         // 日曜日はカレンダー上1つの予定で午前・午後の両クラスを兼ねるため、両方のキーに保存する
         const classes = chadoClass === "日曜日" ? (["日曜日", "日曜日午後"] as const) : [chadoClass];
-        for (const c of classes) {
-          const k = nextLessonKey(group, c);
-          if (!result[k]) result[k] = { date, title };
-        }
+        for (const c of classes) push(nextLessonKey(group, c), info);
         continue;
       }
-      // itemsは開始日時順なので、最初に見つかったものが一番近い予定
-      if (!result[key]) result[key] = { date, title };
+      push(group, info);
     }
   }
-  return result;
+
+  const dates: Record<string, NextLessonInfo> = {};
+  const upcoming: Record<string, NextLessonInfo[]> = {};
+  for (const [key, list] of Object.entries(all)) {
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    dates[key] = list[0];
+    upcoming[key] = list.slice(0, 10);
+  }
+  return { dates, upcoming };
+}
+
+/** カレンダーを読み直して meta/nextLessonDates を更新する */
+async function refreshNextLessonDates(): Promise<LessonSchedule> {
+  const schedule = await fetchLessonSchedule();
+  await db.doc("meta/nextLessonDates").set({ ...schedule, updatedAt: new Date().toISOString() });
+  return schedule;
 }
 
 // 茶道教室のうち、出欠ボタンで管理する（次回のお稽古日を表示する）曜日クラス
@@ -1465,23 +1535,157 @@ function chadoClassOfEvent(title: string, date: string): "木曜日" | "日曜�
 export const syncNextLessonDates = onSchedule(
   { schedule: "every 30 minutes", timeZone: "Asia/Tokyo" },
   async () => {
-    const dates = await fetchNextLessonDates();
-    await db.doc("meta/nextLessonDates").set({ dates, updatedAt: new Date().toISOString() });
+    await refreshNextLessonDates();
   }
 );
 
 /**
  * 上と同じ処理を、待たずに手動で今すぐ実行するための呼び出し可能関数（本部のみ）。
- * カレンダー共有設定後の動作確認などに使う。
+ * カレンダー共有設定後の動作確認や、カレンダーを直接直したあとの即時反映に使う。
  */
 export const syncNextLessonDatesNow = onCall(async (request) => {
   if (request.auth?.token?.role !== "honbu") {
     throw new HttpsError("permission-denied", "本部のみ実行できます。");
   }
-  const dates = await fetchNextLessonDates();
-  await db.doc("meta/nextLessonDates").set({ dates, updatedAt: new Date().toISOString() });
+  const { dates } = await refreshNextLessonDates();
   return { dates };
 });
+
+/**
+ * 管理画面から、お稽古の日程・開催場所を変更する（本部のみ）。
+ * 1. 本部の共有Googleカレンダーの予定（日付・場所欄）を書き換える
+ *    （書き込み権限がない等で失敗しても、システム側の表示は lessonChanges で変更後の内容になる）
+ * 2. 日付が変わった場合、マイページで元の日付に出欠回答していた会員の回答（rsvpByDate）と、
+ *    茶道教室の開催日（chadoClassSessions）を新しい日付へ付け替える
+ * 3. meta/nextLessonDates をすぐに更新する（マイページ・講師画面・LINE/Slack通知に反映）
+ */
+export const changeLessonSchedule = onCall<{ eventId: string; date: string; place?: string }>(async (request) => {
+  if (request.auth?.token?.role !== "honbu") {
+    throw new HttpsError("permission-denied", "本部のみ実行できます。");
+  }
+  const { eventId } = request.data ?? ({} as { eventId: string; date: string });
+  const newDate = String(request.data?.date ?? "");
+  const place = String(request.data?.place ?? "").trim().slice(0, 100);
+  if (!eventId || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+    throw new HttpsError("invalid-argument", "日付を正しく指定してください。");
+  }
+
+  // 対象の予定を、同期済みの一覧から探す（どの会・クラスの予定かを知るため）
+  const meta = (await db.doc("meta/nextLessonDates").get()).data() as
+    | { upcoming?: Record<string, NextLessonInfo[]> }
+    | undefined;
+  const keys: string[] = [];
+  let current: NextLessonInfo | undefined;
+  for (const [key, list] of Object.entries(meta?.upcoming ?? {})) {
+    const hit = list.find((i) => i.eventId === eventId);
+    if (hit) {
+      keys.push(key);
+      current = hit;
+    }
+  }
+  if (!current) {
+    throw new HttpsError("not-found", "対象のお稽古が見つかりません。画面を開き直してください。");
+  }
+  const oldDate = current.date.slice(0, 10);
+  const changeRef = db.doc(`lessonChanges/${eventId}`);
+  const prev = (await changeRef.get()).data() as LessonChangeDoc | undefined;
+  const originalDate = prev?.originalDate ?? current.originalDate ?? oldDate;
+
+  // 1. Googleカレンダーの予定を書き換える
+  let calendarUpdated = false;
+  let calendarError: string | null = null;
+  try {
+    const auth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/calendar.events"] });
+    const token = (await (await auth.getClient()).getAccessToken()).token;
+    if (!token) throw new Error("アクセストークンを取得できませんでした");
+    const evUrl =
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(hqCalendarId.value())}` +
+      `/events/${encodeURIComponent(eventId)}`;
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const getRes = await fetch(evUrl, { headers });
+    if (!getRes.ok) throw new Error(`予定の取得に失敗（${getRes.status}）`);
+    const ev = (await getRes.json()) as {
+      start?: { date?: string; dateTime?: string; timeZone?: string };
+      end?: { date?: string; dateTime?: string; timeZone?: string };
+    };
+    const startRaw = ev.start?.dateTime ?? ev.start?.date ?? "";
+    const delta = diffDateKeys(startRaw.slice(0, 10), newDate);
+    const shift = (t?: { date?: string; dateTime?: string; timeZone?: string }) => {
+      if (!t) return t;
+      if (t.date) return { date: addDaysToDateKey(t.date, delta) };
+      if (t.dateTime) {
+        return {
+          dateTime: replaceDatePart(t.dateTime, addDaysToDateKey(t.dateTime.slice(0, 10), delta)),
+          ...(t.timeZone ? { timeZone: t.timeZone } : {}),
+        };
+      }
+      return t;
+    };
+    const patchRes = await fetch(evUrl, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ start: shift(ev.start), end: shift(ev.end), location: place }),
+    });
+    if (!patchRes.ok) throw new Error(`予定の更新に失敗（${patchRes.status}）：${await patchRes.text()}`);
+    calendarUpdated = true;
+  } catch (err) {
+    calendarError = err instanceof Error ? err.message : String(err);
+    console.error(`お稽古の日程変更をカレンダーに反映できませんでした（${eventId}）`, err);
+  }
+
+  // 2. 変更内容を記録（カレンダーに書けなかった場合は、これで表示を上書きする）
+  await changeRef.set({
+    eventId,
+    keys,
+    title: current.title,
+    originalDate,
+    date: newDate,
+    place,
+    calendarSynced: calendarUpdated,
+    updatedAt: new Date().toISOString(),
+    updatedBy: request.auth?.uid ?? "",
+  });
+
+  // 3. 日付が変わったら、出欠回答と茶道教室の開催日を新しい日付へ付け替える
+  if (newDate !== oldDate) await moveLessonAnswers(keys, oldDate, newDate);
+
+  // 4. 表示用データをすぐ更新
+  await refreshNextLessonDates();
+  return { calendarUpdated, calendarError };
+});
+
+/** 日程変更に合わせて、元の日付への出欠回答（rsvpByDate）と茶道教室の開催日（chadoClassSessions）を付け替える */
+async function moveLessonAnswers(keys: string[], oldDate: string, newDate: string) {
+  const groups = Array.from(new Set(keys.map((k) => k.split("・")[0])));
+  for (const group of groups) {
+    const snap = await db.collection("members").where("group", "==", group).get();
+    for (const d of snap.docs) {
+      const m = d.data() as { group?: string; chadoClass?: string; rsvpByDate?: Record<string, string> };
+      if (!keys.includes(nextLessonKey(m.group ?? "", m.chadoClass))) continue;
+      const answer = m.rsvpByDate?.[oldDate];
+      if (!answer) continue;
+      await d.ref.update({
+        [`rsvpByDate.${oldDate}`]: admin.firestore.FieldValue.delete(),
+        ...(m.rsvpByDate?.[newDate] ? {} : { [`rsvpByDate.${newDate}`]: answer }),
+      });
+    }
+  }
+
+  // 茶道教室の木曜日・日曜日クラスの開催日（担当講師・出欠表示）
+  const chadoClasses = new Set<string>();
+  for (const k of keys) {
+    if (k === "茶道教室・木曜日") chadoClasses.add("木曜日");
+    if (k === "茶道教室・日曜日" || k === "茶道教室・日曜日午後") chadoClasses.add("日曜日");
+  }
+  for (const cls of chadoClasses) {
+    const oldRef = db.doc(`chadoClassSessions/${oldDate}_${cls}`);
+    const newRef = db.doc(`chadoClassSessions/${newDate}_${cls}`);
+    const [oldSnap, newSnap] = await Promise.all([oldRef.get(), newRef.get()]);
+    if (!oldSnap.exists || newSnap.exists) continue;
+    await newRef.set({ ...oldSnap.data(), date: newDate });
+    await oldRef.delete();
+  }
+}
 
 /**
  * 出欠・予約のリマインドを自動プッシュ送信する(LINE連携済みの会員のみが対象)。
@@ -1535,7 +1739,7 @@ export const sendLineReminders = onSchedule(
     // 2. 出欠リマインド:明日が「次回のお稽古」日の茶道教室クラスについて、出欠未回答の会員に送る
     // (自動リマインドは茶道教室のみが対象。土曜日クラスは予約制のため対象外。木曜日・日曜日クラスはrsvpで管理するため対象)
     const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
-    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string; place?: string }> | undefined;
     if (nextDates) {
       for (const [key, info] of Object.entries(nextDates)) {
         if (info.date.slice(0, 10) !== tomorrowKey) continue;
@@ -1549,7 +1753,7 @@ export const sendLineReminders = onSchedule(
           if (!member.lineUserId) continue;
           if ((member.rsvp ?? "未回答") !== "未回答") continue;
           const attendanceText = `${member.name}様
-明日${formatDateJp(tomorrowKey)}のお稽古の出欠がまだ未回答です。マイページからご回答をお願いします。`;
+明日${formatDateJp(tomorrowKey)}${info.place ? `（${info.place}）` : ""}のお稽古の出欠がまだ未回答です。マイページからご回答をお願いします。`;
           await pushLineMessage(member.lineUserId, accessToken, attendanceText);
           await logLineMessage({
             memberId: memberDoc.id,
@@ -2133,7 +2337,7 @@ export const notifyChadoParticipants = onSchedule(
 
     // 2. 木曜日・日曜日クラス（日程変更があるため曜日ではなく meta/nextLessonDates の次回日で判定）
     const nextLessonSnap = await db.doc("meta/nextLessonDates").get();
-    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string }> | undefined;
+    const nextDates = nextLessonSnap.data()?.dates as Record<string, { date: string; place?: string }> | undefined;
     const targetClasses = CHADO_RSVP_CLASSES.filter(
       (c) => nextDates?.[nextLessonKey("茶道教室", c)]?.date?.slice(0, 10) === targetDateKey
     );
@@ -2159,7 +2363,10 @@ export const notifyChadoParticipants = onSchedule(
         if (mentionIds.length > 0) lines.push(mentionIds.map((id) => `<@${id}>`).join(" "));
         lines.push(
           header,
-          `${CHADO_RSVP_CLASS_LABEL[chadoClass]}クラス ${info.time}／担当：${info.teacher}`,
+          `${CHADO_RSVP_CLASS_LABEL[chadoClass]}クラス ${info.time}／担当：${info.teacher}` +
+            (nextDates?.[nextLessonKey("茶道教室", chadoClass)]?.place
+              ? `／場所：${nextDates[nextLessonKey("茶道教室", chadoClass)].place}`
+              : ""),
           `出席（${attend.length}名）：${joinNames(attend)}`,
           `欠席（${absent.length}名）：${joinNames(absent)}`,
           `未回答（${unanswered.length}名）：${joinNames(unanswered)}`
