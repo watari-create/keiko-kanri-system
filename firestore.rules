@@ -189,6 +189,27 @@ service cloud.firestore {
       allow write: if false; // Cloud Functions（Square Webhook受信用）からのみ
     }
 
+    // ---- memberSubscriptions（お月謝のカード自動払い：Square）。doc id = 会員番号 ----
+    // 書き込みはCloud Functions（functions/src/square.ts）のみ。本部と本人が閲覧できる。
+    match /memberSubscriptions/{memberId} {
+      allow read: if isHonbu() || isSelf(memberId);
+      allow write: if false;
+      match /payments/{paymentId} {
+        allow read: if isHonbu() || isSelf(memberId);
+        allow write: if false;
+      }
+    }
+
+    // ---- Square連携の内部データ（プランIDのキャッシュ・受信済みWebhook） ----
+    match /squareCatalog/{docId} {
+      allow read: if isHonbu();
+      allow write: if false;
+    }
+    match /squareWebhookEvents/{eventId} {
+      allow read: if isHonbu();
+      allow write: if false;
+    }
+
     // ---- meta（Googleカレンダーから同期した「次回のお稽古」日など） ----
     match /meta/{docId} {
       allow read: if isKnownUser();

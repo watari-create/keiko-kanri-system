@@ -25,7 +25,7 @@ export default function EnrollPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [step, setStep] = useState<Step>("form");
   const [issuedNo, setIssuedNo] = useState<string | null>(null);
-  const [payInfo, setPayInfo] = useState<{ label: string; amount: string; link: string } | null>(null);
+  const [payInfo, setPayInfo] = useState<{ label: string; amount: string; link: string; cardBilling?: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -217,7 +217,14 @@ export default function EnrollPage() {
         }
       }
 
-      setPayInfo(
+      // カード自動払い（マイページから申込み）を使う場合は、Squareの決済リンクの代わりにマイページへ案内する。
+      // Vercelの環境変数 NEXT_PUBLIC_SQUARE_BILLING_ENABLED=1 で有効になる（本番のSquare設定が済んでから）。
+      const cardBilling =
+        process.env.NEXT_PUBLIC_SQUARE_BILLING_ENABLED === "1" &&
+        !isOneTime &&
+        ["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(group.title);
+      const withCard = <T extends object>(info: T) => ({ ...info, cardBilling });
+      setPayInfo(withCard(
         selectedRecruit
           ? {
               label: `お支払い（月謝・自動払い）　${selectedRecruit.name}`,
@@ -235,7 +242,7 @@ export default function EnrollPage() {
               amount: isOneTime ? group.amounts.onetime : group.amounts.subscription,
               link: isOneTime ? group.links.onetime : group.links.subscription,
             }
-      );
+      ));
       setStep("confirm");
     } catch (err) {
       console.error(err);
@@ -416,7 +423,19 @@ export default function EnrollPage() {
                     <span className="text-[11px] text-muted font-normal"> / 月</span>
                   )}
                 </div>
-                {payInfo.link ? (
+                {payInfo.cardBilling ? (
+                  <>
+                    <p className="text-xs text-muted leading-relaxed mb-3">
+                      お月謝は前払いのクレジットカード自動払いです（参加開始月の分はカード登録時、以降は毎月25日に翌月分）。上の会員番号とご登録のメールアドレスでマイページにログインし、カード情報をご登録ください。
+                    </p>
+                    <a
+                      href="/mypage/login?next=/mypage/payment"
+                      className="block text-center bg-matcha-deep text-white rounded py-3 text-sm font-semibold"
+                    >
+                      ログインしてカードを登録する
+                    </a>
+                  </>
+                ) : payInfo.link ? (
                   <a
                     href={payInfo.link}
                     target="_blank"

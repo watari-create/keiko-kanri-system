@@ -1850,28 +1850,6 @@ export const checkG1ShippingReminder = onSchedule(
 );
 
 /**
- * Square Webhook受信エンドポイント（雛形）。
- * 実際の導入時は、Square側のWebhook署名検証を必ず行うこと。
- * https://developer.squareup.com/docs/webhooks/step3verify
- */
-export const squareWebhook = onRequest(async (req, res) => {
-  // TODO: req.headers["x-square-hmacsha256-signature"] を使った署名検証を実装する
-  const event = req.body;
-
-  if (event?.type === "payment.updated" && event?.data?.object?.payment?.status === "COMPLETED") {
-    const payment = event.data.object.payment;
-    await db.collection("paymentEvents").add({
-      amount: payment.amount_money?.amount ?? null,
-      squarePaymentId: payment.id,
-      receivedAt: new Date().toISOString(),
-      matched: false, // TODO: メモ欄の会員番号などで members と突き合わせる処理を追加
-    });
-  }
-
-  res.status(200).send("ok");
-});
-
-/**
  * 毎週月曜3:00（JST）に、お稽古ノート（keikoNoteEntries）の内容を丸ごと
  * keikoNoteBackups/{YYYY-MM-DD}/entries/{entryId} に複製してバックアップする。
  * 誤操作・誤削除からの復旧用。90日より古いバックアップは自動的に削除する。
@@ -2617,3 +2595,6 @@ export const keikoNoteGuestLogin = onCall<{ code: string }>(
     return { token };
   }
 );
+
+// Square決済（お月謝のカード自動払い）。詳細は square.ts を参照
+export { getSquareBillingInfo, startSquareSubscription, updateSquareSubscriptionCard, squareWebhook } from "./square";

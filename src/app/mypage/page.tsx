@@ -16,6 +16,7 @@ import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
 import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
 import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME, CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import SaturdayReservation from "@/components/SaturdayReservation";
+import MyPagePaymentCard from "@/components/MyPagePaymentCard";
 import type { Member, LeaveRequestType } from "@/types";
 
 export default function MyPage() {
@@ -389,17 +390,7 @@ export default function MyPage() {
         </button>
       </div>
 
-      {isHonbuKeikoGroup(member.group) && (
-        <div className="bg-paper border border-line rounded-md p-6 mb-4">
-          <h2 className="text-sm text-muted mb-3">お支払い方法の変更</h2>
-          <div className="text-xs text-muted bg-matcha-pale rounded-md p-3 space-y-1">
-            <p>
-              クレジットカード情報の変更は、ご登録時にSquareから届いた決済完了メール内の「このサブスクリプションを管理する」というリンクから、ご自身でお手続きいただけます。
-            </p>
-            <p>メールが見当たらない場合は、お手数ですが本部までご連絡ください。</p>
-          </div>
-        </div>
-      )}
+      {isHonbuKeikoGroup(member.group) && <MyPagePaymentCard />}
 
       <div className="bg-paper border border-line rounded-md p-6">
         <h2 className="text-sm text-muted mb-3">

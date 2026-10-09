@@ -39,6 +39,7 @@ import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { groupDisplayName, groupHasGuardianField, UCI_GROUPS } from "@/lib/areas";
 import CsvImportModal from "@/components/CsvImportModal";
 import MemberRoster from "@/components/MemberRoster";
+import AdminSubscriptionStatus from "@/components/AdminSubscriptionStatus";
 import OperationRules from "@/components/OperationRules";
 import ChadoWeeklySessions from "@/components/ChadoWeeklySessions";
 import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
@@ -2414,6 +2415,32 @@ export default function AdminPage() {
                   空欄なら会の標準額を使います。ご家族割引など標準額と異なる場合のみ入力してください（都度払いは1回あたり）。
                 </p>
               </Field>
+              {["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(selectedMember.group) && (
+                <>
+                  <Field label="カード自動払い（Square）の申込みボタン">
+                    <select
+                      className="input"
+                      value={draft.squareBillingAllowed === true ? "on" : draft.squareBillingAllowed === false ? "off" : "auto"}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          squareBillingAllowed: e.target.value === "on" ? true : e.target.value === "off" ? false : null,
+                        })
+                      }
+                    >
+                      <option value="auto">自動（新しく入会した会員のみ表示）</option>
+                      <option value="on">マイページに表示する</option>
+                      <option value="off">表示しない</option>
+                    </select>
+                    <p className="text-[11px] text-muted mt-1">
+                      従来のSquare決済リンクでお支払い中の会員は「自動」のままにしてください（二重のお引き落とし防止）。
+                    </p>
+                  </Field>
+                  <Field label="カード自動払いの状況">
+                    <AdminSubscriptionStatus memberId={selectedMember.id} />
+                  </Field>
+                </>
+              )}
               <Field label="メールアドレス">
                 <input
                   className="input"

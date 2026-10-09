@@ -20,9 +20,13 @@ export default function MemberLoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lineNotice, setLineNotice] = useState(false);
+  // ログイン後の移動先（例：入会完了画面からの /mypage/payment）。マイページ配下のみ許可する。
+  const [nextPath, setNextPath] = useState("/mypage");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const next = params.get("next");
+    if (next && /^\/mypage(\/[a-z-]+)?$/.test(next)) setNextPath(next);
     if (params.get("lineNotLinked") === "1") {
       setLineNotice(true);
       window.history.replaceState({}, "", window.location.pathname);
@@ -41,7 +45,7 @@ export default function MemberLoginPage() {
       );
       const result = await verify({ memberNo, email });
       await signInWithCustomToken(auth, result.data.token);
-      router.push(result.data.role === "staff" ? "/staff" : "/mypage");
+      router.push(result.data.role === "staff" ? "/staff" : nextPath);
     } catch (err) {
       // 失敗が続いて一時停止中の場合は、サーバーからのメッセージをそのまま表示する
       const code = (err as { code?: string })?.code;

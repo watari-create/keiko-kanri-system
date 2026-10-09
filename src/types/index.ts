@@ -82,6 +82,9 @@ export interface Member {
   rsvpByDate?: Record<string, "出席" | "欠席">; // マイページの出欠回答を、お稽古日（YYYY-MM-DD）ごとに記録したもの（木曜日・日曜日クラスの開催日表示用）
   chadoCohortId?: string; // 茶道教室のみ。新規募集クラス（chadoRecruitClasses のdoc id）から入会した場合の所属クラス
   lineUserId?: string; // 公式LINEアカウントと連携した際のLINEユーザーID（Cloud Functions経由で設定）
+  // お月謝のカード自動払い（Square）の申込みボタンをマイページに表示するか。未設定なら、入会日が
+  // SQUARE_BILLING_FROM（functions側の設定）以降の会員にだけ表示する。true＝表示、false＝表示しない、null／未設定＝入会日で自動判定。
+  squareBillingAllowed?: boolean | null;
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
