@@ -100,9 +100,12 @@ export default function StaffPage() {
     });
   }, [group]);
 
-  // LINE送信履歴（プッシュ・マルチキャスト分。Cloud Functionsが送信のたびに記録している）
+  // LINE送信履歴（プッシュ・マルチキャスト分。Cloud Functionsが送信のたびに記録している。茶道教室のみ）
   useEffect(() => {
-    if (!group) return;
+    if (group !== "茶道教室") {
+      setLineMessageLogs([]);
+      return;
+    }
     // group＋sentAtの並べ替えは複合インデックスが必要になるため、groupのみで取得してクライアント側で新しい順に並べる
     const q = query(collection(db, "lineMessageLogs"), where("group", "==", group));
     return onSnapshot(
@@ -433,14 +436,16 @@ export default function StaffPage() {
         )}
       </section>
 
-      <section className="bg-paper border border-line rounded-md p-5 mb-6">
-        <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
-        <p className="text-xs text-muted mb-3">
-          自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
-          チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。行をクリックすると全文を表示します。
-        </p>
-        <LineMessageLogList logs={lineMessageLogs} />
-      </section>
+      {group === "茶道教室" && (
+        <section className="bg-paper border border-line rounded-md p-5 mb-6">
+          <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
+          <p className="text-xs text-muted mb-3">
+            自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
+            チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。行をクリックすると全文を表示します。
+          </p>
+          <LineMessageLogList logs={lineMessageLogs} />
+        </section>
+      )}
 
       {group === "茶道教室" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6">
