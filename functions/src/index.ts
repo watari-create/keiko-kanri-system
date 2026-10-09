@@ -2038,6 +2038,9 @@ const CHADO_RSVP_CLASS_INFO: Record<(typeof CHADO_RSVP_CLASSES)[number], { time:
 // 何日前に通知するか
 const CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE = 3;
 
+// 新月会の出欠通知（3日前、本部稽古チャンネル）でメンションするSlackユーザー（2026-10-09 ゆちゃ指定）
+const SHINGETSUKAI_NOTICE_MENTIONS = ["UG8JH2Q1F"];
+
 /**
  * 講師名（複数可）から、メンションするSlackユーザーIDを重複なしで集める。
  * 名前が未入力・対応表にない場合は何も追加しない（メンションなしで送る）。
@@ -2064,6 +2067,7 @@ function joinNames(names: string[]): string {
  * 参加者一覧を本部稽古チャンネルにSlack通知する（開催日がなければ何も送らない）。
  * ・土曜日クラス：chadoSaturdaySessions の予約状況（午前・午後）
  * ・木曜日／日曜日クラス：meta/nextLessonDates の次回日が3日後と一致する場合のみ、members の rsvp
+ * ・新月会：meta/nextLessonDates の「新月会」の次回日が3日後と一致する場合のみ、members の rsvp（UG8JH2Q1F をメンション）
  * 同じ開催日・クラスについて二重送信しないよう、meta/chadoParticipantNotice に送信済みを記録する。
  */
 export const notifyChadoParticipants = onSchedule(
@@ -2141,6 +2145,37 @@ export const notifyChadoParticipants = onSchedule(
         );
         messages.push({ key: `${targetDateKey}_${chadoClass}`, text: lines.join("\n") });
       }
+    }
+
+    // 3. 新月会（カレンダーの予定タイトルに「新月会」を含む次回日が3日後のとき）
+    const shingetsuNext = nextDates?.["新月会"]?.date;
+    if (shingetsuNext && eventDateKeyJST(shingetsuNext) === targetDateKey) {
+      const membersSnap = await db.collection("members").where("group", "==", "新月会").get();
+      const attend: string[] = [];
+      const absent: string[] = [];
+      const unanswered: string[] = [];
+      for (const memberDoc of membersSnap.docs) {
+        const m = memberDoc.data();
+        if (m.isTestAccount) continue;
+        if ((m.status ?? "在籍") !== "在籍") continue;
+        const name = (m.name as string | undefined) ?? "（氏名未登録）";
+        const rsvp = m.rsvp ?? "未回答";
+        if (rsvp === "出席") attend.push(name);
+        else if (rsvp === "欠席") absent.push(name);
+        else unanswered.push(name);
+      }
+      // 時刻指定の予定なら開始時刻（JST）も添える
+      const startTime = shingetsuNext.includes("T")
+        ? new Date(Date.parse(shingetsuNext) + 9 * 60 * 60 * 1000).toISOString().slice(11, 16) + "〜"
+        : "";
+      const lines = [
+        SHINGETSUKAI_NOTICE_MENTIONS.map((id) => `<@${id}>`).join(" "),
+        `【新月会】${dateLabel}${startTime ? " " + startTime : ""} お稽古の出欠（${CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE}日前のお知らせ）`,
+        `出席（${attend.length}名）：${joinNames(attend)}`,
+        `欠席（${absent.length}名）：${joinNames(absent)}`,
+        `未回答（${unanswered.length}名）：${joinNames(unanswered)}`,
+      ].filter(Boolean);
+      messages.push({ key: `${targetDateKey}_新月会`, text: lines.join("\n") });
     }
 
     if (messages.length === 0) return; // 3日後に開催日なし
