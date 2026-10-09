@@ -118,7 +118,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
 
   // 対象の会（月謝払い）の会員のカード自動払いの状況
   function cardStatus(m: Member): "対象外" | "未登録" | "登録済み" | "旧契約の解約待ち" {
-    if (!["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
+    if (!["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"].includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
     const sub = subs[m.id];
     if (!sub || !["PENDING", "ACTIVE", "PAUSED"].includes(sub.status)) return "未登録";
     if (sub.migratedFromLink && !m.legacySquareCanceled) return "旧契約の解約待ち";

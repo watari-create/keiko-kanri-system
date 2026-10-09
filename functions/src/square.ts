@@ -43,11 +43,16 @@ const SQUARE_VERSION = "2025-01-23";
 // 毎月のお引き落とし日
 const BILLING_DAY = 25;
 // カード自動払いの対象の会（Firestoreのgroup名）
-const TARGET_GROUPS = ["茶道教室", "名月会", "Gマダムの茶の湯講座"];
+const TARGET_GROUPS = ["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"];
+// 決済リンク（従来のSquareサブスク）を使っていない会。切り替え月（SQUARE_MIGRATION_MONTH）からの開始は同じだが、
+// 同じメールアドレスの旧契約の検索・自動解約はしない（別の会の契約を誤って解約しないため）。
+// 新月会：2026-10開始。10月分は別の仕組みで支払い済み、11月分（10/25）からカード自動払い（2026-10-09 ゆちゃ）
+const NO_LEGACY_LINK_GROUPS = ["新月会"];
 // 標準のお月謝（src/lib/enrollGroups.ts・src/lib/memberFees.ts と同じ金額にしておくこと）
 const STANDARD_MONTHLY_FEES: Record<string, number> = {
   "名月会": 12000,
   "Gマダムの茶の湯講座": 20000,
+  "新月会": 15000,
 };
 const CHADO_ONCE_FEE = 15000;
 const CHADO_TWICE_FEE = 28000;
@@ -240,6 +245,11 @@ function nextBillingDateAfter(dateStr: string): string {
 /** 決済リンク（従来の方式）から切り替える会員か：入会日が SQUARE_BILLING_FROM より前で、新規募集クラスの会員ではない */
 function isMigrationMember(m: MemberDoc): boolean {
   return !m.chadoCohortId && !m.squareRejoin && (m.joinDate ?? "") < squareBillingFrom.value();
+}
+
+/** 切り替え会員のうち、決済リンクの旧契約がある（＝旧契約の検索・自動解約の対象になる）会員か */
+function hasLegacyLink(m: MemberDoc): boolean {
+  return isMigrationMember(m) && !NO_LEGACY_LINK_GROUPS.includes(m.group ?? "");
 }
 
 /** 選べる参加開始月。新規募集クラスは開講月、切り替え会員は切り替え月（過ぎていれば翌月）に固定、それ以外は今月・来月から選ぶ */
@@ -451,6 +461,7 @@ export const getSquareBillingInfo = onCall(async (request) => {
     label: fee.label,
     schedules: startMonthOptions(fee.cohortStartDate, isMigrationMember(m)).map(buildSchedule),
     migration: isMigrationMember(m),
+    legacyLink: hasLegacyLink(m),
     billingDay: BILLING_DAY,
     memberName: m.name ?? "",
     email: m.email ?? "",
@@ -606,7 +617,8 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
       };
       // 決済リンクからの切り替え会員は、同じメールアドレスの旧契約を探して自動解約を予約する
       let legacyIds: string[] = [];
-      if (migration && m.email) {
+      const legacyLink = hasLegacyLink(m);
+      if (legacyLink && m.email) {
         try {
           const ours = (await db().collection("memberSubscriptions").get()).docs
             .map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId)
@@ -620,8 +632,8 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
       await subRef.set({
         ...record,
         startMonth: schedule.startMonth,
-        migratedFromLink: migration,
-        ...(migration
+        migratedFromLink: legacyLink,
+        ...(legacyLink
           ? {
               legacySubscriptionIds: legacyIds,
               legacyCancelAfter: lastDayOfMonth(addMonths(schedule.startMonth, -1)),
@@ -630,7 +642,7 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
             }
           : {}),
       });
-      const legacyState = migration && legacyIds.length ? await processLegacyCancellation(memberId) : null;
+      const legacyState = legacyLink && legacyIds.length ? await processLegacyCancellation(memberId) : null;
       if (oneTimePaymentId) {
         await subRef.collection("payments").add({
           kind: "入金",
@@ -661,7 +673,7 @@ export const startSquareSubscription = onCall<{ token: string; startMonth?: stri
           (schedule.nowCount ? `お申込み時に引き落とし：${schedule.nowItems.join("・")}\n` : "") +
           (entryFee ? `入会金：¥${entryFee.amount.toLocaleString("ja-JP")}（お申込み時に引き落とし済み）\n` : "") +
           `次回：${schedule.nextDate}（${schedule.nextMonth}）` +
-          (migration
+          (legacyLink
             ? legacyState
               ? `\n決済リンクの旧契約：${legacyState}（${monthLabel(addMonths(schedule.startMonth, -1))}の引き落とし後に自動で解約します）`
               : `\n⚠️ 決済リンクからの切り替えですが、同じメールアドレスの旧契約が見つかりませんでした。` +
@@ -1028,7 +1040,7 @@ export const listLegacySquareMembers = onCall(
     const targets = membersSnap.docs
       .map((d) => ({ id: d.id, ...(d.data() as MemberDoc & { isTestAccount?: boolean }) }))
       .filter((m) => TARGET_GROUPS.includes(m.group ?? "") && m.paymentMethod !== "都度払い" && !m.isTestAccount)
-      .filter((m) => !liveMemberIds.has(m.id) && isMigrationMember(m));
+      .filter((m) => !liveMemberIds.has(m.id) && hasLegacyLink(m));
 
     const rows: any[] = [];
     // Squareの制限に配慮して少しずつ問い合わせる
@@ -1336,7 +1348,7 @@ async function stopSquareBillingForLeave(memberId: string, type: string): Promis
     const mSnap = await db().doc(`members/${memberId}`).get();
     const m = mSnap.data() as MemberDoc | undefined;
     const email = (m?.email ?? "").trim();
-    if (email) {
+    if (email && !NO_LEGACY_LINK_GROUPS.includes(m?.group ?? "")) {
       try {
         const allOurs = (await db().collection("memberSubscriptions").get()).docs
           .map((d) => (d.data() as SubscriptionRecord).squareSubscriptionId)

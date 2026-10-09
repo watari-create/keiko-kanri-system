@@ -263,7 +263,7 @@ export default function PaymentPage() {
               )}
               <Row label="以降のお引き落とし" value={`毎月${info.billingDay}日に翌月分`} />
               <Row label="お支払い方法" value="クレジットカード" />
-              {info.migration && schedule && (
+              {info.migration && info.legacyLink !== false && schedule && (
                 <p className="text-xs text-matcha-deep bg-matcha-pale rounded p-3 mt-3 leading-relaxed">
                   これまでの決済リンク（Square）でのお支払いは、{formatYm(schedule.startMonth)}分の前月分までで終了します。
                   旧契約の解約は本部でお手続きしますので、お客様のお手続きは不要です。

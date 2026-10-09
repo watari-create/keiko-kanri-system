@@ -2515,7 +2515,7 @@ export default function AdminPage() {
                   </select>
                 </Field>
               )}
-              {["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(selectedMember.group) && (
+              {["茶道教室", "名月会", "Gマダムの茶の湯講座", "新月会"].includes(selectedMember.group) && (
                 <>
                   <Field label="カード自動払い（Square）の申込みボタン">
                     <select
