@@ -45,6 +45,7 @@ import ChadoRecruitClasses from "@/components/ChadoRecruitClasses";
 import { memberFee, formatYen } from "@/lib/memberFees";
 import { CHADO_CLASSES, CHADO_CLASS_LABEL, CHADO_SATURDAY_DEFAULT_CAPACITY, isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { CHADO_LEDGER_DEFAULTS, chadoKiLabel } from "@/lib/chadoClassLedger";
+import MonthSelect from "@/components/MonthSelect";
 import type {
   Member,
   LicenseRequest,
@@ -2482,14 +2483,15 @@ export default function AdminPage() {
                   {LICENSE_FEES.map((l) => (
                     <div key={l.name} className="flex items-center gap-2">
                       <span className="text-xs w-24 shrink-0">{l.name}</span>
-                      <input
-                        type="month"
-                        className="input text-xs"
+                      <MonthSelect
+                        allowEmpty
+                        yearFrom={1950}
+                        selectClassName="input text-xs"
                         value={draft.licenseHistory?.[l.name] ?? ""}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const next = { ...(draft.licenseHistory ?? {}) };
-                          if (e.target.value) {
-                            next[l.name] = e.target.value;
+                          if (v) {
+                            next[l.name] = v;
                           } else {
                             delete next[l.name];
                           }
