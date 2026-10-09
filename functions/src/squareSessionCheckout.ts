@@ -40,6 +40,7 @@ interface SessionMember extends MemberDoc {
   sessionPayments?: Record<string, string>;
   rsvpByDate?: Record<string, string>;
   createdAt?: admin.firestore.Timestamp;
+  sessionPaymentExempt?: boolean;
 }
 
 interface CheckoutRecord {
@@ -271,7 +272,7 @@ export const onSessionPaidThenAbsent = onDocumentUpdated(
   async (event) => {
     const before = event.data?.before.data() as SessionMember | undefined;
     const after = event.data?.after.data() as SessionMember | undefined;
-    if (!before || !after || after.paymentMethod !== "都度払い") return;
+    if (!before || !after || after.paymentMethod !== "都度払い" || after.sessionPaymentExempt) return;
     const months = Object.keys(after.attendance ?? {}).filter(
       (mk) => before.attendance?.[mk] === "出席" && after.attendance?.[mk] === "欠席" && after.sessionPayments?.[mk] === "済"
     );
@@ -302,7 +303,7 @@ export const checkUnpaidSessionPayments = onSchedule(
     const lines: string[] = [];
     for (const doc of members.docs) {
       const m = doc.data() as SessionMember & { isTestAccount?: boolean };
-      if (m.isTestAccount) continue;
+      if (m.isTestAccount || m.sessionPaymentExempt) continue;
       for (const [mk, v] of Object.entries(m.attendance ?? {})) {
         if (v !== "出席" || mk < from || mk > thisMonth || m.sessionPayments?.[mk] === "済") continue;
         // 月が終わった、または出席と答えたお稽古日から3日たった

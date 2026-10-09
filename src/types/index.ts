@@ -101,6 +101,8 @@ export interface Member {
   sessionPayments?: Record<string, "済" | "未納">;
   // 都度払いの支払いページ（Square）で入金された月の記録（Cloud Functionsが書き込む）
   sessionPaymentsSquare?: Record<string, { amount: number; paidAt: string }>;
+  // 都度払いの支払い確認の対象外（未入金・欠席の通知、マイページの支払い案内を出さない）
+  sessionPaymentExempt?: boolean;
   email: string;
   phone?: string;
   address?: string;

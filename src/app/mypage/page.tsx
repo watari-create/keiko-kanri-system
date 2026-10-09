@@ -198,7 +198,7 @@ export default function MyPage() {
     );
 
     // 都度払いの会員が「出席する」を押したときは、その場でSquareの支払いページ（この会員・この月専用）を開く
-    if (member.paymentMethod === "都度払い") {
+    if (member.paymentMethod === "都度払い" && !member.sessionPaymentExempt) {
       const paid = member.sessionPayments?.[monthKey] === "済";
       if (value === "出席") {
         if (paid) {
@@ -380,7 +380,7 @@ export default function MyPage() {
                 {member.rsvp === "欠席" ? "✓ 欠席する" : "欠席する"}
               </button>
             </div>
-            {member.paymentMethod === "都度払い" && (
+            {member.paymentMethod === "都度払い" && !member.sessionPaymentExempt && (
               <SessionPaymentBox
                 member={member}
                 busy={checkoutBusy}

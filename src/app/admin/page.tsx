@@ -1262,6 +1262,7 @@ export default function AdminPage() {
                         <span className="block truncate" title={`${m.name}（${groupDisplayName(m.group)}）`}>
                           {m.name}（{groupDisplayName(m.group)}）
                         </span>
+                        {m.sessionPaymentExempt && <span className="block text-[10px] text-muted">通知対象外</span>}
                       </td>
                       {fiscalYearMonths().map((mk) => {
                         const attended = m.attendance?.[mk] === "出席";
@@ -2488,6 +2489,18 @@ export default function AdminPage() {
                   空欄なら会の標準額を使います。ご家族割引など標準額と異なる場合のみ入力してください（都度払いは1回あたり）。
                 </p>
               </Field>
+              {(draft.paymentMethod ?? selectedMember.paymentMethod) === "都度払い" && (
+                <Field label="都度払いの支払い確認">
+                  <select
+                    className="input"
+                    value={draft.sessionPaymentExempt ? "off" : "on"}
+                    onChange={(e) => setDraft({ ...draft, sessionPaymentExempt: e.target.value === "off" })}
+                  >
+                    <option value="on">対象（マイページで支払い案内・未入金を通知）</option>
+                    <option value="off">対象外（支払い案内・未入金の通知を出さない）</option>
+                  </select>
+                </Field>
+              )}
               {["茶道教室", "名月会", "Gマダムの茶の湯講座"].includes(selectedMember.group) && (
                 <>
                   <Field label="カード自動払い（Square）の申込みボタン">
