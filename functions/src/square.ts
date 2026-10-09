@@ -653,14 +653,25 @@ export const updateSquareSubscriptionCard = onCall<{ token: string }>(
 
 // ---- Squareからの通知（Webhook） ----
 
-function isValidSquareSignature(rawBody: string, signature: string | undefined): boolean {
-  const key = squareWebhookSignatureKey.value();
-  const url = squareWebhookUrl.value();
-  if (!key || !url || !signature) return false;
-  const expected = crypto.createHmac("sha256", key).update(url + rawBody).digest("base64");
-  const a = Buffer.from(expected);
+function isValidSquareSignature(rawBody: string, signature: string | undefined, requestUrls: string[]): boolean {
+  const key = squareWebhookSignatureKey.value().trim();
+  if (!key || !signature) return false;
+  // Squareは「登録したURL＋本文」で署名する。登録URLの末尾スラッシュの有無や、
+  // cloudfunctions.net／run.app のどちらのURLで登録したかの違いでずれないよう、候補をすべて試す。
+  const configured = squareWebhookUrl.value().trim();
+  const bases = [configured, ...requestUrls].filter(Boolean);
+  const candidates = new Set<string>();
+  for (const u of bases) {
+    candidates.add(u);
+    candidates.add(u.endsWith("/") ? u.slice(0, -1) : u + "/");
+  }
   const b = Buffer.from(signature);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  for (const url of candidates) {
+    const expected = Buffer.from(crypto.createHmac("sha256", key).update(url + rawBody).digest("base64"));
+    if (expected.length === b.length && crypto.timingSafeEqual(expected, b)) return true;
+  }
+  console.warn("Square Webhook：署名が一致しません", { tried: [...candidates], keyLength: key.length, bodyLength: rawBody.length });
+  return false;
 }
 
 async function findSubscriptionDoc(subscriptionId: string | undefined) {
@@ -681,7 +692,12 @@ export const squareWebhook = onRequest(
       return;
     }
     const raw = req.rawBody ? req.rawBody.toString("utf8") : JSON.stringify(req.body);
-    if (!isValidSquareSignature(raw, req.header("x-square-hmacsha256-signature"))) {
+    const host = req.header("x-forwarded-host") || req.header("host") || "";
+    const path = req.originalUrl || "/";
+    const requestUrls = host
+      ? [`https://${host}${path === "/" ? "" : path}`, `https://${host}${path}`]
+      : [];
+    if (!isValidSquareSignature(raw, req.header("x-square-hmacsha256-signature"), requestUrls)) {
       console.warn("Square Webhook：署名が一致しません");
       res.status(403).send("invalid signature");
       return;
