@@ -90,6 +90,8 @@ export interface Member {
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
+  // 新月会のみ：月（"YYYY-MM"）ごとに、出席する開催日（"YYYY-MM-DD"）または "欠席"（src/lib/shingetsu.ts）
+  shingetsuChoice?: Record<string, string>;
   // 入会金の入金状況（名月会のみ対象、一律¥33,000。経理タブで管理）
   entryFeeStatus?: "済" | "未納";
   // 都度払い会員の、出席した月ごとの月謝入金状況（キーはattendanceと同じ会計年度の月）。経理タブで管理

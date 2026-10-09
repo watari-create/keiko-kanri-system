@@ -29,6 +29,8 @@ import { useAuth } from "@/lib/AuthContext";
 import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, isUciGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
+import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
@@ -574,12 +576,17 @@ export default function StaffPage() {
 
       <section className="bg-paper border border-line rounded-md p-5 mb-6">
         <h2 className="font-bold mb-2">出席簿</h2>
+        {group === SHINGETSU_GROUP ? (
+          // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
+          <ShingetsuAttendanceGrid members={members} editable />
+        ) : (
         <AttendanceGrid
           members={members}
           editable
           isRowEditable={(m) => !isChadoSaturdayMember(m)}
           onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
         />
+        )}
       </section>
 
       {isHonbuKeikoGroup(group) && (

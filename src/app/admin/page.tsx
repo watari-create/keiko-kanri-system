@@ -30,6 +30,8 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
+import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MakeupTicketList from "@/components/MakeupTicketList";
 import LineMessageLogList from "@/components/LineMessageLogList";
 import { formatNextLessons, nextLessonsForGroup, type NextLessonInfo } from "@/lib/nextLesson";
@@ -1659,12 +1661,17 @@ export default function AdminPage() {
           </div>
           {showAttendance && (
             <div className="p-5">
+              {group === SHINGETSU_GROUP ? (
+                // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
+                <ShingetsuAttendanceGrid members={members} editable canEditSessions />
+              ) : (
               <AttendanceGrid
                 sections={memberSections}
                 editable
                 isRowEditable={(m) => !isChadoSaturdayMember(m)}
                 onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
               />
+              )}
             </div>
           )}
         </section>

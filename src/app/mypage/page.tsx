@@ -16,6 +16,8 @@ import { groupDisplayName, isHonbuKeikoGroup } from "@/lib/areas";
 import { formatLessonDate, nextLessonKey, type NextLessonInfo } from "@/lib/nextLesson";
 import { CHADO_FIXED_TEACHERS, CHADO_CLASS_TIME, CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import SaturdayReservation from "@/components/SaturdayReservation";
+import ShingetsuAttendanceCard from "@/components/ShingetsuAttendanceCard";
+import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MyPagePaymentCard from "@/components/MyPagePaymentCard";
 import type { Member, LeaveRequestType } from "@/types";
 
@@ -270,7 +272,10 @@ export default function MyPage() {
       )}
 
       {member.groupCategory === "本部稽古" &&
-        (member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
+        (member.group === SHINGETSU_GROUP ? (
+          // 新月会：月2回の開催日から1日を選ぶ方式（管理画面の出席簿と連動）
+          <ShingetsuAttendanceCard memberId={member.id} />
+        ) : member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
           <SaturdayReservation
             memberId={member.id}
             quota={member.chadoMonthlyQuota ?? 1}

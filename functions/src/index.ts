@@ -2045,7 +2045,7 @@ function joinNames(names: string[]): string {
  * 参加者一覧を本部稽古チャンネルにSlack通知する（開催日がなければ何も送らない）。
  * ・土曜日クラス：chadoSaturdaySessions の予約状況（午前・午後）
  * ・木曜日／日曜日クラス：meta/nextLessonDates の次回日が3日後と一致する場合のみ、members の rsvp
- * ・新月会：meta/nextLessonDates の「新月会」の次回日が3日後と一致する場合のみ、members の rsvp（UG8JH2Q1F をメンション）
+ * ・新月会：shingetsuSessions に3日後の開催日があれば、members.shingetsuChoice（どの日に出席するか）で集計（UG8JH2Q1F をメンション）
  * 同じ開催日・クラスについて二重送信しないよう、meta/chadoParticipantNotice に送信済みを記録する。
  */
 export const notifyChadoParticipants = onSchedule(
@@ -2125,11 +2125,16 @@ export const notifyChadoParticipants = onSchedule(
       }
     }
 
-    // 3. 新月会（カレンダーの予定タイトルに「新月会」を含む次回日が3日後のとき）
-    const shingetsuNext = nextDates?.["新月会"]?.date;
-    if (shingetsuNext && eventDateKeyJST(shingetsuNext) === targetDateKey) {
+    // 3. 新月会（shingetsuSessions に3日後の開催日が登録されているとき）
+    // 会員は月2回の開催日から1日を選ぶ方式。members.shingetsuChoice["YYYY-MM"] が
+    // その日付なら出席、"欠席"なら欠席、同じ月の別の日なら「別日に出席」、未設定なら未回答。
+    const shingetsuSession = await db.doc(`shingetsuSessions/${targetDateKey}`).get();
+    if (shingetsuSession.exists) {
+      const place = (shingetsuSession.data()?.place as string | undefined) || "場所未定";
+      const monthKey = targetDateKey.slice(0, 7);
       const membersSnap = await db.collection("members").where("group", "==", "新月会").get();
       const attend: string[] = [];
+      const otherDay: string[] = [];
       const absent: string[] = [];
       const unanswered: string[] = [];
       for (const memberDoc of membersSnap.docs) {
@@ -2137,21 +2142,19 @@ export const notifyChadoParticipants = onSchedule(
         if (m.isTestAccount) continue;
         if ((m.status ?? "在籍") !== "在籍") continue;
         const name = (m.name as string | undefined) ?? "（氏名未登録）";
-        const rsvp = m.rsvp ?? "未回答";
-        if (rsvp === "出席") attend.push(name);
-        else if (rsvp === "欠席") absent.push(name);
+        const choice = (m.shingetsuChoice as Record<string, string> | undefined)?.[monthKey];
+        if (choice === targetDateKey) attend.push(name);
+        else if (choice === "欠席") absent.push(name);
+        else if (choice) otherDay.push(name);
         else unanswered.push(name);
       }
-      // 時刻指定の予定なら開始時刻（JST）も添える
-      const startTime = shingetsuNext.includes("T")
-        ? new Date(Date.parse(shingetsuNext) + 9 * 60 * 60 * 1000).toISOString().slice(11, 16) + "〜"
-        : "";
       const lines = [
         SHINGETSUKAI_NOTICE_MENTIONS.map((id) => `<@${id}>`).join(" "),
-        `【新月会】${dateLabel}${startTime ? " " + startTime : ""} お稽古の出欠（${CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE}日前のお知らせ）`,
+        `【新月会】${dateLabel}（${place}）お稽古の出欠（${CHADO_PARTICIPANT_NOTICE_DAYS_BEFORE}日前のお知らせ）`,
         `出席（${attend.length}名）：${joinNames(attend)}`,
-        `欠席（${absent.length}名）：${joinNames(absent)}`,
         `未回答（${unanswered.length}名）：${joinNames(unanswered)}`,
+        `今月は別日に出席（${otherDay.length}名）：${joinNames(otherDay)}`,
+        `今月は欠席（${absent.length}名）：${joinNames(absent)}`,
       ].filter(Boolean);
       messages.push({ key: `${targetDateKey}_新月会`, text: lines.join("\n") });
     }
