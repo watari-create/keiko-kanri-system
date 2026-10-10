@@ -1,18 +1,20 @@
 /* お稽古ノートページ専用スタイル。
    プロトタイプ（https://okeiko-note-saturday.netlify.app/）の見た目をそのまま移植したもの。
-   他ページのTailwindスタイルと衝突しないよう、すべて .keiko-note-page 配下に閉じ込めている。 */
+   他ページのTailwindスタイルと衝突しないよう、すべて .keiko-note-page 配下に閉じ込めている。
+   配色は固有の値を持たず、マイページ・入会フォームと同じ .member-theme（globals.css）の
+   カラートークンをそのまま使う（page.tsx側で .keiko-note-page と一緒に .member-theme を付与）。 */
 
 .keiko-note-page{
-  --paper: #EFEAD9;
-  --paper-raised: #F8F4E8;
-  --ink: #2C2A24;
-  --ink-soft: #6B6553;
-  --matcha: #4B5D3A;
-  --matcha-deep: #37452A;
-  --gold: #A8823C;
-  --seal: #A23B2E;
-  --rule: #D9D2BC;
-  --rule-soft: #E6E0CC;
+  --paper: rgb(var(--c-bg) / 1);
+  --paper-raised: rgb(var(--c-paper) / 1);
+  --ink: rgb(var(--c-ink) / 1);
+  --ink-soft: rgb(var(--c-muted) / 1);
+  --matcha: rgb(var(--c-matcha) / 1);
+  --matcha-deep: rgb(var(--c-matcha-deep) / 1);
+  --gold: rgb(var(--c-matcha-deep) / 1); /* アプリ側にゴールド系トークンがないため、強調色はmatcha-deepで代用 */
+  --seal: rgb(var(--c-hanko) / 1);
+  --rule: rgb(var(--c-line) / 1);
+  --rule-soft: rgb(var(--c-line) / 0.6);
 
   background:var(--paper);
   color:var(--ink);
@@ -133,7 +135,7 @@
   cursor:pointer;
   text-align:center;
 }
-.keiko-note-page .add-btn:hover{ background:#f2ead2; }
+.keiko-note-page .add-btn:hover{ background:rgb(var(--c-matcha-pale) / 1); }
 
 .keiko-note-page .entry{
   border-bottom:1px solid var(--rule-soft);
@@ -393,7 +395,7 @@
   flex-wrap:wrap;
 }
 .keiko-note-page .vgi-variants.inline a{ width:auto; }
-.keiko-note-page .vgi-variants a:hover{ background:#f2ead2; }
+.keiko-note-page .vgi-variants a:hover{ background:rgb(var(--c-matcha-pale) / 1); }
 .keiko-note-page .entry-actions{
   margin-top:16px;
   display:flex;
@@ -455,6 +457,21 @@
   resize:vertical;
 }
 .keiko-note-page .form-row textarea{ min-height:70px; line-height:1.7; }
+.keiko-note-page .date-input-row{ display:flex; gap:8px; align-items:center; }
+.keiko-note-page .date-input-row input[type="date"]{ width:auto; flex:1; }
+.keiko-note-page .date-shift-btn{
+  flex-shrink:0;
+  padding:9px 14px;
+  border:1px solid var(--rule);
+  border-radius:5px;
+  background:var(--paper-raised);
+  color:var(--ink-soft);
+  font-size:13px;
+  font-family:'Noto Sans JP', sans-serif;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.keiko-note-page .date-shift-btn:hover{ background:var(--paper); }
 .keiko-note-page .form-actions{
   display:flex;
   gap:10px;

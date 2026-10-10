@@ -1050,7 +1050,7 @@ export default function KeikoNotePage() {
     role === "member" ? "/mypage" : role === "staff" ? "/staff" : role === "honbu" ? "/admin" : null;
 
   return (
-    <div className="keiko-note-page">
+    <div className="keiko-note-page member-theme">
       <div className="wrap">
         {backHref && (
           <div style={{ marginBottom: 16 }}>
