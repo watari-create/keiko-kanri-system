@@ -49,3 +49,6 @@ next-env.d.ts
 setup.log
 setup_firebase.sh
 .fuse_hidden*
+
+# iCloud Drive同期対象外にするための実体フォルダ（node_modulesはここへのシンボリックリンク）
+*.nosync
