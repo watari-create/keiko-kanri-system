@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 色の定義（tailwind.config.ts から参照）。管理画面・講師画面は :root の色 */
+:root {
+  --c-bg: 247 245 238; /* #F7F5EE */
+  --c-paper: 255 255 255; /* #FFFFFF */
+  --c-line: 227 222 204; /* #E3DECC */
+  --c-ink: 43 43 38; /* #2B2B26 */
+  --c-muted: 138 131 112; /* #8A8370 */
+  --c-matcha: 92 107 63; /* #5C6B3F */
+  --c-matcha-deep: 69 81 46; /* #45512E */
+  --c-matcha-pale: 234 238 223; /* #EAEEDF */
+  --c-hanko: 172 68 51; /* #AC4433 */
+  --c-hanko-pale: 247 229 223; /* #F7E5DF */
+  --c-btn: 69 81 46; /* #45512E */
+  --c-btn-ink: 255 255 255; /* #FFFFFF */
+}
+
+/* 会員向け画面（マイページ・入会フォーム）：予約サイトと同じ配色 */
+.member-theme {
+  --c-ink: 62 58 52; /* #3E3A34 */
+  --c-muted: 125 115 102; /* #7D7366 */
+  --c-matcha: 107 123 105; /* #6B7B69 */
+  --c-matcha-deep: 74 90 73; /* #4A5A49 */
+  --c-matcha-pale: 232 239 221; /* #E8EFDD */
+  --c-btn: 215 227 196; /* #D7E3C4 */
+  --c-btn-ink: 74 90 73; /* #4A5A49 */
+}
+
 body {
   font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
 }

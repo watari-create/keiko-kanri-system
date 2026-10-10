@@ -120,7 +120,7 @@ export default function SaturdayReservation({
                       onClick={() => handle(s.id, slot, mine ? "cancel" : "book")}
                       className={`text-left rounded-md border px-3 py-2 text-xs disabled:opacity-50 ${
                         mine
-                          ? "bg-matcha-deep text-white border-matcha-deep"
+                          ? "bg-btn text-btn-ink border-matcha-deep"
                           : full
                           ? "bg-paper border-line text-muted"
                           : "border-matcha-deep text-matcha-deep"

@@ -101,7 +101,7 @@ export default function MemberLoginPage() {
           {error && <p className="text-hanko text-xs">{error}</p>}
           <button
             disabled={loading}
-            className="w-full bg-matcha-deep text-white rounded py-3 text-sm disabled:opacity-50"
+            className="w-full bg-btn text-btn-ink rounded py-3 text-sm disabled:opacity-50"
           >
             {loading ? "確認中…" : "ログイン"}
           </button>

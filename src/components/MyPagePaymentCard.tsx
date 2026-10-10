@@ -101,7 +101,7 @@ export default function MyPagePaymentCard() {
           </p>
           <Link
             href="/mypage/payment"
-            className="block text-center w-full bg-matcha-deep text-white rounded py-2.5 text-sm"
+            className="block text-center w-full bg-btn text-btn-ink rounded py-2.5 text-sm"
           >
             カード自動払いを申し込む
           </Link>

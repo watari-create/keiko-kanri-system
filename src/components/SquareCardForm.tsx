@@ -128,7 +128,7 @@ export default function SquareCardForm({
       {!ready && !error && <p className="text-xs text-muted mb-2">カード入力欄を読み込み中…</p>}
       {error && <p className="text-hanko text-xs mb-2 whitespace-pre-wrap">{error}</p>}
       <button
-        className="w-full bg-matcha-deep text-white rounded py-2.5 text-sm disabled:opacity-50"
+        className="w-full bg-btn text-btn-ink rounded py-2.5 text-sm disabled:opacity-50"
         onClick={submit}
         disabled={!ready || busy || disabled}
       >

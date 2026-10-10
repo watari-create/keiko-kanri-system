@@ -292,7 +292,7 @@ export default function MyPage() {
             <div className="border-t border-line mt-4 pt-3">
               <div className="text-xs text-muted mb-2">ご家族を切り替える</div>
               <div className="flex flex-wrap gap-2">
-                <span className="text-xs bg-matcha-deep text-white rounded-full px-3 py-1.5">
+                <span className="text-xs bg-btn text-btn-ink rounded-full px-3 py-1.5">
                   {member.name}様（表示中）
                 </span>
                 {familyMembers.map((f) => (
@@ -325,7 +325,7 @@ export default function MyPage() {
               role="tab"
               aria-selected={tab === key}
               className={`rounded-md py-2.5 text-sm font-bold transition ${
-                tab === key ? "bg-matcha-deep text-white" : "text-muted"
+                tab === key ? "bg-btn text-btn-ink" : "text-muted"
               }`}
               onClick={() => changeTab(key)}
             >
@@ -387,7 +387,7 @@ export default function MyPage() {
                 <button
                   className={`flex-1 rounded-md py-3 text-base font-bold transition ${
                     member.rsvp === "出席"
-                      ? "bg-matcha-deep text-white ring-2 ring-matcha-deep ring-offset-1"
+                      ? "bg-btn text-btn-ink ring-2 ring-matcha-deep ring-offset-1"
                       : "border-2 border-matcha text-matcha-deep bg-paper"
                   }`}
                   onClick={() => updateRsvp("出席")}
@@ -425,7 +425,7 @@ export default function MyPage() {
             </p>
             <a
               href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
-              className="block text-center w-full bg-matcha-deep text-white rounded-md py-3 text-base font-bold"
+              className="block text-center w-full bg-btn text-btn-ink rounded-md py-3 text-base font-bold"
             >
               LINEでログインして連携する
             </a>
@@ -448,7 +448,7 @@ export default function MyPage() {
               href="https://one-stream.io/login/WAFrlVXGvJeKz3PaYEwjUe1JjZJ3?redirectPath=%2Fuser%2FWAFrlVXGvJeKz3PaYEwjUe1JjZJ3&isInvoicePayment=false"
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-center text-sm font-bold bg-matcha-deep text-white rounded-md py-3"
+              className="block text-center text-sm font-bold bg-btn text-btn-ink rounded-md py-3"
             >
               家元動画を見る
             </a>

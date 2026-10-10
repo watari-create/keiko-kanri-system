@@ -120,7 +120,7 @@ export default function ShingetsuAttendanceCard({ memberId }: { memberId: string
               onClick={() => choose(s.date)}
               className={`w-full flex items-center justify-between rounded px-4 py-3 text-sm text-left transition ${
                 on
-                  ? "bg-matcha-deep text-white ring-2 ring-matcha-deep ring-offset-1"
+                  ? "bg-btn text-btn-ink ring-2 ring-matcha-deep ring-offset-1"
                   : "border border-line text-ink disabled:opacity-50"
               }`}
             >

@@ -497,7 +497,7 @@ export default function EnrollPage() {
 
             <button
               disabled={submitting || chadoClosed || chadoLoading || !settingsLoaded || noGroupOpen || requestedClosed || !group}
-              className="w-full bg-matcha-deep text-white rounded py-3 text-sm disabled:opacity-50"
+              className="w-full bg-btn text-btn-ink rounded py-3 text-sm disabled:opacity-50"
             >
               {submitting ? "送信中…" : "申し込む"}
             </button>
@@ -537,7 +537,7 @@ export default function EnrollPage() {
                     </p>
                     <a
                       href="/mypage/login?next=/mypage/payment"
-                      className="block text-center bg-matcha-deep text-white rounded py-3 text-sm font-semibold"
+                      className="block text-center bg-btn text-btn-ink rounded py-3 text-sm font-semibold"
                     >
                       ログインしてカードを登録する
                     </a>

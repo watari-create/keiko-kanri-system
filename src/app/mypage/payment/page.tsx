@@ -39,7 +39,7 @@ function Steps({ current }: { current: 1 | 2 | 3 }) {
           <li key={label} className="flex-1 flex flex-col items-center">
             <span
               className={`w-6 h-6 rounded-full flex items-center justify-center mb-1 ${
-                active ? "bg-matcha-deep text-white" : done ? "bg-matcha-pale text-matcha-deep" : "bg-bg border border-line text-muted"
+                active ? "bg-btn text-btn-ink" : done ? "bg-matcha-pale text-matcha-deep" : "bg-bg border border-line text-muted"
               }`}
             >
               {done ? "✓" : n}
@@ -282,7 +282,7 @@ export default function PaymentPage() {
                 <span>上記の内容に同意して、カード自動払いを申し込みます</span>
               </label>
               <button
-                className="w-full mt-4 bg-matcha-deep text-white rounded py-2.5 text-sm disabled:opacity-50"
+                className="w-full mt-4 bg-btn text-btn-ink rounded py-2.5 text-sm disabled:opacity-50"
                 disabled={!agreed}
                 onClick={() => setStep("card")}
               >
