@@ -36,7 +36,7 @@
 .keiko-note-page .eyebrow{
   font-size:12px;
   letter-spacing:0.2em;
-  color:var(--matcha);
+  color:var(--matcha-deep);
   margin:0 0 6px;
   font-weight:700;
 }
@@ -79,12 +79,12 @@
   margin-top:2px;
 }
 .keiko-note-page .class-tab.active{
-  background:var(--matcha);
-  border-color:var(--matcha);
+  background:rgb(var(--c-btn) / 1);
+  border-color:rgb(var(--c-btn) / 1);
 }
 .keiko-note-page .class-tab.active .ct-main,
 .keiko-note-page .class-tab.active .ct-sub{
-  color:#fff;
+  color:rgb(var(--c-btn-ink) / 1);
 }
 .keiko-note-page .mode-row{
   display:flex;
@@ -209,7 +209,7 @@
 }
 .keiko-note-page .field-label{
   font-size:11px;
-  color:var(--matcha);
+  color:var(--matcha-deep);
   font-weight:700;
   letter-spacing:0.05em;
   margin:14px 0 4px;
@@ -295,7 +295,7 @@
 .keiko-note-page .block:last-child{ margin-bottom:0; }
 .keiko-note-page .block-title{
   font-size:11px;
-  color:var(--matcha);
+  color:var(--matcha-deep);
   font-weight:700;
   letter-spacing:0.05em;
   margin:0 0 8px;
@@ -488,8 +488,8 @@
   border:none;
 }
 .keiko-note-page .btn-primary{
-  background:var(--matcha);
-  color:#fff;
+  background:rgb(var(--c-btn) / 1);
+  color:rgb(var(--c-btn-ink) / 1);
 }
 .keiko-note-page .btn-primary:hover{ background:var(--matcha-deep); }
 .keiko-note-page .btn-secondary{
