@@ -163,13 +163,20 @@ export default function StaffPage() {
     setNewNoteBody("");
     const q = query(
       collection(db, "chadoStudentNotes"),
-      where("memberId", "==", selectedMember.id),
-      orderBy("date", "desc"),
-      orderBy("createdAt", "desc")
+      where("memberId", "==", selectedMember.id)
     );
-    return onSnapshot(q, (snap) => {
-      setStudentNotes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoStudentNote)));
-    });
+    // 並べ替えは画面側で行う（orderByを付けると複合インデックスが必要になり、未作成だと一覧が読めないため）
+    return onSnapshot(
+      q,
+      (snap) => {
+        const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ChadoStudentNote));
+        notes.sort((a, b) =>
+          a.date !== b.date ? b.date.localeCompare(a.date) : (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
+        );
+        setStudentNotes(notes);
+      },
+      (err) => console.error("申し送りの読み込みに失敗しました", err)
+    );
   }, [selectedMember, group]);
 
   async function addStudentNote() {
@@ -185,6 +192,9 @@ export default function StaffPage() {
         createdAt: new Date().toISOString(),
       });
       setNewNoteBody("");
+    } catch (err) {
+      console.error(err);
+      alert("申し送りを保存できませんでした。時間をおいて再度お試しください。");
     } finally {
       setSavingNote(false);
     }
@@ -675,7 +685,7 @@ export default function StaffPage() {
           onClick={() => setSelectedMember(null)}
         >
           <div
-            className="bg-paper border border-line rounded-md p-6 max-w-md w-full"
+            className="bg-paper border border-line rounded-md p-6 max-w-md w-full max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start mb-4">
