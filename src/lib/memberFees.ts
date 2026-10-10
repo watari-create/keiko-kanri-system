@@ -23,6 +23,10 @@ export function memberFee(
   const unit: "月" | "回" = perSession ? "回" : "月";
   const baseLabel = perSession ? "都度払い" : "月謝";
 
+  // 0円＝お月謝なし（カード自動払いの登録も不要）
+  if (m.monthlyFee === 0) {
+    return { amount: 0, unit, label: perSession ? "都度払いなし（個別設定）" : "お月謝なし（個別設定）", custom: true };
+  }
   if (typeof m.monthlyFee === "number") {
     return { amount: m.monthlyFee, unit, label: `${baseLabel}（個別設定）`, custom: true };
   }

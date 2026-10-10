@@ -471,7 +471,7 @@ export default function MyPage() {
         {tab === "procedures" && (
           <>
         {/* ⑤ お支払い */}
-        {isHonbuKeikoGroup(member.group) && <MyPagePaymentCard />}
+        {isHonbuKeikoGroup(member.group) && member.monthlyFee !== 0 && <MyPagePaymentCard />}
 
         {/* ⑥ 連絡先 */}
         <div className="bg-paper border border-line rounded-lg p-5 mb-4">

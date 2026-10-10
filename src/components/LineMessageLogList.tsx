@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { LineMessageLog } from "@/types";
 
 type LogGroup = {
@@ -53,14 +54,20 @@ function recipientsSummary(names: string[]): string {
   return `${names[0]} ほか${names.length - 1}名`;
 }
 
-export default function LineMessageLogList({ logs }: { logs: LineMessageLog[] }) {
+// initialCount：最初に表示する件数（未指定なら全件）。残りは下の「▼」で開いて表示する
+export default function LineMessageLogList({ logs, initialCount }: { logs: LineMessageLog[]; initialCount?: number }) {
+  const [expanded, setExpanded] = useState(false);
   if (logs.length === 0) {
     return <p className="text-xs text-muted">まだ送信履歴がありません。</p>;
   }
   const groups = groupLogs(logs);
+  const limit = initialCount ?? groups.length;
+  const shown = expanded ? groups : groups.slice(0, limit);
+  const hiddenCount = groups.length - limit;
   return (
+    <div>
     <ul className="divide-y divide-line border border-line rounded">
-      {groups.map((g) => (
+      {shown.map((g) => (
         <li key={g.key}>
           <details className="group">
             <summary className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-sm cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-black/5">
@@ -89,5 +96,17 @@ export default function LineMessageLogList({ logs }: { logs: LineMessageLog[] })
         </li>
       ))}
     </ul>
+    {hiddenCount > 0 && (
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full mt-1 py-1.5 text-xs text-muted hover:bg-black/5 rounded flex items-center justify-center gap-1"
+        aria-expanded={expanded}
+      >
+        <span className={`inline-block transition-transform ${expanded ? "rotate-180" : ""}`}>▼</span>
+        {expanded ? "閉じる" : `過去の履歴をもっと見る（${hiddenCount}件）`}
+      </button>
+    )}
+    </div>
   );
 }

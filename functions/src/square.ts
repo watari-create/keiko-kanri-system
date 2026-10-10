@@ -266,6 +266,8 @@ function eligibility(m: MemberDoc): { ok: boolean; reason?: string } {
   if (!m.group || !isCardAutoPayGroup(m.group)) return { ok: false, reason: "対象外の会" };
   if (m.status !== "在籍") return { ok: false, reason: "在籍中の会員のみ" };
   if (m.paymentMethod === "都度払い") return { ok: false, reason: "都度払いの会員" };
+  // 個別のお月謝が0円＝お月謝なしの会員（カード登録不要）
+  if (m.monthlyFee === 0) return { ok: false, reason: "お月謝なし" };
   if (m.squareBillingAllowed === false) return { ok: false, reason: "本部の設定で対象外" };
   if (m.squareBillingAllowed === true) return { ok: true };
   // テスト環境（sandbox）の間は、管理画面で「マイページに表示する」にした会員（テスト用）だけに表示する
@@ -1446,7 +1448,7 @@ async function resumeSquareBillingForReturn(memberId: string): Promise<{ lines: 
   if (!stopped) return { lines: [], needsCheck: false };
 
   // 2. 停止済み → 登録済みのカードで契約し直す
-  if (m.squareBillingAllowed === false || m.paymentMethod === "都度払い" || !isCardAutoPayGroup(m.group)) {
+  if (m.squareBillingAllowed === false || m.monthlyFee === 0 || m.paymentMethod === "都度払い" || !isCardAutoPayGroup(m.group)) {
     return { lines: ["カード自動払いの対象外の設定のため、再開していません"], needsCheck: false };
   }
   const fee = await monthlyFeeFor(m);

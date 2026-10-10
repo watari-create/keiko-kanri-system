@@ -1746,9 +1746,9 @@ export default function AdminPage() {
           <h2 className="font-bold mb-1">公式LINE送信履歴</h2>
           <p className="text-xs text-muted mb-3">
             自動リマインド・一斉送信で実際に送った内容です（LINE公式アカウントマネージャーの
-            チャット画面には表示されないため、こちらで確認してください）。直近30件を表示しています。行をクリックすると全文を表示します。
+            チャット画面には表示されないため、こちらで確認してください）。最新の3件を表示し、下の「▼」で直近30件まで表示します。行をクリックすると全文を表示します。
           </p>
-          <LineMessageLogList logs={lineMessageLogs} />
+          <LineMessageLogList logs={lineMessageLogs} initialCount={3} />
         </section>
       )}
 
@@ -2537,7 +2537,7 @@ export default function AdminPage() {
                   }
                 />
                 <p className="text-[11px] text-muted mt-1">
-                  空欄なら会の標準額を使います。ご家族割引など標準額と異なる場合のみ入力してください（都度払いは1回あたり）。
+                  空欄なら会の標準額を使います。ご家族割引など標準額と異なる場合のみ入力してください（都度払いは1回あたり）。0にすると「お月謝なし」になり、カード登録は不要（マイページのお支払い欄・申込みボタンを出さず、会員名簿のカード自動払いは「対象外」）。
                 </p>
               </Field>
               {(draft.paymentMethod ?? selectedMember.paymentMethod) === "都度払い" && (
