@@ -87,7 +87,8 @@ export default function MyPage() {
         setPhone(data.phone ?? "");
         setAddress(data.address ?? "");
         setAffiliation(data.affiliation ?? "");
-        setLeaveType(data.status === "休会" ? "復会" : "休会");
+        // 茶道教室は休会なし（退会のみ）
+        setLeaveType(data.status === "休会" ? "復会" : data.group === "茶道教室" ? "退会" : "休会");
       }
     });
   }, [memberId]);
@@ -521,7 +522,11 @@ export default function MyPage() {
         {/* ⑦ 休会・退会 */}
         <div className="bg-paper border border-line rounded-lg p-5">
           <h2 className={H2}>
-            {member.status === "休会" ? "復会・退会のお申請" : "休会・退会のお申請"}
+            {member.status === "休会"
+              ? "復会・退会のお申請"
+              : member.group === "茶道教室"
+              ? "退会のお申請"
+              : "休会・退会のお申請"}
           </h2>
           <div>
             <select
@@ -536,7 +541,8 @@ export default function MyPage() {
                 </>
               ) : (
                 <>
-                  <option>休会</option>
+                  {/* 茶道教室は休会なし（退会のみ） */}
+                  {member.group !== "茶道教室" && <option>休会</option>}
                   <option>退会</option>
                 </>
               )}

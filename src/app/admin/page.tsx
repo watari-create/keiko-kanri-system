@@ -1669,7 +1669,8 @@ export default function AdminPage() {
                       }
                     >
                       <option>在籍</option>
-                      <option>休会</option>
+                      {/* 茶道教室は休会なし（すでに休会の会員だけ表示） */}
+                      {(m.group !== "茶道教室" || m.status === "休会") && <option>休会</option>}
                       <option>退会</option>
                     </select>
                     {m.status === "退会" && (
@@ -2515,7 +2516,8 @@ export default function AdminPage() {
                   }
                 >
                   <option>在籍</option>
-                  <option>休会</option>
+                  {/* 茶道教室は休会なし（すでに休会の会員だけ表示） */}
+                  {(selectedMember.group !== "茶道教室" || selectedMember.status === "休会") && <option>休会</option>}
                   <option>退会</option>
                 </select>
               </Field>
