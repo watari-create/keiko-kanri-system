@@ -92,6 +92,15 @@ function areaGroups(a: string): string[] | undefined {
   return undefined;
 }
 
+// エリアを開いたときに最初に表示する会（本部稽古は茶道教室。無い場合は並び順の先頭）
+const AREA_DEFAULT_GROUP: Record<string, string> = { 本部稽古: "茶道教室" };
+function defaultGroupFor(a: string): string | undefined {
+  const gs = areaGroups(a);
+  if (!gs?.length) return undefined;
+  const pref = AREA_DEFAULT_GROUP[a];
+  return pref && gs.includes(pref) ? pref : gs[0];
+}
+
 // 雪月花は雪組・月組・花組の3つの実際のグループを束ねたもの。名簿はこの3区分で表示する。
 const SOHEN_SUBGROUPS = ["雪組", "月組", "花組"];
 
@@ -176,7 +185,7 @@ export default function AdminPage() {
 
   const [area, setArea] = useState<Area>("本部稽古");
   const groupSettingsList = useGroupSettings(); // 会の設定が変わったら再描画する
-  const [group, setGroup] = useState(areaGroups("本部稽古")?.[0] ?? "名月会");
+  const [group, setGroup] = useState(defaultGroupFor("本部稽古") ?? "茶道教室");
 
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
@@ -381,8 +390,8 @@ export default function AdminPage() {
   function switchArea(a: Area) {
     setArea(a);
     setShowNotifications(false);
-    const gs = areaGroups(a);
-    if (gs?.length) setGroup(gs[0]);
+    const g = defaultGroupFor(a);
+    if (g) setGroup(g);
   }
 
   // 会員一覧をリアルタイム購読
