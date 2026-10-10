@@ -323,6 +323,11 @@ export default function DateAttendanceGrid({
                               </th>
                             );
                           })}
+                          {group === CHADO && (
+                            <th className="px-2 text-center font-medium whitespace-nowrap text-xs" title="今月の出席回数／月の予約可能回数（月1回・月2回）と振替チケットの残り">
+                              今月
+                            </th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
@@ -379,6 +384,24 @@ export default function DateAttendanceGrid({
                                   </td>
                                 );
                               })}
+                              {group === CHADO && (() => {
+                                const marks: (Mark | "予約")[] = sat
+                                  ? Object.entries(saturdayMarks[m.id] ?? {}).filter(([d]) => d.startsWith(month)).map(([, v]) => v)
+                                  : Object.entries(m.attendanceByDate ?? {}).filter(([d]) => d.startsWith(month)).map(([, v]) => v);
+                                const attended = marks.filter((v) => v === "出席").length;
+                                const absent = marks.filter((v) => v === "欠席").length;
+                                const quota = m.chadoMonthlyQuota ?? 1;
+                                const tickets = m.chadoMakeupTickets ?? 0;
+                                return (
+                                  <td className="px-2 h-9 text-center border border-line text-xs whitespace-nowrap">
+                                    <span className={attended >= quota ? "text-matcha-deep font-bold" : absent > 0 ? "text-hanko font-bold" : "text-ink"}>
+                                      出席 {attended}/{quota}回
+                                    </span>
+                                    {absent > 0 && <span className="block text-[10px] text-hanko">欠席 {absent}回</span>}
+                                    {tickets > 0 && <span className="block text-[10px] text-muted">振替 {tickets}枚</span>}
+                                  </td>
+                                );
+                              })()}
                             </tr>
                           );
                         })}
@@ -397,6 +420,7 @@ export default function DateAttendanceGrid({
             <span>－ 未記録</span>
             <span>(○)(×) マイページの回答（未確定）</span>
             <span>網掛け：その方のクラスのお稽古日ではない日</span>
+            {group === CHADO && <span>今月：出席回数／月の回数（月1回・月2回）、欠席回数、振替チケットの残り</span>}
           </div>
           {hasSaturday && (
             <p className="mt-1 text-xs text-muted">
