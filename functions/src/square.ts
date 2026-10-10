@@ -38,7 +38,8 @@ const squareBillingFrom = defineString("SQUARE_BILLING_FROM", { default: "2026-1
 const squareMigrationMonth = defineString("SQUARE_MIGRATION_MONTH", { default: "2026-12" });
 // 引き落とし失敗などの通知先（既存の本部稽古boチャンネル）
 const slackBotTokenForSquare = defineSecret("SLACK_BOT_TOKEN");
-const slackHqChannelForSquare = defineString("SLACK_HQ_CHANNEL");
+// お支払い関係の通知は「請求書-経理」チャンネル（許状の請求書発行依頼と同じ SLACK_LICENSE_CHANNEL）に送る
+const slackKeiriChannelForSquare = defineString("SLACK_LICENSE_CHANNEL");
 
 const SQUARE_VERSION = "2025-01-23";
 // 毎月のお引き落とし日
@@ -409,14 +410,15 @@ async function notifySlack(text: string, thread?: { channel?: string; ts?: strin
   }
   try {
     const token = slackBotTokenForSquare.value();
-    const channel = slackHqChannelForSquare.value();
+    const channel = slackKeiriChannelForSquare.value();
     if (!token || !channel) return;
+    // スレッド返信は、元のメッセージが同じ「請求書-経理」チャンネルにある場合のみ。
+    // 本部稽古boの申請スレッドなどへの返信は、請求書-経理に単独のメッセージとして送る。
+    const inThread = thread?.ts && (!thread.channel || thread.channel === channel);
     await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(
-        thread?.ts ? { channel: thread.channel || channel, thread_ts: thread.ts, text } : { channel, text }
-      ),
+      body: JSON.stringify(inThread ? { channel, thread_ts: thread!.ts, text } : { channel, text }),
     });
   } catch (err) {
     console.error("Slack通知に失敗しました", err);
