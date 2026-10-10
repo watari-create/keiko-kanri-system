@@ -387,8 +387,8 @@ export default function MyPage() {
                 <button
                   className={`flex-1 rounded-md py-3 text-base font-bold transition ${
                     member.rsvp === "出席"
-                      ? "bg-btn text-btn-ink ring-2 ring-matcha-deep ring-offset-1"
-                      : "border-2 border-matcha text-matcha-deep bg-paper"
+                      ? "bg-btn text-btn-ink ring-1 ring-matcha"
+                      : "border border-matcha text-matcha-deep bg-paper"
                   }`}
                   onClick={() => updateRsvp("出席")}
                 >
@@ -397,8 +397,8 @@ export default function MyPage() {
                 <button
                   className={`flex-1 rounded-md py-3 text-base font-bold transition ${
                     member.rsvp === "欠席"
-                      ? "bg-hanko text-white ring-2 ring-hanko ring-offset-1"
-                      : "border-2 border-hanko/60 text-hanko bg-paper"
+                      ? "bg-hanko text-white"
+                      : "border border-hanko/40 text-hanko bg-paper"
                   }`}
                   onClick={() => updateRsvp("欠席")}
                 >
