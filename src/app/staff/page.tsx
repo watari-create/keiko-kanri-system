@@ -592,8 +592,8 @@ export default function StaffPage() {
         {group === SHINGETSU_GROUP ? (
           // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
           <ShingetsuAttendanceGrid members={members} editable canEditSessions />
-        ) : isHonbuKeikoGroup(group) ? (
-          // 本部稽古：会員×お稽古日（日にち）の出席簿。「月ごと」に切り替えるとこれまでの月単位の記録を表示
+        ) : group === "茶道教室" ? (
+          // 茶道教室：会員×お稽古日（日にち）の出席簿（名月会・G1などは月ごとのまま）。「月ごと」に切り替えるとこれまでの月単位の記録を表示
           <DateAttendanceGrid
             group={group}
             sections={[{ label: null, members }]}

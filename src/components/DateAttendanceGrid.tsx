@@ -1,7 +1,7 @@
 "use client";
 
-// 出席簿（日にち表示）：会員×お稽古日のグリッド。本部稽古の会（名月会・茶道教室・G1など）で使う。
-// 新月会は ShingetsuAttendanceGrid、宗徧流稽古・UCIは月ごとの AttendanceGrid のまま。
+// 出席簿（日にち表示）：会員×お稽古日のグリッド。茶道教室で使う（どの会でも使える作り）。
+// 新月会は ShingetsuAttendanceGrid、名月会・G1・宗徧流稽古・UCIは月ごとの AttendanceGrid のまま。
 //
 // 列（お稽古日）は次を合わせたもの：
 //   ・本部の共有Googleカレンダーのお稽古日（Cloud Functionsが meta/lessonDateLog に蓄積。過ぎた日も残る）
