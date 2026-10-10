@@ -92,7 +92,7 @@ service cloud.firestore {
       // 世話人は自分の担当する会の会員のステータス・出席・支払い方法のみ編集可
       allow update: if isSewaninFor(resource.data.group)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'attendance', 'paymentStatus', 'paymentMethod', 'shingetsuChoice']);
+             .hasOnly(['status', 'attendance', 'attendanceByDate', 'paymentStatus', 'paymentMethod', 'shingetsuChoice']);
 
       // 本人は連絡先とRSVP・出欠のみ編集可（許状段階やステータスは変更不可）
       // 出欠は、マイページの「出欠登録」ボタンが今月分の出席簿セルを直接更新するために必要。
@@ -103,7 +103,7 @@ service cloud.firestore {
       // 講師は自分の担当する会の会員の出席のみ編集可
       allow update: if isTeacherFor(resource.data.group)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['attendance', 'shingetsuChoice']);
+             .hasOnly(['attendance', 'attendanceByDate', 'shingetsuChoice']);
 
       // 公開の入会フォーム（/enroll、未ログイン）からの新規作成のみ許可。
       // 許可される値をかなり狭く固定することで、なりすまし作成や項目の不正混入を防ぐ。
@@ -291,6 +291,14 @@ service cloud.firestore {
     match /chadoSaturdaySessions/{sessionId} {
       allow read: if isKnownUser();
       allow write: if isHonbu() || isStaffFor('茶道教室');
+    }
+
+    // ---- lessonExtraDates（出席簿（日にち表示）に手で追加した開催日。doc id = "<会のキー>_<YYYY-MM-DD>"） ----
+    // カレンダーにないお稽古日を本部・その会の世話人・講師が追加する。カレンダーのお稽古日は meta/lessonDateLog（Cloud Functions）
+    match /lessonExtraDates/{dateId} {
+      allow read: if isKnownUser();
+      allow create, update: if isHonbu() || isStaffFor(request.resource.data.group);
+      allow delete: if isHonbu() || isStaffFor(resource.data.group);
     }
 
     // ---- shingetsuSessions（新月会：開催日と場所。会員は月2回のうち1日を選んで出席する） ----

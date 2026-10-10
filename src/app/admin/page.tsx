@@ -30,6 +30,8 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import { isHonbuKeikoGroup } from "@/lib/areas";
+import DateAttendanceGrid from "@/components/DateAttendanceGrid";
 import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
 import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MakeupTicketList from "@/components/MakeupTicketList";
@@ -1791,6 +1793,21 @@ export default function AdminPage() {
               {group === SHINGETSU_GROUP ? (
                 // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
                 <ShingetsuAttendanceGrid members={members} editable canEditSessions />
+              ) : isHonbuKeikoGroup(group) ? (
+                // 本部稽古：会員×お稽古日（日にち）の出席簿。「月ごと」に切り替えるとこれまでの月単位の記録を表示
+                <DateAttendanceGrid
+                  group={group}
+                  sections={memberSections}
+                  editable
+                  monthlyView={
+                    <AttendanceGrid
+                      sections={memberSections}
+                      editable
+                      isRowEditable={(m) => !isChadoSaturdayMember(m)}
+                      onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
+                    />
+                  }
+                />
               ) : (
               <AttendanceGrid
                 sections={memberSections}

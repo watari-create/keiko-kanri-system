@@ -30,6 +30,7 @@ import { LICENSE_FEES, formatYearMonth } from "@/lib/licenseFees";
 import { isHonbuKeikoGroup, isUciGroup, groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import { useGroupSettings } from "@/lib/groupSettings";
 import AttendanceGrid from "@/components/AttendanceGrid";
+import DateAttendanceGrid from "@/components/DateAttendanceGrid";
 import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
 import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MakeupTicketList from "@/components/MakeupTicketList";
@@ -591,6 +592,21 @@ export default function StaffPage() {
         {group === SHINGETSU_GROUP ? (
           // 新月会：会員×開催日（日付・場所）の出席簿。マイページの回答と同じデータを編集する
           <ShingetsuAttendanceGrid members={members} editable canEditSessions />
+        ) : isHonbuKeikoGroup(group) ? (
+          // 本部稽古：会員×お稽古日（日にち）の出席簿。「月ごと」に切り替えるとこれまでの月単位の記録を表示
+          <DateAttendanceGrid
+            group={group}
+            sections={[{ label: null, members }]}
+            editable
+            monthlyView={
+              <AttendanceGrid
+                members={members}
+                editable
+                isRowEditable={(m) => !isChadoSaturdayMember(m)}
+                onCellChange={(memberId, monthKey, value) => setAttendance(memberId, monthKey, value)}
+              />
+            }
+          />
         ) : (
         <AttendanceGrid
           members={members}

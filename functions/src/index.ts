@@ -1383,6 +1383,9 @@ function diffDateKeys(a: string, b: string): number {
 interface LessonSchedule {
   dates: Record<string, NextLessonInfo>; // 会（茶道教室はクラス）ごとの次回のお稽古
   upcoming: Record<string, NextLessonInfo[]>; // 会ごとの今後のお稽古（管理画面の日程・場所変更用）
+  // 出席簿（日にち表示）の列にするお稽古日。過去60日〜今後180日の予定を、会（茶道教室はクラス）ごと・予定IDごとに持つ。
+  // meta/lessonDateLog にマージで蓄積し、過ぎた日も出席簿に残す（予定IDごとなので日程変更すると上書きされる）
+  log: Record<string, Record<string, { date: string; place?: string }>>;
 }
 
 /**
@@ -1433,7 +1436,12 @@ async function fetchLessonSchedule(): Promise<LessonSchedule> {
 
   const today = todayKeyJST();
   const all: Record<string, NextLessonInfo[]> = {};
+  const log: LessonSchedule["log"] = {};
   const push = (key: string, info: NextLessonInfo) => {
+    const d = info.date.slice(0, 10);
+    const logId = info.eventId ?? d;
+    (log[key] ??= {})[logId] = { date: d, ...(info.place ? { place: info.place } : {}) };
+    if (d < today) return; // 「次回のお稽古」は今日以降のみ
     (all[key] ??= []).push(info);
   };
   for (const ev of items) {
@@ -1442,7 +1450,6 @@ async function fetchLessonSchedule(): Promise<LessonSchedule> {
     if (!rawDate) continue;
     const change = ev.id ? changes.get(ev.id) : undefined;
     const date = change ? replaceDatePart(rawDate, change.date) : rawDate;
-    if (date.slice(0, 10) < today) continue;
     const place = change ? change.place : (ev.location ?? "").trim();
     const info: NextLessonInfo = {
       date,
@@ -1475,14 +1482,16 @@ async function fetchLessonSchedule(): Promise<LessonSchedule> {
     dates[key] = list[0];
     upcoming[key] = list.slice(0, 10);
   }
-  return { dates, upcoming };
+  return { dates, upcoming, log };
 }
 
 /** カレンダーを読み直して meta/nextLessonDates を更新する */
 async function refreshNextLessonDates(): Promise<LessonSchedule> {
-  const schedule = await fetchLessonSchedule();
+  const { log, ...schedule } = await fetchLessonSchedule();
   await db.doc("meta/nextLessonDates").set({ ...schedule, updatedAt: new Date().toISOString() });
-  return schedule;
+  // 出席簿（日にち表示）用：過ぎたお稽古日も残るようにマージで蓄積する
+  await db.doc("meta/lessonDateLog").set({ ...log, updatedAt: new Date().toISOString() }, { merge: true });
+  return { ...schedule, log };
 }
 
 // 茶道教室のうち、出欠ボタンで管理する（次回のお稽古日を表示する）曜日クラス

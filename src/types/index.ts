@@ -92,6 +92,9 @@ export interface Member {
   lastAttended?: string;
   // 出席簿：会計年度の月（例："2026-04"）ごとの出欠記録
   attendance?: Record<string, "出席" | "欠席">;
+  // 出席簿（日にち表示）：お稽古日（"YYYY-MM-DD"）ごとの出欠。本部稽古の会で使う（src/components/DateAttendanceGrid.tsx）。
+  // 記録すると、その月の attendance（月の出欠）も自動で更新する（出席が1回でもあれば出席、出席なしで欠席があれば欠席）
+  attendanceByDate?: Record<string, "出席" | "欠席">;
   // 新月会のみ：月（"YYYY-MM"）ごとに、出席する開催日（"YYYY-MM-DD"）または "欠席"（src/lib/shingetsu.ts）
   shingetsuChoice?: Record<string, string>;
   // 入会金の入金状況（名月会のみ対象、一律¥33,000。経理タブで管理）
