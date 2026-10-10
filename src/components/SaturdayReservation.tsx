@@ -74,13 +74,16 @@ export default function SaturdayReservation({
   return (
     <div className="bg-paper border border-line rounded-lg p-5 mb-4">
       <h2 className="text-base font-bold text-ink mb-3 pl-2 border-l-4 border-matcha">土曜日クラスの予約</h2>
-      <div className="flex items-center justify-between bg-matcha-pale rounded-md px-4 py-3 mb-2">
-        <span className="text-sm text-matcha-deep">振替チケット</span>
-        <span className="text-matcha-deep">
-          <span className="text-2xl font-bold">{tickets}</span>
-          <span className="text-sm ml-1">枚</span>
-        </span>
-      </div>
+      {/* 振替チケットは1枚以上持っている人だけに表示する */}
+      {tickets > 0 && (
+        <div className="flex items-center justify-between bg-matcha-pale rounded-md px-4 py-3 mb-2">
+          <span className="text-sm text-matcha-deep">振替チケット</span>
+          <span className="text-matcha-deep">
+            <span className="text-2xl font-bold">{tickets}</span>
+            <span className="text-sm ml-1">枚</span>
+          </span>
+        </div>
+      )}
       <p className="text-xs text-muted mb-3">
         予約して欠席された回数分の振替チケットが付与されます（予約しなかった回は対象外です）。月{quota}回の予約枠を使い切った後も、チケット1枚につき1回追加で予約できます。同じ日の午前と午後を両方予約することもできます（それぞれ1回と数えます）。
       </p>
