@@ -43,6 +43,8 @@ export default function MyPage() {
   // 都度払い：作成したSquareの支払いページ（タブが開けなかったときのボタン用）と処理中フラグ
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  // 画面のタブ：お稽古（出欠・ノート・動画）／各種お手続き（連絡先・お月謝・休会退会）。URLの ?tab=procedures で直接開ける
+  const [tab, setTab] = useState<"keiko" | "procedures">("keiko");
 
   useEffect(() => {
     if (!loading && role !== "member") router.replace("/mypage/login");
@@ -50,6 +52,7 @@ export default function MyPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === "procedures") setTab("procedures");
     const sessionPaid = params.get("sessionPaid");
     if (sessionPaid) {
       setSavedMsg("お支払いありがとうございました。反映まで少し時間がかかる場合があります。");
@@ -237,6 +240,13 @@ export default function MyPage() {
     setSavedMsg(`${leaveType}の申請を受け付けました。本部の承認をお待ちください。`);
   }
 
+  function changeTab(next: "keiko" | "procedures") {
+    setTab(next);
+    const url = next === "procedures" ? `${window.location.pathname}?tab=procedures` : window.location.pathname;
+    window.history.replaceState({}, "", url);
+    window.scrollTo({ top: 0 });
+  }
+
   async function logout() {
     await auth.signOut();
     router.push("/mypage/login");
@@ -244,253 +254,330 @@ export default function MyPage() {
 
   if (loading || !member) return <div className="p-8 text-muted">確認中…</div>;
 
+  const showLineCard = member.group === "茶道教室" && !member.lineUserId;
+  const isError = !!savedMsg && /失敗|できません|ご入力ください/.test(savedMsg);
+
   return (
-    <div className="max-w-md mx-auto p-6">
-      <button className="text-xs text-muted underline mb-4" onClick={logout}>
-        ログアウト
-      </button>
-
-      {familyMembers.length > 0 && (
-        <div className="bg-paper border border-line rounded-md p-3 mb-4">
-          <div className="text-xs text-muted mb-2">ご家族を切り替える</div>
-          <div className="flex flex-wrap gap-2">
-            <span className="text-xs bg-matcha-deep text-white rounded-full px-3 py-1">
-              {member.name}様（表示中）
-            </span>
-            {familyMembers.map((f) => (
-              <button
-                key={f.id}
-                className="text-xs border border-line text-matcha-deep rounded-full px-3 py-1 disabled:opacity-50"
-                onClick={() => switchToFamilyMember(f.id)}
-                disabled={switchingFamily}
-              >
-                {f.name}様（{groupDisplayName(f.group)}）
-              </button>
-            ))}
+    <div className="min-h-screen bg-bg">
+      <div className="max-w-md mx-auto px-4 py-6 pb-28">
+        {/* ① お名前・会員情報 */}
+        <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs text-muted">{groupDisplayName(member.group)}</div>
+              <div className="text-xl font-bold text-matcha-deep mt-0.5">{member.name} 様</div>
+            </div>
+            <button
+              className="shrink-0 text-xs text-muted border border-line rounded-full px-3 py-1"
+              onClick={logout}
+            >
+              ログアウト
+            </button>
           </div>
-          {switchingFamily && <p className="text-xs text-muted mt-2">切り替え中…</p>}
-          {switchError && <p className="text-hanko text-xs mt-2">{switchError}</p>}
-        </div>
-      )}
+          <dl className="grid grid-cols-2 gap-2 mt-4">
+            <div className="bg-bg rounded-md px-3 py-2">
+              <dt className="text-xs text-muted">会員番号</dt>
+              <dd className="text-sm font-bold text-ink mt-0.5">{member.id}</dd>
+            </div>
+            <div className="bg-bg rounded-md px-3 py-2">
+              <dt className="text-xs text-muted">許状段階</dt>
+              <dd className="text-sm font-bold text-ink mt-0.5">{member.license ?? "—"}</dd>
+            </div>
+          </dl>
+          {member.group === "茶道教室" && member.lineUserId && (
+            <p className="text-xs text-matcha-deep mt-3">✓ 公式LINE連携済み（お稽古前日にリマインドが届きます）</p>
+          )}
 
-      {member.group === "茶道教室" && (
-        <Link
-          href="/keiko-note"
-          className="block text-center text-sm bg-matcha-pale text-matcha-deep rounded-md py-2.5 mb-4"
-        >
-          お稽古ノートを見る
-        </Link>
-      )}
-
-      <div className="bg-paper border border-line rounded-md p-6 mb-4 text-center">
-        <div className="text-lg font-bold text-matcha-deep">{member.name} 様</div>
-        <div className="text-xs text-muted mt-1">{groupDisplayName(member.group)}</div>
-        <div className="mt-4 text-sm space-y-1 text-left">
-          <div className="flex justify-between border-b border-line py-1">
-            <span className="text-muted">会員番号</span>
-            <span>{member.id}</span>
-          </div>
-          <div className="flex justify-between border-b border-line py-1">
-            <span className="text-muted">許状段階</span>
-            <span>{member.license ?? "—"}</span>
-          </div>
-        </div>
-      </div>
-
-      {member.group === "茶道教室" && (
-        <div className="bg-paper border border-line rounded-md p-6 mb-4">
-          <h2 className="text-sm text-muted mb-3">公式LINEとの連携</h2>
-          {member.lineUserId ? (
-            <p className="text-sm text-matcha-deep">
-              連携済みです。お稽古前日にリマインドが届きます。
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-muted mb-3">
-                連携すると、お稽古前日の出欠・ご予約のリマインドが公式LINEに届くようになります。
-              </p>
-              <a
-                href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
-                className="block text-center w-full bg-matcha-deep text-white rounded py-2 text-sm"
-              >
-                LINEでログインして連携する
-              </a>
-            </>
+          {familyMembers.length > 0 && (
+            <div className="border-t border-line mt-4 pt-3">
+              <div className="text-xs text-muted mb-2">ご家族を切り替える</div>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs bg-matcha-deep text-white rounded-full px-3 py-1.5">
+                  {member.name}様（表示中）
+                </span>
+                {familyMembers.map((f) => (
+                  <button
+                    key={f.id}
+                    className="text-xs border border-matcha text-matcha-deep rounded-full px-3 py-1.5 disabled:opacity-50"
+                    onClick={() => switchToFamilyMember(f.id)}
+                    disabled={switchingFamily}
+                  >
+                    {f.name}様（{groupDisplayName(f.group)}）に切り替え
+                  </button>
+                ))}
+              </div>
+              {switchingFamily && <p className="text-xs text-muted mt-2">切り替え中…</p>}
+              {switchError && <p className="text-hanko text-xs mt-2">{switchError}</p>}
+            </div>
           )}
         </div>
-      )}
 
-      {member.groupCategory === "本部稽古" &&
-        (member.group === SHINGETSU_GROUP ? (
-          // 新月会：月2回の開催日から1日を選ぶ方式（管理画面の出席簿と連動）
-          <ShingetsuAttendanceCard memberId={member.id} />
-        ) : member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
-          <SaturdayReservation
-            memberId={member.id}
-            quota={member.chadoMonthlyQuota ?? 1}
-            tickets={member.chadoMakeupTickets ?? 0}
-          />
-        ) : (
-          <div className="bg-paper border border-line rounded-md p-6 mb-4">
-            <h2 className="text-sm text-muted mb-3">次回のお稽古 出欠登録</h2>
-            {member.group === "茶道教室" && member.chadoClass && (
-              <p className="text-xs text-matcha-deep mb-1">
-                {CHADO_CLASS_LABEL[member.chadoClass]}クラス　{CHADO_CLASS_TIME[member.chadoClass]}
-                {CHADO_FIXED_TEACHERS[member.chadoClass] &&
-                  `　担当：${CHADO_FIXED_TEACHERS[member.chadoClass]}`}
-              </p>
-            )}
-            {nextLesson && (
-              <p className="text-xs text-matcha-deep mb-1">
-                次回：{formatLessonDate(nextLesson.date)}
-                {nextLesson.place && `　場所：${nextLesson.place}`}
-              </p>
-            )}
-            <div className="mb-3">
-              {member.rsvp === "出席" ? (
-                <span className="inline-block text-xs font-bold text-matcha-deep bg-matcha-pale rounded-full px-3 py-1">
-                  ✓ 出席で回答済み
-                </span>
-              ) : member.rsvp === "欠席" ? (
-                <span className="inline-block text-xs font-bold text-hanko bg-hanko-pale rounded-full px-3 py-1">
-                  ✓ 欠席で回答済み
-                </span>
-              ) : (
-                <span className="inline-block text-xs text-muted bg-bg border border-line rounded-full px-3 py-1">
-                  未回答
-                </span>
+        {/* タブ切り替え */}
+        <div role="tablist" className="grid grid-cols-2 gap-1 bg-paper border border-line rounded-lg p-1 mb-4">
+          {(
+            [
+              ["keiko", "お稽古"],
+              ["procedures", "各種お手続き"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              className={`rounded-md py-2.5 text-sm font-bold transition ${
+                tab === key ? "bg-matcha-deep text-white" : "text-muted"
+              }`}
+              onClick={() => changeTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "keiko" && (
+          <>
+        {/* ② 次回のお稽古（いちばん大事な欄なので上に） */}
+        {member.groupCategory === "本部稽古" &&
+          (member.group === SHINGETSU_GROUP ? (
+            // 新月会：月2回の開催日から1日を選ぶ方式（管理画面の出席簿と連動）
+            <ShingetsuAttendanceCard memberId={member.id} />
+          ) : member.group === "茶道教室" && member.chadoClass === "土曜日" ? (
+            <SaturdayReservation
+              memberId={member.id}
+              quota={member.chadoMonthlyQuota ?? 1}
+              tickets={member.chadoMakeupTickets ?? 0}
+            />
+          ) : (
+            <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+              <h2 className={H2}>次回のお稽古 出欠登録</h2>
+              {(nextLesson || (member.group === "茶道教室" && member.chadoClass)) && (
+                <div className="bg-matcha-pale rounded-md px-4 py-3 mb-3">
+                  {nextLesson && (
+                    <div className="text-base font-bold text-matcha-deep">
+                      {formatLessonDate(nextLesson.date)}
+                    </div>
+                  )}
+                  {nextLesson?.place && (
+                    <div className="text-sm text-ink mt-1">場所：{nextLesson.place}</div>
+                  )}
+                  {member.group === "茶道教室" && member.chadoClass && (
+                    <div className="text-xs text-matcha-deep mt-1">
+                      {CHADO_CLASS_LABEL[member.chadoClass]}クラス　{CHADO_CLASS_TIME[member.chadoClass]}
+                      {CHADO_FIXED_TEACHERS[member.chadoClass] &&
+                        `　担当：${CHADO_FIXED_TEACHERS[member.chadoClass]}`}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs text-muted">現在のご回答：</span>
+                {member.rsvp === "出席" ? (
+                  <span className="text-sm font-bold text-matcha-deep bg-matcha-pale rounded-full px-3 py-1">
+                    ✓ 出席
+                  </span>
+                ) : member.rsvp === "欠席" ? (
+                  <span className="text-sm font-bold text-hanko bg-hanko-pale rounded-full px-3 py-1">
+                    ✓ 欠席
+                  </span>
+                ) : (
+                  <span className="text-sm text-hanko font-bold">まだ回答していません</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className={`flex-1 rounded-md py-3 text-base font-bold transition ${
+                    member.rsvp === "出席"
+                      ? "bg-matcha-deep text-white ring-2 ring-matcha-deep ring-offset-1"
+                      : "border-2 border-matcha text-matcha-deep bg-paper"
+                  }`}
+                  onClick={() => updateRsvp("出席")}
+                >
+                  {member.rsvp === "出席" ? "✓ 出席する" : "出席する"}
+                </button>
+                <button
+                  className={`flex-1 rounded-md py-3 text-base font-bold transition ${
+                    member.rsvp === "欠席"
+                      ? "bg-hanko text-white ring-2 ring-hanko ring-offset-1"
+                      : "border-2 border-hanko/60 text-hanko bg-paper"
+                  }`}
+                  onClick={() => updateRsvp("欠席")}
+                >
+                  {member.rsvp === "欠席" ? "✓ 欠席する" : "欠席する"}
+                </button>
+              </div>
+              {member.paymentMethod === "都度払い" && !member.sessionPaymentExempt && (
+                <SessionPaymentBox
+                  member={member}
+                  busy={checkoutBusy}
+                  checkoutUrl={checkoutUrl}
+                  onPay={(mk) => openSessionCheckout(mk)}
+                />
               )}
             </div>
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 rounded py-2 text-sm transition ${
-                  member.rsvp === "出席"
-                    ? "bg-matcha-deep text-white ring-2 ring-matcha-deep ring-offset-1"
-                    : "border border-line text-muted"
-                }`}
-                onClick={() => updateRsvp("出席")}
+          ))}
+
+        {/* ③ 公式LINE（未連携のときだけ大きく案内） */}
+        {showLineCard && (
+          <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+            <h2 className={H2}>公式LINEとの連携</h2>
+            <p className="text-sm text-ink mb-3">
+              連携すると、お稽古前日の出欠・ご予約のリマインドが公式LINEに届くようになります。
+            </p>
+            <a
+              href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
+              className="block text-center w-full bg-matcha-deep text-white rounded-md py-3 text-base font-bold"
+            >
+              LINEでログインして連携する
+            </a>
+          </div>
+        )}
+
+        {/* ④ お稽古ノート・家元動画 */}
+        <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+          <h2 className={H2}>お稽古の予習・復習</h2>
+          <div className={`grid gap-2 ${member.group === "茶道教室" ? "grid-cols-2" : "grid-cols-1"}`}>
+            {member.group === "茶道教室" && (
+              <Link
+                href="/keiko-note"
+                className="block text-center text-sm font-bold bg-matcha-pale text-matcha-deep rounded-md py-3"
               >
-                {member.rsvp === "出席" ? "✓ 出席する" : "出席する"}
-              </button>
-              <button
-                className={`flex-1 rounded py-2 text-sm transition ${
-                  member.rsvp === "欠席"
-                    ? "bg-hanko text-white ring-2 ring-hanko ring-offset-1"
-                    : "border border-line text-muted"
-                }`}
-                onClick={() => updateRsvp("欠席")}
-              >
-                {member.rsvp === "欠席" ? "✓ 欠席する" : "欠席する"}
-              </button>
+                お稽古ノート
+              </Link>
+            )}
+            <a
+              href="https://one-stream.io/login/WAFrlVXGvJeKz3PaYEwjUe1JjZJ3?redirectPath=%2Fuser%2FWAFrlVXGvJeKz3PaYEwjUe1JjZJ3&isInvoicePayment=false"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-center text-sm font-bold bg-matcha-deep text-white rounded-md py-3"
+            >
+              家元動画を見る
+            </a>
+          </div>
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer text-matcha-deep">家元動画に初めてご登録の方へ</summary>
+            <div className="text-ink bg-matcha-pale rounded-md p-3 mt-2 space-y-1">
+              <p>動画の料金はお稽古代に含まれております。</p>
+              <p>お支払い画面で「クーポンをお持ちの方」を開き、下記のクーポンコードをご入力ください。</p>
+              <p className="text-center text-lg font-bold text-matcha-deep tracking-widest mt-2 select-all">
+                4bJIdgZJ
+              </p>
             </div>
-            {member.paymentMethod === "都度払い" && !member.sessionPaymentExempt && (
-              <SessionPaymentBox
-                member={member}
-                busy={checkoutBusy}
-                checkoutUrl={checkoutUrl}
-                onPay={(mk) => openSessionCheckout(mk)}
+          </details>
+        </div>
+
+          </>
+        )}
+
+        {tab === "procedures" && (
+          <>
+        {/* ⑤ お支払い */}
+        {isHonbuKeikoGroup(member.group) && <MyPagePaymentCard />}
+
+        {/* ⑥ 連絡先 */}
+        <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+          <h2 className={H2}>連絡先情報の変更</h2>
+          <div className="space-y-3 mb-4">
+            <label className="block">
+              <span className="text-xs text-muted">メールアドレス</span>
+              <input
+                type="email"
+                className={INPUT}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted">電話番号</span>
+              <input
+                type="tel"
+                className={INPUT}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted">ご住所</span>
+              <input className={INPUT} value={address} onChange={(e) => setAddress(e.target.value)} />
+            </label>
+            {member.group === "名月会" && (
+              <label className="block">
+                <span className="text-xs text-muted">現在の所属（学校名・勤務先など）</span>
+                <input
+                  className={INPUT}
+                  value={affiliation}
+                  onChange={(e) => setAffiliation(e.target.value)}
+                />
+              </label>
             )}
           </div>
-        ))}
-
-      <div className="bg-paper border border-line rounded-md p-6 mb-4">
-        <h2 className="text-sm text-muted mb-3">家元動画へのアクセス</h2>
-        <a
-          href="https://one-stream.io/login/WAFrlVXGvJeKz3PaYEwjUe1JjZJ3?redirectPath=%2Fuser%2FWAFrlVXGvJeKz3PaYEwjUe1JjZJ3&isInvoicePayment=false"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block text-center text-sm bg-matcha-deep text-white rounded-md py-2.5 mb-3"
-        >
-          家元動画を見る
-        </a>
-        <div className="text-xs text-muted bg-matcha-pale rounded-md p-3 space-y-1">
-          <p className="font-bold text-matcha-deep">初めてご登録の方へ</p>
-          <p>動画の料金はお稽古代に含まれております。</p>
-          <p>お支払い時に下記のクーポンコードを入力ください。</p>
-          <p>「クーポンをお持ちの方」を開き、下記のクーポンコードをご入力ください。</p>
-          <p className="text-center text-sm font-bold text-matcha-deep tracking-wide mt-2">
-            4bJIdgZJ
-          </p>
+          <button
+            className="w-full border-2 border-matcha-deep text-matcha-deep font-bold rounded-md py-3 text-sm"
+            onClick={saveContact}
+          >
+            この内容で保存する
+          </button>
         </div>
-      </div>
 
-      <div className="bg-paper border border-line rounded-md p-6 mb-4">
-        <h2 className="text-sm text-muted mb-3">連絡先情報の変更</h2>
-        <input
-          className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="メールアドレス"
-        />
-        <input
-          className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          placeholder="電話番号"
-        />
-        <input
-          className={`w-full border border-line rounded px-3 py-2 text-sm ${
-            member.group === "名月会" ? "mb-2" : "mb-3"
-          }`}
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder="ご住所"
-        />
-        {member.group === "名月会" && (
-          <input
-            className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
-            value={affiliation}
-            onChange={(e) => setAffiliation(e.target.value)}
-            placeholder="現在の所属（学校名・勤務先など）"
-          />
+        {/* ⑦ 休会・退会 */}
+        <div className="bg-paper border border-line rounded-lg p-5">
+          <h2 className={H2}>
+            {member.status === "休会" ? "復会・退会のお申請" : "休会・退会のお申請"}
+          </h2>
+          <div>
+            <select
+              className={`${INPUT} mb-2`}
+              value={leaveType}
+              onChange={(e) => setLeaveType(e.target.value as LeaveRequestType)}
+            >
+              {member.status === "休会" ? (
+                <>
+                  <option>復会</option>
+                  <option>退会</option>
+                </>
+              ) : (
+                <>
+                  <option>休会</option>
+                  <option>退会</option>
+                </>
+              )}
+            </select>
+            <input
+              className={`${INPUT} mb-3`}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={leaveType === "復会" ? "理由（任意）" : "理由（必須）"}
+            />
+            <button
+              className="w-full border border-matcha-deep text-matcha-deep rounded-md py-2.5 text-sm"
+              onClick={submitLeave}
+            >
+              申請する
+            </button>
+          </div>
+        </div>
+          </>
         )}
-        <button
-          className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm"
-          onClick={saveContact}
-        >
-          この内容で保存する
-        </button>
       </div>
 
-      {isHonbuKeikoGroup(member.group) && <MyPagePaymentCard />}
-
-      <div className="bg-paper border border-line rounded-md p-6">
-        <h2 className="text-sm text-muted mb-3">
-          {member.status === "休会" ? "復会・退会のお申請" : "休会・退会のお申請"}
-        </h2>
-        <select
-          className="w-full border border-line rounded px-3 py-2 text-sm mb-2"
-          value={leaveType}
-          onChange={(e) => setLeaveType(e.target.value as LeaveRequestType)}
-        >
-          {member.status === "休会" ? (
-            <>
-              <option>復会</option>
-              <option>退会</option>
-            </>
-          ) : (
-            <>
-              <option>休会</option>
-              <option>退会</option>
-            </>
-          )}
-        </select>
-        <input
-          className="w-full border border-line rounded px-3 py-2 text-sm mb-3"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder={leaveType === "復会" ? "理由（任意）" : "理由（必須）"}
-        />
-        <button
-          className="w-full border border-matcha-deep text-matcha-deep rounded py-2 text-sm"
-          onClick={submitLeave}
-        >
-          申請する
-        </button>
-      </div>
-
-      {savedMsg && <p className="text-center text-xs text-matcha-deep mt-4">{savedMsg}</p>}
+      {/* 完了・エラーのお知らせ：どこまでスクロールしていても見えるよう画面下に固定 */}
+      {savedMsg && (
+        <div className="fixed inset-x-0 bottom-0 z-50 px-4 pb-4">
+          <div
+            role="status"
+            className={`max-w-md mx-auto flex items-start gap-3 rounded-lg shadow-lg px-4 py-3 text-sm text-white ${
+              isError ? "bg-hanko" : "bg-matcha-deep"
+            }`}
+          >
+            <p className="flex-1">{savedMsg}</p>
+            <button className="shrink-0 text-white/80 text-lg leading-none" onClick={() => setSavedMsg(null)} aria-label="閉じる">
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const H2 = "text-base font-bold text-ink mb-3 pl-2 border-l-4 border-matcha";
+const INPUT = "mt-1 w-full border border-line rounded-md px-3 py-2.5 text-base bg-paper focus:outline-none focus:border-matcha";

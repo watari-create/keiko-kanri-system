@@ -41,8 +41,8 @@ export default function ShingetsuAttendanceCard({ memberId }: { memberId: string
 
   if (months.length === 0) {
     return (
-      <div className="bg-paper border border-line rounded-md p-6 mb-4">
-        <h2 className="text-sm text-muted mb-2">お稽古の出欠登録</h2>
+      <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+        <h2 className="text-base font-bold text-ink mb-2 pl-2 border-l-4 border-matcha">お稽古の出欠登録</h2>
         <p className="text-xs text-muted">今後の開催日はまだ登録されていません。</p>
       </div>
     );
@@ -68,8 +68,8 @@ export default function ShingetsuAttendanceCard({ memberId }: { memberId: string
   }
 
   return (
-    <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-1">お稽古の出欠登録</h2>
+    <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+      <h2 className="text-base font-bold text-ink mb-1 pl-2 border-l-4 border-matcha">お稽古の出欠登録</h2>
       <p className="text-xs text-muted mb-3">毎月2日の開催日のうち、ご都合のよい1日をお選びください。</p>
 
       <div className="flex gap-1 overflow-x-auto border-b border-line mb-4" role="tablist" aria-label="月">

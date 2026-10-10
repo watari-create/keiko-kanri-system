@@ -44,8 +44,8 @@ export default function MyPagePaymentCard() {
   const hasLiveSub = sub && ["PENDING", "ACTIVE", "PAUSED"].includes(sub.status);
 
   return (
-    <div className="bg-paper border border-line rounded-md p-6 mb-4">
-      <h2 className="text-sm text-muted mb-3">お月謝のお支払い</h2>
+    <div className="bg-paper border border-line rounded-lg p-5 mb-4">
+      <h2 className="text-base font-bold text-ink mb-3 pl-2 border-l-4 border-matcha">お月謝のお支払い</h2>
       {!info && !failed && <p className="text-xs text-muted">読み込み中…</p>}
       {(failed || (info && !sub && !info.eligible)) && <LegacyNotice />}
 
