@@ -75,17 +75,17 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
   const [familyOnly, setFamilyOnly] = useState(false);
   const [includeTest, setIncludeTest] = useState(false);
   // カード自動払い（Square）の契約状況。doc id = 会員番号
-  const [subs, setSubs] = useState<Record<string, { status: string; migratedFromLink?: boolean }>>({});
+  const [subs, setSubs] = useState<Record<string, { status: string; legacyCancelStatus?: string }>>({});
   const [cardFilter, setCardFilter] = useState("すべて");
 
   useEffect(() => {
     return onSnapshot(
       collection(db, "memberSubscriptions"),
       (snap) => {
-        const next: Record<string, { status: string; migratedFromLink?: boolean }> = {};
+        const next: Record<string, { status: string; legacyCancelStatus?: string }> = {};
         snap.forEach((d) => {
-          const data = d.data() as { status?: string; migratedFromLink?: boolean };
-          if (data.status && data.status !== "CREATING") next[d.id] = { status: data.status, migratedFromLink: data.migratedFromLink };
+          const data = d.data() as { status?: string; legacyCancelStatus?: string };
+          if (data.status && data.status !== "CREATING") next[d.id] = { status: data.status, legacyCancelStatus: data.legacyCancelStatus };
         });
         setSubs(next);
       },
@@ -129,7 +129,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
     if (!cardAutoPayGroups().includes(m.group) || m.paymentMethod === "都度払い") return "対象外";
     const sub = subs[m.id];
     if (!sub || !["PENDING", "ACTIVE", "PAUSED"].includes(sub.status)) return "未登録";
-    if (sub.migratedFromLink && !m.legacySquareCanceled) return "旧契約の解約待ち";
+    if (sub.legacyCancelStatus === "pending" && !m.legacySquareCanceled) return "旧契約の解約待ち";
     return "登録済み";
   }
 

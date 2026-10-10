@@ -152,7 +152,7 @@ export const DEFAULT_GROUP_SETTINGS: GroupSetting[] = [
     guideUrl: ENROLL_GROUPS.chado.notice?.guideUrl ?? "",
     guideLabel: ENROLL_GROUPS.chado.notice?.guideLabel ?? "",
     enrollFields: withoutPayment(ENROLL_GROUPS.chado.fields),
-    legacyLink: true,
+    legacyLink: false, // 茶道教室はSquareではない別の仕組みでお月謝を払っていた
   }),
   base({
     name: "Gマダムの茶の湯講座",

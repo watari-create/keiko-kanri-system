@@ -58,7 +58,7 @@ const DEFAULTS: ServerGroupSetting[] = [
     entryFee: 15000,
     entryFeeNote: "入会費・宗徧会費・入門許状代・扇子代を含みます。",
     cardAutoPay: true,
-    legacyLink: true,
+    legacyLink: false, // 茶道教室はSquareではない別の仕組みでお月謝を払っていた（2026-10-10 ゆちゃ）
   }),
   def({
     name: "Gマダムの茶の湯講座",
@@ -104,7 +104,7 @@ export async function refreshGroupSettings(force = false): Promise<void> {
         entryFee: "entryFee" in d ? numOrNull(d.entryFee) : base.entryFee,
         entryFeeNote: typeof d.entryFeeNote === "string" ? d.entryFeeNote : base.entryFeeNote,
         cardAutoPay: typeof d.cardAutoPay === "boolean" ? d.cardAutoPay : base.cardAutoPay,
-        legacyLink: typeof d.legacyLink === "boolean" ? d.legacyLink : base.legacyLink,
+        legacyLink: base.legacyLink, // 画面では編集しない項目なので、コードの設定だけを使う
       });
     });
     cache = next;
