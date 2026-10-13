@@ -10,6 +10,8 @@ type Props = {
   allowEmpty?: boolean; // 「未選択」を選べるようにする
   className?: string;
   selectClassName?: string;
+  yearClassName?: string; // 年プルダウンだけに追加するクラス（幅の指定など）
+  monthClassName?: string; // 月プルダウンだけに追加するクラス
 };
 
 export default function MonthSelect({
@@ -20,6 +22,8 @@ export default function MonthSelect({
   allowEmpty = false,
   className = "",
   selectClassName = "border border-line rounded px-3 py-2 text-sm",
+  yearClassName = "",
+  monthClassName = "",
 }: Props) {
   const thisYear = new Date().getFullYear();
   const [y, m] = value ? value.split("-") : ["", ""];
@@ -38,7 +42,7 @@ export default function MonthSelect({
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <select className={selectClassName} value={y} onChange={(e) => update(e.target.value, e.target.value ? m : "")}>
+      <select className={`${selectClassName} ${yearClassName}`} value={y} onChange={(e) => update(e.target.value, e.target.value ? m : "")}>
         {(allowEmpty || !y) && <option value="">年</option>}
         {years.map((yr) => (
           <option key={yr} value={String(yr)}>
@@ -46,7 +50,7 @@ export default function MonthSelect({
           </option>
         ))}
       </select>
-      <select className={selectClassName} value={m} onChange={(e) => update(e.target.value ? y : "", e.target.value)}>
+      <select className={`${selectClassName} ${monthClassName}`} value={m} onChange={(e) => update(e.target.value ? y : "", e.target.value)}>
         {(allowEmpty || !m) && <option value="">月</option>}
         {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map((mm) => (
           <option key={mm} value={mm}>

@@ -425,8 +425,10 @@ export const onLeaveRequestApproved = onDocumentUpdated(
  *
  * ・「発行済」になったら → 講師が生徒にお渡しできるよう、Slackに通知する
  *   （許状段階の反映はまだ行わない。✔️リアクションで「お渡し済」に進む）。
- * ・「完了」になったら → members 側の許状段階（license）を実際に更新し、通知ログに記録する
- *   （本部の管理者が管理画面で最後の「次に進める」を押したタイミング）。
+ * ・「お渡し済」になったら（Slackの✔️・講師画面の「お渡し済にする」・管理画面の「次に進める」のどれでも）
+ *   → members 側の許状段階（license）と茶歴を更新し、通知ログに記録したうえで、自動で「完了」まで進める。
+ *   管理画面で最後の「完了」を押す必要はない。
+ * ・「お渡し済」を経ずに直接「完了」になった場合も同じ反映を行う（二重には反映しない）。
  */
 export const onLicenseIssued = onDocumentUpdated(
   { document: "licenseRequests/{requestId}", secrets: [slackBotToken] },
@@ -452,7 +454,7 @@ export const onLicenseIssued = onDocumentUpdated(
           `許状が発行されました\n` +
           `会員：${after.memberName}様（${groupDisplayName(after.group)}）\n` +
           `許状：${after.licenseName}\n` +
-          `生徒様にお渡しできたら、このメッセージに✔️のリアクションをつけてください（自動でステータスが進みます）。`;
+          `生徒様にお渡しできたら、このメッセージに✔️のリアクションをつけてください（自動で許状段階が更新され、完了になります）。`;
         try {
           const posted = await postSlackMessage(token, channel, text);
           if (posted && event.data) {
@@ -470,7 +472,10 @@ export const onLicenseIssued = onDocumentUpdated(
       }
     }
 
-    if (before.status !== "完了" && after.status === "完了") {
+    // licenseApplied で二重反映を防ぐ（この仕組みより前に「お渡し済」で止まっていた申請も、
+    // 管理画面で「次に進める」→「完了」にすれば反映される）。
+    const delivered = after.status === "お渡し済" || after.status === "完了";
+    if (delivered && !after.licenseApplied && before.status !== "完了") {
       // 茶歴（licenseHistory）にも取得年月を記録する。申請時に指定された申請月（issueMonth）が
       // あればそれを使い、なければ完了操作を行った今月を使う。
       const now = new Date();
@@ -490,6 +495,15 @@ export const onLicenseIssued = onDocumentUpdated(
         createdAt: new Date().toISOString(),
         read: false,
       });
+
+      // お渡し済になった時点で手続きは終わりなので、そのまま「完了」まで自動で進める
+      if (event.data) {
+        await event.data.after.ref.update({
+          licenseApplied: true,
+          ...(after.status === "お渡し済" ? { status: "完了" } : {}),
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
   }
 );
@@ -580,6 +594,20 @@ export const onLicenseRequestStatusChanged = onDocumentUpdated(
     }
 
     if (after.status !== "請求書発行依頼") return;
+
+    // 代金0円の許状（入門など）は請求書を作らず、Slack通知もせずに
+    // 「発行手続き中」まで自動で進め、経理タブの入金状況も「済」にしておく。
+    if (!(Number(after.fee) > 0)) {
+      if (event.data) {
+        await event.data.after.ref.update({
+          status: "発行手続き中",
+          accountingPaymentStatus: "済",
+          squareInvoiceError: admin.firestore.FieldValue.delete(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
 
     // Squareの請求書を自動で作って会員に送る。送れたら「発行手続き中」まで自動で進める。
     // すでに送信済み（一つ戻す→次に進めるで再び請求書発行依頼になった場合など）なら送り直さない。

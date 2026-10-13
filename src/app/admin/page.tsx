@@ -2011,7 +2011,7 @@ export default function AdminPage() {
               </button>
             </div>
             <p className="text-xs text-muted mb-3">
-              受付 → 請求書発行依頼 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます
+              受付 → 請求書発行依頼 → 発行手続き中 → 発行済 → お渡し済 → 完了 の順に進みます（お渡し済になると許状段階が自動で更新され、そのまま完了になります）
               （「申請者一覧を印刷」は、現在表示中の「{groupDisplayName(group)}」の対応中の申請を印刷します）
             </p>
             <div className="space-y-3">
@@ -2687,30 +2687,42 @@ export default function AdminPage() {
             {selectedMember.groupCategory === "本部稽古" && (
               <div className="mt-4 pt-4 border-t border-line">
                 <h4 className="text-sm font-bold mb-1">茶歴</h4>
-                <p className="text-xs text-muted mb-2">
-                  各許状を取得した年月を記録します（未取得は空欄のまま）。許状申請が「完了」になると自動で記録されます。
+                <p className="text-xs text-muted mb-3">
+                  各許状を取得した年月を記録します（未取得は空欄のまま）。許状をお渡し済（Slackの✔️など）にすると自動で記録されます。
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2">
-                  {LICENSE_FEES.map((l) => (
-                    <div key={l.name} className="flex items-center gap-2">
-                      <span className="text-xs w-24 shrink-0">{l.name}</span>
-                      <MonthSelect
-                        allowEmpty
-                        yearFrom={1950}
-                        selectClassName="input text-xs"
-                        value={draft.licenseHistory?.[l.name] ?? ""}
-                        onChange={(v) => {
-                          const next = { ...(draft.licenseHistory ?? {}) };
-                          if (v) {
-                            next[l.name] = v;
-                          } else {
-                            delete next[l.name];
-                          }
-                          setDraft({ ...draft, licenseHistory: next });
-                        }}
-                      />
-                    </div>
-                  ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+                  {LICENSE_FEES.map((l) => {
+                    const v = draft.licenseHistory?.[l.name] ?? "";
+                    return (
+                      <div
+                        key={l.name}
+                        className={`flex items-center justify-between gap-3 rounded px-2 py-1 ${v ? "bg-[#f4f1e6]" : ""}`}
+                      >
+                        <span className={`text-sm ${v ? "font-bold text-ink" : "text-muted"}`}>
+                          {v && <span className="mr-1">✓</span>}
+                          {l.name}
+                        </span>
+                        <MonthSelect
+                          allowEmpty
+                          yearFrom={1950}
+                          className="shrink-0"
+                          selectClassName="border border-line rounded px-2 py-1 text-sm bg-white"
+                          yearClassName="w-[6.5rem]"
+                          monthClassName="w-[4.5rem]"
+                          value={v}
+                          onChange={(nv) => {
+                            const next = { ...(draft.licenseHistory ?? {}) };
+                            if (nv) {
+                              next[l.name] = nv;
+                            } else {
+                              delete next[l.name];
+                            }
+                            setDraft({ ...draft, licenseHistory: next });
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
