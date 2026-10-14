@@ -309,6 +309,7 @@ export default function MemberRoster({ onSelect, groups }: { onSelect?: (m: Memb
             <thead>
               <tr className="text-muted text-left border-b border-line text-xs">
                 <th className="py-2 pr-3 font-normal">会員番号</th>
+                {onSelect && <th className="py-2 pr-3 font-normal print:hidden">編集</th>}
                 <th className="py-2 pr-3 font-normal">氏名</th>
                 <th className="py-2 pr-3 font-normal text-right">年齢</th>
                 <th className="py-2 pr-3 font-normal">入会日</th>
@@ -326,6 +327,16 @@ export default function MemberRoster({ onSelect, groups }: { onSelect?: (m: Memb
                 return (
                   <tr key={m.id} className="border-b border-line last:border-0 align-top">
                     <td className="py-2 pr-3 text-muted whitespace-nowrap">{m.id}</td>
+                    {onSelect && (
+                      <td className="py-2 pr-3 whitespace-nowrap print:hidden">
+                        <button data-nav
+                          className="text-xs bg-matcha-deep text-white rounded px-3 py-1"
+                          onClick={() => onSelect(m)}
+                        >
+                          編集
+                        </button>
+                      </td>
+                    )}
                     <td className="py-2 pr-3 whitespace-nowrap">
                       {onSelect ? (
                         <button data-nav

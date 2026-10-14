@@ -1642,6 +1642,7 @@ export default function AdminPage() {
                   </th>
                 )}
                 <th className="py-2 pr-3">会員番号</th>
+                <th className="pr-3">編集</th>
                 {showAffiliation && <th className="pr-3">所属</th>}
                 {showSohenDetails && <th className="pr-3">支部</th>}
                 <th className="pr-3">氏名</th>
@@ -1658,8 +1659,7 @@ export default function AdminPage() {
                     <th className="pr-3">支払い方法</th>
                   </>
                 )}
-                <th className="pr-3">ステータス</th>
-                <th></th>
+                <th>ステータス</th>
               </tr>
             </thead>
             <tbody>
@@ -1691,6 +1691,14 @@ export default function AdminPage() {
                     </td>
                   )}
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
+                  <td className="pr-3">
+                    <button data-nav
+                      className="text-xs bg-matcha-deep text-white rounded px-3 py-1"
+                      onClick={() => openMemberDetail(m)}
+                    >
+                      編集
+                    </button>
+                  </td>
                   {showAffiliation && <td className="pr-3">{groupDisplayName(m.group)}</td>}
                   {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
                   <td className="pr-3">
@@ -1775,14 +1783,6 @@ export default function AdminPage() {
                         削除
                       </button>
                     )}
-                  </td>
-                  <td className="pl-3">
-                    <button data-nav
-                      className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1"
-                      onClick={() => openMemberDetail(m)}
-                    >
-                      編集
-                    </button>
                   </td>
                 </tr>
                   ))}
