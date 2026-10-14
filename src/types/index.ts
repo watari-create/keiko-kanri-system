@@ -210,6 +210,10 @@ export interface LeaveRequest {
   requestedAt: string;
   approvedBy?: string;
   approvedAt?: string;
+  /** 講師・本部が会員詳細から直接手続きしたもの（2026-10-14〜。本人の申請は廃止） */
+  direct?: boolean;
+  operatedBy?: string;
+  operatedByRole?: "講師" | "世話人" | "本部";
 }
 
 export interface NotificationLogEntry {

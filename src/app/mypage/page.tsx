@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { doc, getDoc, onSnapshot, updateDoc, collection, addDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { signInWithCustomToken } from "firebase/auth";
 import { db, auth } from "@/lib/firebase";
@@ -20,7 +20,7 @@ import SaturdayReservation from "@/components/SaturdayReservation";
 import ShingetsuAttendanceCard from "@/components/ShingetsuAttendanceCard";
 import { SHINGETSU_GROUP } from "@/lib/shingetsu";
 import MyPagePaymentCard from "@/components/MyPagePaymentCard";
-import type { Member, LeaveRequestType } from "@/types";
+import type { Member } from "@/types";
 
 export default function MyPage() {
   useGroupSettings(); // 会の設定（表示名・エリア）の読み込み後に再描画する
@@ -31,8 +31,6 @@ export default function MyPage() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [affiliation, setAffiliation] = useState("");
-  const [leaveType, setLeaveType] = useState<LeaveRequestType>("休会");
-  const [reason, setReason] = useState("");
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [nextLesson, setNextLesson] = useState<NextLessonInfo | null>(null);
 
@@ -87,8 +85,6 @@ export default function MyPage() {
         setPhone(data.phone ?? "");
         setAddress(data.address ?? "");
         setAffiliation(data.affiliation ?? "");
-        // 茶道教室は休会なし（退会のみ）
-        setLeaveType(data.status === "休会" ? "復会" : data.group === "茶道教室" ? "退会" : "休会");
       }
     });
   }, [memberId]);
@@ -221,24 +217,6 @@ export default function MyPage() {
     }
 
     setSavedMsg(`次回のお稽古を「${value}」で登録しました。`);
-  }
-
-  async function submitLeave() {
-    if (!memberId || !member) return;
-    if ((leaveType === "休会" || leaveType === "退会") && !reason.trim()) {
-      setSavedMsg("休会・退会の理由をご入力ください。");
-      return;
-    }
-    await addDoc(collection(db, "leaveRequests"), {
-      memberId,
-      memberName: member.name,
-      group: member.group,
-      type: leaveType,
-      reason,
-      status: "pending",
-      requestedAt: new Date().toISOString(),
-    });
-    setSavedMsg(`${leaveType}の申請を受け付けました。本部の承認をお待ちください。`);
   }
 
   function changeTab(next: "keiko" | "procedures") {
@@ -519,47 +497,13 @@ export default function MyPage() {
           </button>
         </div>
 
-        {/* ⑦ 休会・退会 */}
+        {/* ⑦ 休会・退会（2026-10-14〜 本人の申請は廃止。講師・本部が手続きする） */}
         <div className="bg-paper border border-line rounded-lg p-5">
-          <h2 className={H2}>
-            {member.status === "休会"
-              ? "復会・退会のお申請"
-              : member.group === "茶道教室"
-              ? "退会のお申請"
-              : "休会・退会のお申請"}
-          </h2>
-          <div>
-            <select
-              className={`${INPUT} mb-2`}
-              value={leaveType}
-              onChange={(e) => setLeaveType(e.target.value as LeaveRequestType)}
-            >
-              {member.status === "休会" ? (
-                <>
-                  <option>復会</option>
-                  <option>退会</option>
-                </>
-              ) : (
-                <>
-                  {/* 茶道教室は休会なし（退会のみ） */}
-                  {member.group !== "茶道教室" && <option>休会</option>}
-                  <option>退会</option>
-                </>
-              )}
-            </select>
-            <input
-              className={`${INPUT} mb-3`}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={leaveType === "復会" ? "理由（任意）" : "理由（必須）"}
-            />
-            <button
-              className="w-full border border-matcha-deep text-matcha-deep rounded-md py-2.5 text-sm"
-              onClick={submitLeave}
-            >
-              申請する
-            </button>
-          </div>
+          <h2 className={H2}>{member.group === "茶道教室" ? "退会について" : "休会・退会について"}</h2>
+          <p className="text-sm text-ink">
+            {member.group === "茶道教室" ? "退会" : "休会・退会・復会"}
+            をご希望の方は、担当の講師または本部までお申し出ください。
+          </p>
         </div>
           </>
         )}

@@ -22,7 +22,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth, canEditGroupWith } from "@/lib/AuthContext";
 import type {
   StaffAccount,
   G1ShippingDoc,
@@ -93,7 +93,8 @@ function todayDateKey(): string {
 }
 
 export default function G1ShippingPage() {
-  const { role, staffId, loading, canEdit: honbuCanEdit } = useAuth();
+  const authState = useAuth();
+  const { role, staffId, loading } = authState;
   const router = useRouter();
 
   const [account, setAccount] = useState<StaffAccount | null>(null);
@@ -113,7 +114,7 @@ export default function G1ShippingPage() {
   const [printingLog, setPrintingLog] = useState(false);
 
   // 本部のうち「閲覧のみ」の人は編集できない
-  const canEdit = (role === "honbu" && honbuCanEdit) || (role === "staff" && !!account?.groups.includes(G1_GROUP));
+  const canEdit = (role === "honbu" && canEditGroupWith(authState, G1_GROUP)) || (role === "staff" && !!account?.groups.includes(G1_GROUP));
 
   useEffect(() => {
     if (!loading && role !== "honbu" && role !== "staff") router.replace("/login");

@@ -27,6 +27,7 @@ service cloud.firestore {
     // 本部の権限レベル（2026-10-14〜）。カスタムクレーム honbuLevel で管理する。
     //   admin  … アドミン（すべての編集＋バックアップ・操作ログ・権限管理）
     //   editor … 編集できる（これまでの本部と同じ）
+    //   group  … お稽古ごとの編集者（honbuGroups に入っている会だけ編集できる。ほかの会は閲覧のみ）
     //   viewer … 閲覧のみ（どの画面も見られるが、追加・変更・削除はできない）
     // honbuLevel が付いていない本部アカウント（この仕組みより前に作ったもの）は admin として扱う。
     function honbuLevel() {
@@ -38,6 +39,14 @@ service cloud.firestore {
     }
     function isHonbuAdmin() {
       return isHonbu() && honbuLevel() == 'admin';
+    }
+    // お稽古ごとの編集者で、その会の担当か
+    function isHonbuGroupEditorFor(group) {
+      return isHonbu() && honbuLevel() == 'group' && group in request.auth.token.get('honbuGroups', []);
+    }
+    // その会のデータを変更できる本部（アドミン・編集できる・その会のお稽古ごとの編集者）
+    function canEditGroup(group) {
+      return isHonbuEditor() || isHonbuGroupEditorFor(group);
     }
 
     // 世話人・講師のスタッフドキュメントを取得
@@ -105,6 +114,10 @@ service cloud.firestore {
 
       // 本部は全項目を編集可
       allow write: if isHonbuEditor();
+      // お稽古ごとの編集者は、担当の会の会員のみ（担当外の会へ移すことはできない）
+      allow create: if isHonbuGroupEditorFor(request.resource.data.group);
+      allow update: if isHonbuGroupEditorFor(resource.data.group) && isHonbuGroupEditorFor(request.resource.data.group);
+      allow delete: if isHonbuGroupEditorFor(resource.data.group);
 
       // 世話人は自分の担当する会の会員のステータス・出席・支払い方法のみ編集可
       allow update: if isSewaninFor(resource.data.group)
@@ -183,8 +196,9 @@ service cloud.firestore {
       allow create: if isTeacherFor(request.resource.data.group)
         && isHonbuKeikoGroup(request.resource.data.group);
 
-      // 本部：全ステータス変更可
-      allow update: if isHonbuEditor();
+      // 本部：全ステータス変更可（お稽古ごとの編集者は担当の会のみ、会の付け替えは不可）
+      allow update: if isHonbuEditor()
+        || (isHonbuGroupEditorFor(resource.data.group) && request.resource.data.group == resource.data.group);
 
       // 講師：「発行済」→「お渡し済」の変更のみ可（他のフィールドは変更不可、本部稽古のグループのみ）
       allow update: if isTeacherFor(resource.data.group)
@@ -193,19 +207,28 @@ service cloud.firestore {
         && request.resource.data.status == 'お渡し済'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'updatedBy']);
 
-      allow delete: if isHonbuEditor();
+      allow delete: if canEditGroup(resource.data.group);
     }
 
     // ---- leaveRequests（退会・休会・復会申請） ----
     match /leaveRequests/{requestId} {
       allow read: if isHonbu() || isStaffFor(resource.data.group) || isSelf(resource.data.memberId);
 
-      // 本人が新規申請
-      allow create: if isSelf(request.resource.data.memberId)
-        && request.resource.data.status == 'pending';
+      // 2026-10-14〜 本人のマイページからの申請は廃止。
+      // 担当の講師・世話人、または本部が会員詳細から理由を記入して手続きする（direct: true）。
+      // 作成後は Cloud Functions（onLeaveRequestCreated）が Slack 通知→自動承認する。
+      allow create: if (canEditGroup(request.resource.data.group) || isStaffFor(request.resource.data.group))
+        && request.resource.data.status == 'pending'
+        && request.resource.data.direct == true
+        && request.resource.data.type in ['休会', '退会', '復会']
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() > 0
+        && exists(/databases/$(database)/documents/members/$(request.resource.data.memberId))
+        && get(/databases/$(database)/documents/members/$(request.resource.data.memberId)).data.group == request.resource.data.group;
 
-      // 承認・却下は本部のみ
-      allow update: if isHonbuEditor();
+      // 承認・却下は本部のみ（お稽古ごとの編集者は担当の会のみ）
+      allow update: if isHonbuEditor()
+        || (isHonbuGroupEditorFor(resource.data.group) && request.resource.data.group == resource.data.group);
     }
 
     // ---- lineMessageLogs（LINE公式アカウントから送信したメッセージの履歴。
@@ -266,39 +289,39 @@ service cloud.firestore {
 
     // ---- meta/g1ShippingDoc（G1＝Gマダムの茶の湯講座の発送物リスト。本部と担当講師が編集可） ----
     match /meta/g1ShippingDoc {
-      allow write: if isHonbuEditor() || isStaffFor('Gマダムの茶の湯講座');
+      allow write: if canEditGroup('Gマダムの茶の湯講座') || isStaffFor('Gマダムの茶の湯講座');
     }
 
     // ---- g1ShippingLogs（G1の発送記録アーカイブ。発送のたびに1件作成） ----
     match /g1ShippingLogs/{logId} {
       allow read: if isHonbu() || isStaffFor('Gマダムの茶の湯講座');
-      allow create, update: if isHonbuEditor() || isStaffFor('Gマダムの茶の湯講座');
-      allow delete: if isHonbuEditor();
+      allow create, update: if canEditGroup('Gマダムの茶の湯講座') || isStaffFor('Gマダムの茶の湯講座');
+      allow delete: if canEditGroup('Gマダムの茶の湯講座');
     }
 
     // ---- meta/nyumonSetInventory（名月会の入門セット在庫。本部が管理画面で編集し、
     //      新規入門時はCloud Functions（Admin SDK、ルール適用外）が自動的に数量を減らす） ----
     match /meta/nyumonSetInventory {
-      allow write: if isHonbuEditor();
+      allow write: if canEditGroup('名月会');
     }
 
     // ---- chadoClassLedger（茶道教室：クラス台帳。期・段階・定員・入会受付の可否） ----
     // 入会フォーム（/enroll、未ログイン）が受付中のクラスを表示するため、読み取りは公開。
     match /chadoClassLedger/{classId} {
       allow read: if true;
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- chadoRecruitClasses（茶道教室：新規募集クラス。管理画面で作成、入会フォームが受付中のクラスを表示） ----
     match /chadoRecruitClasses/{classId} {
       allow read: if true;
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- chadoClassSessions（茶道教室：木曜日・日曜日クラスの開催日ごとの担当講師・出欠） ----
     match /chadoClassSessions/{sessionId} {
       allow read: if isKnownUser();
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- chadoSaturdaySessions（茶道教室：土曜日クラスの開催日ごとの午前/午後枠・予約状況） ----
@@ -307,22 +330,22 @@ service cloud.firestore {
     // 開催日の追加・担当講師や定員の設定、予約の手動修正は本部・茶道教室担当の世話人・講師が管理画面から行う。
     match /chadoSaturdaySessions/{sessionId} {
       allow read: if isKnownUser();
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- lessonExtraDates（出席簿（日にち表示）に手で追加した開催日。doc id = "<会のキー>_<YYYY-MM-DD>"） ----
     // カレンダーにないお稽古日を本部・その会の世話人・講師が追加する。カレンダーのお稽古日は meta/lessonDateLog（Cloud Functions）
     match /lessonExtraDates/{dateId} {
       allow read: if isKnownUser();
-      allow create, update: if isHonbuEditor() || isStaffFor(request.resource.data.group);
-      allow delete: if isHonbuEditor() || isStaffFor(resource.data.group);
+      allow create, update: if canEditGroup(request.resource.data.group) || isStaffFor(request.resource.data.group);
+      allow delete: if canEditGroup(resource.data.group) || isStaffFor(resource.data.group);
     }
 
     // ---- shingetsuSessions（新月会：開催日と場所。会員は月2回のうち1日を選んで出席する） ----
     // 会員の回答は members.shingetsuChoice に保存するため、ここは開催日の一覧だけ。
     match /shingetsuSessions/{sessionId} {
       allow read: if isKnownUser();
-      allow write: if isHonbuEditor() || isStaffFor('新月会');
+      allow write: if canEditGroup('新月会') || isStaffFor('新月会');
     }
 
     // ---- chadoStudentNotes（茶道教室：生徒ごとの進捗申し送り） ----
@@ -330,7 +353,7 @@ service cloud.firestore {
     // 読み書きとも本部、または茶道教室担当の世話人・講師のみに限定する。
     match /chadoStudentNotes/{noteId} {
       allow read: if isHonbu() || isStaffFor('茶道教室');
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- keikoNoteEntries（茶道教室：お稽古ノート） ----
@@ -342,7 +365,7 @@ service cloud.firestore {
       // 閲覧専用ゲスト（keikoNoteGuestLogin で発行、role: keikoNoteGuest）だけが読めるようにした。
       // ゲストはこのお稽古ノート以外は読めない。
       allow read: if isKnownUser() || (isSignedIn() && request.auth.token.role == 'keikoNoteGuest');
-      allow write: if isHonbuEditor() || isStaffFor('茶道教室');
+      allow write: if canEditGroup('茶道教室') || isStaffFor('茶道教室');
     }
 
     // ---- keikoNoteBackups（お稽古ノートの週次自動バックアップ。Cloud Functions

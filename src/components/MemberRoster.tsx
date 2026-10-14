@@ -66,7 +66,9 @@ function csvCell(v: string | number | null | undefined) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => void }) {
+// groups を渡すと、その会の会員だけを表示する（お稽古ごとの編集者は担当の会の分だけ）
+export default function MemberRoster({ onSelect, groups }: { onSelect?: (m: Member) => void; groups?: string[] }) {
+  const groupsKey = groups ? groups.join("|") : "";
   const groupSettings = useGroupSettings(); // 会の設定（料金・並び順）が変わったら再描画する
   const [all, setAll] = useState<Member[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -95,10 +97,12 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
 
   useEffect(() => {
     return onSnapshot(collection(db, "members"), (snap) => {
-      setAll(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member));
+      setAll(groups ? list.filter((m) => groups.includes(m.group)) : list);
       setLoaded(true);
     });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsKey]);
 
   const byId = useMemo(() => new Map(all.map((m) => [m.id, m])), [all]);
 

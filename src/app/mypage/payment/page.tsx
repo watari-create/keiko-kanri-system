@@ -275,7 +275,7 @@ export default function PaymentPage() {
                 {info.entryFee && <li>入会金は、お申込み時に同じカードからお引き落としします（初回のみ）。</li>}
                 <li>領収書（レシート）はSquareからメールでお送りします。</li>
                 <li>カードはこのマイページからいつでも変更できます。</li>
-                <li>休会・退会の際は、マイページのお申請または本部へのご連絡をお願いします。</li>
+                <li>休会・退会の際は、担当の講師または本部へご連絡をお願いします。</li>
               </ul>
               <label className="flex items-start gap-2 text-sm mt-4">
                 <input type="checkbox" className="mt-1" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />

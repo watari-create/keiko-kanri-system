@@ -7,6 +7,7 @@
 // 2026-10-14〜 本部は権限レベル（honbuLevel）で3段階に分かれる：
 //   admin（アドミン）… すべての編集＋バックアップ・操作ログ・ログイン履歴・権限管理
 //   editor（編集できる）… これまでの本部と同じ
+//   group（お稽古ごとの編集者）… 担当の会（honbuGroups、複数可）だけ編集できる。ほかの会は閲覧のみ
 //   viewer（閲覧のみ）… どの画面も見られるが、追加・変更・削除・送信はできない
 // honbuLevel が付いていない本部アカウント（この仕組みより前に作ったもの）は admin として扱う。
 
@@ -15,11 +16,12 @@ import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { auth } from "./firebase";
 
 type Role = "honbu" | "staff" | "member" | "keikoNoteGuest" | null;
-export type HonbuLevel = "admin" | "editor" | "viewer";
+export type HonbuLevel = "admin" | "editor" | "group" | "viewer";
 
 export const HONBU_LEVEL_LABEL: Record<HonbuLevel, string> = {
   admin: "アドミン",
   editor: "編集できる",
+  group: "お稽古ごとの編集者",
   viewer: "閲覧のみ",
 };
 
@@ -28,8 +30,10 @@ interface AuthState {
   role: Role;
   /** 本部の権限レベル。本部でなければ null */
   honbuLevel: HonbuLevel | null;
-  /** 本部として、データを変更できるか（アドミン・編集できる） */
+  /** 本部として、すべての会のデータを変更できるか（アドミン・編集できる） */
   canEdit: boolean;
+  /** お稽古ごとの編集者の担当の会（それ以外は空） */
+  honbuGroups: string[];
   /** アドミンか */
   isAdmin: boolean;
   staffId?: string;
@@ -37,14 +41,20 @@ interface AuthState {
   loading: boolean;
 }
 
-const EMPTY: AuthState = { user: null, role: null, honbuLevel: null, canEdit: false, isAdmin: false, loading: false };
+const EMPTY: AuthState = { user: null, role: null, honbuLevel: null, canEdit: false, honbuGroups: [], isAdmin: false, loading: false };
 
 const AuthContext = createContext<AuthState>({ ...EMPTY, loading: true });
 
 function honbuLevelOf(claims: Record<string, unknown>): HonbuLevel | null {
   if (claims.role !== "honbu") return null;
   const lv = claims.honbuLevel;
-  return lv === "editor" || lv === "viewer" || lv === "admin" ? lv : "admin";
+  return lv === "editor" || lv === "viewer" || lv === "group" || lv === "admin" ? lv : "admin";
+}
+
+/** その会のデータを変更できるか（アドミン・編集できる・その会のお稽古ごとの編集者） */
+export function canEditGroupWith(state: Pick<AuthState, "canEdit" | "honbuGroups">, group: string | undefined | null): boolean {
+  if (state.canEdit) return true;
+  return !!group && state.honbuGroups.includes(group);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -78,6 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: (claims.role as Role) ?? null,
         honbuLevel,
         canEdit: honbuLevel === "admin" || honbuLevel === "editor",
+        honbuGroups:
+          honbuLevel === "group" && Array.isArray(claims.honbuGroups)
+            ? (claims.honbuGroups as unknown[]).filter((g): g is string => typeof g === "string")
+            : [],
         isAdmin: honbuLevel === "admin",
         staffId: claims.staffId as string | undefined,
         memberId: claims.memberId as string | undefined,

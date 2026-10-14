@@ -16,7 +16,7 @@ import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firesto
 import { auth, db } from "@/lib/firebase";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { signInWithCustomToken } from "firebase/auth";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth, canEditGroupWith } from "@/lib/AuthContext";
 import { KEIKO_NOTE_CLASSES } from "@/lib/keikoNoteData";
 import type {
   KeikoNoteBlock,
@@ -964,9 +964,10 @@ type FormState =
   | null;
 
 export default function KeikoNotePage() {
-  const { user, role, loading, canEdit: honbuCanEdit } = useAuth();
-  // 本部のうち「閲覧のみ」の人は編集できない
-  const canEdit = (role === "honbu" && honbuCanEdit) || role === "staff";
+  const authState = useAuth();
+  const { user, role, loading } = authState;
+  // 本部のうち「閲覧のみ」の人、茶道教室の担当でない「お稽古ごとの編集者」は編集できない
+  const canEdit = (role === "honbu" && canEditGroupWith(authState, "茶道教室")) || role === "staff";
 
   const [teacherMode, setTeacherMode] = useState(false);
   const [entries, setEntries] = useState<KeikoNoteEntry[]>([]);

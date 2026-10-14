@@ -1,4 +1,4 @@
-import { requireHonbuAny, requireHonbuEditor } from "./roles";
+import { requireHonbuAny, requireHonbuEditorFor } from "./roles";
 /**
  * Square決済（お月謝のカード自動払い＝サブスクリプション）
  *
@@ -1131,7 +1131,7 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
   { secrets: [squareAccessToken, slackBotTokenForSquare] },
   async (request) => {
     await refreshGroupSettings(); // 会の設定（料金など）を最新にする
-    requireHonbuEditor(request);
+    requireHonbuAny(request);
     const { memberId, cardId } = request.data ?? ({} as any);
     const legacyIds: string[] = Array.isArray(request.data?.legacySubscriptionIds) ? request.data.legacySubscriptionIds : [];
     if (typeof memberId !== "string" || typeof cardId !== "string") throw new HttpsError("invalid-argument", "パラメータが不正です。");
@@ -1140,6 +1140,7 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
     const subRef = db().doc(`memberSubscriptions/${memberId}`);
     const m = (await memberRef.get()).data() as MemberDoc | undefined;
     if (!m) throw new HttpsError("not-found", "会員が見つかりません。");
+    requireHonbuEditorFor(request, m.group ?? ""); // お稽古ごとの編集者は担当の会の会員だけ
     if (!m.group || !isCardAutoPayGroup(m.group) || m.paymentMethod === "都度払い" || m.status !== "在籍") {
       throw new HttpsError("failed-precondition", "カード自動払いの対象ではない会員です。");
     }

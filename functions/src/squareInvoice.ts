@@ -1,4 +1,4 @@
-import { requireHonbuEditor } from "./roles";
+import { requireHonbuAny, requireHonbuEditorFor } from "./roles";
 /**
  * Squareの請求書（Invoices API）の自動発行
  *
@@ -421,7 +421,7 @@ export const sendSquareInvoiceManually = onCall<{ kind: InvoiceKind; id: string 
   { secrets: [squareAccessToken, slackBotToken] },
   async (request) => {
     await refreshGroupSettings(); // 会の設定（料金など）を最新にする
-    requireHonbuEditor(request);
+    requireHonbuAny(request);
     const { kind, id } = request.data ?? ({} as { kind: InvoiceKind; id: string });
     if ((kind !== "license" && kind !== "entryFee") || !id) throw new HttpsError("invalid-argument", "対象が指定されていません。");
 
@@ -430,6 +430,7 @@ export const sendSquareInvoiceManually = onCall<{ kind: InvoiceKind; id: string 
     const snap = await ref.get();
     if (!snap.exists) throw new HttpsError("not-found", "対象が見つかりません。");
     const data = snap.data()!;
+    requireHonbuEditorFor(request, String(data.group ?? "")); // お稽古ごとの編集者は担当の会だけ
     const field = kind === "license" ? "squareInvoice" : "entryFeeInvoice";
     const existing = data[field] as InvoiceSummary | undefined;
     if (existing && existing.status !== "CANCELED") {

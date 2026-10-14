@@ -1,13 +1,13 @@
 "use client";
 
 // 管理画面「システム管理」タブ（アドミンのみ表示。2026-10-14〜）
-//   権限管理 … 本部アカウントの追加・権限（アドミン／編集できる／閲覧のみ）の変更・権限の解除
+//   権限管理 … 本部アカウントの追加・権限（アドミン／編集できる／お稽古ごとの編集者／閲覧のみ）の変更・権限の解除
 //   バックアップ … 毎日3:00の自動バックアップと手動バックアップの一覧・ダウンロード
 //   操作ログ … 誰が・いつ・何を変えたか（Cloud Functions〈recordOperationLog〉が記録）
 //   ログイン履歴 … 本部・スタッフ・会員のログインの成功／失敗
 // データの読み取りは Firestore ルール（isHonbuAdmin）と Cloud Functions（requireHonbuAdmin）でアドミンに限定している。
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   collection,
   getDocs,
@@ -22,6 +22,8 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
 import { useAuth, HONBU_LEVEL_LABEL, type HonbuLevel } from "@/lib/AuthContext";
+import { GROUP_AREAS, activeGroupsIn, useGroupSettings } from "@/lib/groupSettings";
+import { groupDisplayName } from "@/lib/areas";
 
 type Section = "access" | "backup" | "oplog" | "login";
 const SECTIONS: [Section, string][] = [
@@ -83,13 +85,48 @@ export default function SystemAdminPanel() {
 // 権限管理
 // ============================================================================
 
-type Account = { uid: string; email: string; level: HonbuLevel; created: string; lastSignIn: string; disabled: boolean };
-const LEVELS: HonbuLevel[] = ["admin", "editor", "viewer"];
+type Account = {
+  uid: string;
+  email: string;
+  level: HonbuLevel;
+  groups?: string[];
+  created: string;
+  lastSignIn: string;
+  disabled: boolean;
+};
+const LEVELS: HonbuLevel[] = ["admin", "editor", "group", "viewer"];
 const LEVEL_DESC: Record<HonbuLevel, string> = {
   admin: "すべての編集に加えて、バックアップ・操作ログ・ログイン履歴の確認と、本部アカウントの権限管理ができます。",
   editor: "会員・出席・入金・許状などのすべての画面を見て、編集・送信できます（これまでの本部と同じ）。バックアップ・ログ・権限管理は見られません。",
+  group:
+    "担当の会（複数選べます）だけ編集・送信できます。ほかの会は閲覧のみ。経理・会員名簿は担当の会の分だけ表示し、スタッフ管理・会の設定は表示しません。管理画面を開くと担当の会が最初に表示されます。",
   viewer: "すべての画面を見ることができますが、追加・変更・削除・LINE送信などの操作はできません。",
 };
+
+/** 担当の会を選ぶチェックボックス（エリアごと） */
+function GroupPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  useGroupSettings(); // 会の設定が読み込まれたら再描画する
+  const toggle = (g: string) => onChange(value.includes(g) ? value.filter((x) => x !== g) : [...value, g]);
+  return (
+    <div className="space-y-2">
+      {GROUP_AREAS.map((area) => {
+        const groups = activeGroupsIn(area);
+        if (groups.length === 0) return null;
+        return (
+          <div key={area} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="w-24 shrink-0 text-xs text-muted">{area}</span>
+            {groups.map((g) => (
+              <label key={g} className="flex items-center gap-1 text-sm">
+                <input type="checkbox" checked={value.includes(g)} onChange={() => toggle(g)} />
+                {groupDisplayName(g)}
+              </label>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function CopyLink({ link, note }: { link: string; note: string }) {
   const [copied, setCopied] = useState(false);
@@ -112,6 +149,13 @@ function CopyLink({ link, note }: { link: string; note: string }) {
   );
 }
 
+function levelLabel(level: HonbuLevel, groups?: string[]): string {
+  if (level === "group" && groups && groups.length > 0) {
+    return `${HONBU_LEVEL_LABEL[level]}（${groups.map(groupDisplayName).join("・")}）`;
+  }
+  return HONBU_LEVEL_LABEL[level];
+}
+
 function AccessSection() {
   const { user } = useAuth();
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -119,6 +163,10 @@ function AccessSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState("");
   const [newLevel, setNewLevel] = useState<HonbuLevel>("viewer");
+  const [newGroups, setNewGroups] = useState<string[]>([]);
+  // 一覧で「お稽古ごとの編集者」の担当の会を選んでいる行（メールアドレス）と、選択中の会
+  const [editingEmail, setEditingEmail] = useState<string | null>(null);
+  const [editingGroups, setEditingGroups] = useState<string[]>([]);
   const [linkInfo, setLinkInfo] = useState<{ link: string; note: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -135,18 +183,22 @@ function AccessSection() {
     load();
   }, [load]);
 
-  async function setAccess(email: string, level: HonbuLevel | "none") {
-    const label = level === "none" ? "本部の権限を外す" : `「${HONBU_LEVEL_LABEL[level]}」にする`;
-    if (!window.confirm(`${email} を${label}します。よろしいですか？`)) return;
+  async function setAccess(email: string, level: HonbuLevel | "none", groups: string[] = []): Promise<boolean> {
+    if (level === "group" && groups.length === 0) {
+      setError("担当の会を1つ以上選んでください。");
+      return false;
+    }
+    const label = level === "none" ? "本部の権限を外す" : `「${levelLabel(level, groups)}」にする`;
+    if (!window.confirm(`${email} を${label}します。よろしいですか？`)) return false;
     setBusy(email);
     setError(null);
     setMessage(null);
     setLinkInfo(null);
     try {
       const res = await httpsCallable<
-        { email: string; level: HonbuLevel | "none" },
+        { email: string; level: HonbuLevel | "none"; groups?: string[] },
         { created: boolean; passwordLink?: string | null }
-      >(getFunctions(), "setHonbuAccess")({ email, level });
+      >(getFunctions(), "setHonbuAccess")({ email, level, ...(level === "group" ? { groups } : {}) });
       if (res.data.created && res.data.passwordLink) {
         setLinkInfo({
           link: res.data.passwordLink,
@@ -156,9 +208,13 @@ function AccessSection() {
         setMessage(`${email} の権限を変更しました。${level === "none" ? "" : "ご本人が次に画面を開いたときから反映されます。"}`);
       }
       setNewEmail("");
+      setNewGroups([]);
+      setEditingEmail(null);
       await load();
+      return true;
     } catch (e) {
       setError(errMsg(e));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -181,6 +237,12 @@ function AccessSection() {
     }
   }
 
+  function startEditGroups(a: Account) {
+    setEditingEmail(a.email);
+    setEditingGroups(a.level === "group" ? a.groups ?? [] : []);
+    setError(null);
+  }
+
   return (
     <div className="space-y-6">
       <section className="bg-paper border border-line rounded-md p-5">
@@ -188,13 +250,13 @@ function AccessSection() {
         <dl className="text-sm space-y-2">
           {LEVELS.map((lv) => (
             <div key={lv} className="flex gap-3">
-              <dt className="w-24 shrink-0 font-bold text-matcha-deep">{HONBU_LEVEL_LABEL[lv]}</dt>
+              <dt className="w-36 shrink-0 font-bold text-matcha-deep">{HONBU_LEVEL_LABEL[lv]}</dt>
               <dd className="text-ink">{LEVEL_DESC[lv]}</dd>
             </div>
           ))}
         </dl>
         <p className="text-xs text-muted mt-3">
-          権限を変えるとセキュリティ通知のSlackにお知らせが届き、操作ログにも残ります。権限を下げた・外した場合は、その人はいったんログアウトされます。
+          権限の変更は操作ログに残ります。権限を下げた・外した・担当の会を減らした場合は、その人はいったんログアウトされます。
           世話人・講師（スタッフ）の担当は「スタッフ管理」タブで設定します。
         </p>
       </section>
@@ -225,56 +287,110 @@ function AccessSection() {
               <tbody>
                 {accounts.map((a) => {
                   const self = a.uid === user?.uid;
+                  const editing = editingEmail === a.email;
                   return (
-                    <tr key={a.uid} className="border-b border-line">
-                      <td className="py-2 pr-3">
-                        {a.email || a.uid}
-                        {self && <span className="ml-2 text-xs text-muted">（あなた）</span>}
-                        {a.disabled && <span className="ml-2 text-xs text-hanko">無効</span>}
-                      </td>
-                      <td className="pr-3">
-                        {self ? (
-                          <span className="font-bold text-matcha-deep">{HONBU_LEVEL_LABEL[a.level]}</span>
-                        ) : (
-                          <select
-                            className="border border-line rounded px-2 py-1 text-sm bg-white"
-                            value={a.level}
-                            disabled={busy === a.email}
-                            onChange={(e) => setAccess(a.email, e.target.value as HonbuLevel)}
-                          >
-                            {LEVELS.map((lv) => (
-                              <option key={lv} value={lv}>
-                                {HONBU_LEVEL_LABEL[lv]}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td className="pr-3 whitespace-nowrap">{fmt(a.lastSignIn)}</td>
-                      <td className="pr-3 whitespace-nowrap">{fmt(a.created)}</td>
-                      <td className="py-2 whitespace-nowrap text-right">
-                        {!self && a.email && (
-                          <>
-                            <button
-                              type="button"
-                              className="text-xs border border-line rounded px-2 py-1 mr-2"
-                              disabled={busy === a.email}
-                              onClick={() => issueLink(a.email)}
-                            >
-                              パスワード設定リンク
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs border border-line text-hanko rounded px-2 py-1"
-                              disabled={busy === a.email}
-                              onClick={() => setAccess(a.email, "none")}
-                            >
-                              権限を外す
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={a.uid}>
+                      <tr className={editing ? "" : "border-b border-line"}>
+                        <td className="py-2 pr-3 align-top">
+                          {a.email || a.uid}
+                          {self && <span className="ml-2 text-xs text-muted">（あなた）</span>}
+                          {a.disabled && <span className="ml-2 text-xs text-hanko">無効</span>}
+                        </td>
+                        <td className="py-2 pr-3 align-top">
+                          {self ? (
+                            <span className="font-bold text-matcha-deep">{levelLabel(a.level, a.groups)}</span>
+                          ) : (
+                            <>
+                              <select
+                                className="border border-line rounded px-2 py-1 text-sm bg-white"
+                                value={editing ? "group" : a.level}
+                                disabled={busy === a.email}
+                                onChange={(e) => {
+                                  const lv = e.target.value as HonbuLevel;
+                                  // お稽古ごとの編集者は、担当の会を選んでから保存する
+                                  if (lv === "group") startEditGroups(a);
+                                  else {
+                                    setEditingEmail(null);
+                                    setAccess(a.email, lv);
+                                  }
+                                }}
+                              >
+                                {LEVELS.map((lv) => (
+                                  <option key={lv} value={lv}>
+                                    {HONBU_LEVEL_LABEL[lv]}
+                                  </option>
+                                ))}
+                              </select>
+                              {a.level === "group" && !editing && (
+                                <div className="mt-1 text-xs text-ink">
+                                  担当：{(a.groups ?? []).map(groupDisplayName).join("・") || "（未設定）"}
+                                  <button
+                                    type="button"
+                                    className="ml-2 text-matcha-deep underline"
+                                    onClick={() => startEditGroups(a)}
+                                  >
+                                    変更
+                                  </button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap align-top">{fmt(a.lastSignIn)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap align-top">{fmt(a.created)}</td>
+                        <td className="py-2 whitespace-nowrap text-right align-top">
+                          {!self && a.email && (
+                            <>
+                              <button
+                                type="button"
+                                className="text-xs border border-line rounded px-2 py-1 mr-2"
+                                disabled={busy === a.email}
+                                onClick={() => issueLink(a.email)}
+                              >
+                                パスワード設定リンク
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs border border-line text-hanko rounded px-2 py-1"
+                                disabled={busy === a.email}
+                                onClick={() => setAccess(a.email, "none")}
+                              >
+                                権限を外す
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                      {editing && (
+                        <tr className="border-b border-line">
+                          <td colSpan={5} className="pb-3">
+                            <div className="border border-line rounded p-3 bg-[#FCFBF8]">
+                              <p className="text-xs text-muted mb-2">
+                                {a.email} の担当の会を選んでください（複数選べます）。担当の会だけ編集でき、ほかの会は閲覧のみになります。
+                              </p>
+                              <GroupPicker value={editingGroups} onChange={setEditingGroups} />
+                              <div className="flex gap-2 mt-3">
+                                <button
+                                  type="button"
+                                  className="text-sm bg-matcha-deep text-white rounded px-4 py-1.5 disabled:opacity-50"
+                                  disabled={editingGroups.length === 0 || busy === a.email}
+                                  onClick={() => setAccess(a.email, "group", editingGroups)}
+                                >
+                                  この担当で保存する
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-sm border border-line rounded px-4 py-1.5"
+                                  onClick={() => setEditingEmail(null)}
+                                >
+                                  キャンセル
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -289,43 +405,51 @@ function AccessSection() {
           メールアドレスがまだ登録されていなければ新しく作り、パスワード設定用のリンクを表示します。登録済みのアカウントなら権限だけを付けます。
         </p>
         <form
-          className="flex flex-wrap items-end gap-3"
+          className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (newEmail.trim()) setAccess(newEmail.trim(), newLevel);
+            if (newEmail.trim()) setAccess(newEmail.trim(), newLevel, newGroups);
           }}
         >
-          <label className="block">
-            <span className="block text-xs text-muted mb-1">メールアドレス</span>
-            <input
-              type="email"
-              className="border border-line rounded px-3 py-2 text-sm w-72"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="name@example.com"
-            />
-          </label>
-          <label className="block">
-            <span className="block text-xs text-muted mb-1">権限</span>
-            <select
-              className="border border-line rounded px-3 py-2 text-sm bg-white"
-              value={newLevel}
-              onChange={(e) => setNewLevel(e.target.value as HonbuLevel)}
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className="block text-xs text-muted mb-1">メールアドレス</span>
+              <input
+                type="email"
+                className="border border-line rounded px-3 py-2 text-sm w-72"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs text-muted mb-1">権限</span>
+              <select
+                className="border border-line rounded px-3 py-2 text-sm bg-white"
+                value={newLevel}
+                onChange={(e) => setNewLevel(e.target.value as HonbuLevel)}
+              >
+                {LEVELS.map((lv) => (
+                  <option key={lv} value={lv}>
+                    {HONBU_LEVEL_LABEL[lv]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="text-sm bg-matcha-deep text-white rounded px-4 py-2 disabled:opacity-50"
+              disabled={!newEmail.trim() || busy !== null || (newLevel === "group" && newGroups.length === 0)}
             >
-              {LEVELS.map((lv) => (
-                <option key={lv} value={lv}>
-                  {HONBU_LEVEL_LABEL[lv]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="text-sm bg-matcha-deep text-white rounded px-4 py-2 disabled:opacity-50"
-            disabled={!newEmail.trim() || busy !== null}
-          >
-            追加する
-          </button>
+              追加する
+            </button>
+          </div>
+          {newLevel === "group" && (
+            <div className="border border-line rounded p-3 bg-[#FCFBF8]">
+              <p className="text-xs text-muted mb-2">担当の会を選んでください（複数選べます）。</p>
+              <GroupPicker value={newGroups} onChange={setNewGroups} />
+            </div>
+          )}
         </form>
       </section>
     </div>

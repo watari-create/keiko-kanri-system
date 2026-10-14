@@ -16,7 +16,7 @@ import {
   entryFeeFor,
 } from "./squareInvoice";
 import { refreshGroupSettings, groupDisplayNameServer } from "./groupSettings";
-import { requireHonbuEditor, requireHonbuAdmin, requireHonbuAny, honbuLevelOf, HONBU_LEVEL_LABEL, type HonbuLevel } from "./roles";
+import { requireHonbuEditor, requireHonbuEditorFor, requireHonbuAdmin, requireHonbuAny, honbuLevelOf, honbuGroupsOf, HONBU_LEVEL_LABEL, type HonbuLevel } from "./roles";
 import { pullCalendarToSystem, calendarFetch, deleteEvent, addDays as addDaysKey, eventDateKey as eventDateKeyCal, type CalEvent } from "./lessonCalendarSync";
 
 admin.initializeApp();
@@ -416,7 +416,9 @@ export const onLeaveRequestApproved = onDocumentUpdated(
       await db.collection("members").doc(after.memberId).update({ status: newStatus });
       await db.collection("notifications").add({
         kind: "leave_approved",
-        message: `${after.memberName}様の${after.type}申請が受理されました。`,
+        message: after.direct
+          ? `${after.memberName}様を${after.type === "復会" ? "復会" : after.type}にしました（${after.operatedBy ?? "講師"}さん）。`
+          : `${after.memberName}様の${after.type}申請が受理されました。`,
         createdAt: new Date().toISOString(),
         read: false,
       });
@@ -739,6 +741,41 @@ export const onLeaveRequestCreated = onDocumentCreated(
     const data = event.data?.data();
     if (!data) return;
     if (data.status !== "pending") return;
+
+    // 講師・本部が会員詳細から直接手続きしたもの（2026-10-14〜、本人の申請は廃止）：
+    // Slackにお知らせを送り、スレッド返信ができるよう ts を保存してから自動で承認にする。
+    // 承認後の処理（会員ステータスの反映・カード自動払いの解約／再開）は onLeaveRequestApproved・
+    // onLeaveRequestApprovedSquare が行う。
+    if (data.direct === true) {
+      const update: Record<string, unknown> = {
+        status: "approved",
+        approvedAt: new Date().toISOString(),
+        approvedBy: data.operatedBy ?? "staff",
+      };
+      const token = slackBotToken.value();
+      const channel = slackHqChannel.value();
+      if (token && channel) {
+        const label = data.type === "復会" ? "復会（在籍に戻す）" : data.type;
+        const text =
+          `${data.operatedBy ?? "講師"}さん（${data.operatedByRole ?? "講師"}）が「${label}」の手続きをしました\n` +
+          `会員：${data.memberName}様（${groupDisplayName(data.group)}）\n` +
+          (data.reason ? `理由：${data.reason}\n` : "") +
+          `ステータスは自動で切り替わります（カード自動払いの結果はこのスレッドにお知らせします）。`;
+        try {
+          const posted = await postSlackMessage(token, channel, text);
+          if (posted) {
+            update.slackTs = posted.ts;
+            update.slackChannel = posted.channel;
+          }
+        } catch (err) {
+          console.error("Slack通知の送信に失敗しました", err);
+        }
+      } else {
+        console.warn("SLACK_BOT_TOKEN / SLACK_HQ_CHANNEL が未設定のため、Slack通知をスキップしました。");
+      }
+      await event.data?.ref.update(update);
+      return;
+    }
 
     const token = slackBotToken.value();
     if (!token) {
@@ -1618,7 +1655,7 @@ export const syncNextLessonDates = onSchedule(
  * カレンダー共有設定後の動作確認や、カレンダーを直接直したあとの即時反映に使う。
  */
 export const syncNextLessonDatesNow = onCall(async (request) => {
-  requireHonbuEditor(request);
+  if (requireHonbuAny(request) === "viewer") throw new HttpsError("permission-denied", "閲覧のみの権限のため、この操作はできません。");
   const { dates } = await refreshNextLessonDates();
   return { dates };
 });
@@ -1632,7 +1669,7 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
  * 3. meta/nextLessonDates をすぐに更新する（マイページ・講師画面・LINE/Slack通知に反映）
  */
 export const changeLessonSchedule = onCall<{ eventId: string; date: string; place?: string }>(async (request) => {
-  requireHonbuEditor(request);
+  requireHonbuAny(request);
   const { eventId } = request.data ?? ({} as { eventId: string; date: string });
   const newDate = String(request.data?.date ?? "");
   const place = String(request.data?.place ?? "").trim().slice(0, 100);
@@ -1656,6 +1693,8 @@ export const changeLessonSchedule = onCall<{ eventId: string; date: string; plac
   if (!current) {
     throw new HttpsError("not-found", "対象のお稽古が見つかりません。画面を開き直してください。");
   }
+  // お稽古ごとの編集者は、担当の会のお稽古だけ変更できる（合同のお稽古は全部の会の担当が必要）
+  requireHonbuEditorFor(request, lessonGroupsOfKeys(keys));
   const oldDate = current.date.slice(0, 10);
   const changeRef = db.doc(`lessonChanges/${eventId}`);
   const prev = (await changeRef.get()).data() as LessonChangeDoc | undefined;
@@ -1851,8 +1890,10 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
     if (role !== "staff" && role !== "honbu") {
       throw new HttpsError("permission-denied", "スタッフとしてログインしてください。");
     }
-    // 本部のうち「閲覧のみ」の人は送信できない
-    if (role === "honbu") requireHonbuEditor(request);
+    // 本部のうち「閲覧のみ」の人は送信できない。「お稽古ごとの編集者」は担当の会の生徒だけに送れる
+    if (role === "honbu" && requireHonbuAny(request) === "viewer") {
+      throw new HttpsError("permission-denied", "閲覧のみの権限のため、この操作はできません。");
+    }
 
     const { memberIds, message } = request.data ?? ({} as { memberIds?: string[]; message?: string });
     if (!Array.isArray(memberIds) || memberIds.length === 0 || typeof message !== "string" || !message.trim()) {
@@ -1874,6 +1915,7 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
       sentBy = (staffSnap.data()?.name as string | undefined) ?? "スタッフ";
     } else {
       sentBy = (request.auth?.token?.email as string | undefined) ?? "本部";
+      if (honbuLevelOf(request.auth?.token) === "group") allowedGroups = honbuGroupsOf(request.auth?.token);
     }
 
     const memberSnaps = await Promise.all(memberIds.map((id) => db.collection("members").doc(id).get()));
@@ -2953,6 +2995,16 @@ export { syncChadoSaturdaySessionToCalendar, syncChadoClassSessionToCalendar } f
 // ---- 管理画面「お稽古の日程変更・開催場所の変更」からのお稽古日の追加・削除（名月会・茶道教室 木曜／日曜・G1） ----
 
 const ADDABLE_GROUPS = ["名月会", "茶道教室", "Gマダムの茶の湯講座"];
+
+/** 「次回のお稽古」のキー（例：名月会、茶道教室_木曜日）から会の名前を取り出す */
+function lessonGroupsOfKeys(keys: string[]): string[] {
+  const out = new Set<string>();
+  for (const key of keys) {
+    const g = LESSON_GROUPS.find((x) => key === x || key.startsWith(x));
+    out.add(g ?? key);
+  }
+  return [...out];
+}
 const CHADO_WEEKLY_DEFAULT: Record<string, { time: [string, string]; am: string; pm?: string }> = {
   "木曜日": { time: ["15:00", "17:00"], am: "阿部宗亜先生" },
   "日曜日": { time: ["10:00", "15:00"], am: "郷田家元教授", pm: "郷田家元教授" },
@@ -2964,12 +3016,13 @@ const CHADO_WEEKLY_DEFAULT: Record<string, { time: [string, string]; am: string;
  * 茶道教室は担当の先生つきの開催日（chadoClassSessions）も作る（タイトルへの先生の書き込みはトリガーが行う）。
  */
 export const addLessonDate = onCall<{ group: string; chadoClass?: string; date: string; place?: string }>(async (request) => {
-  requireHonbuEditor(request);
+  requireHonbuAny(request);
   const group = String(request.data?.group ?? "");
   const date = String(request.data?.date ?? "");
   const place = String(request.data?.place ?? "").trim().slice(0, 100);
   const chadoClass = String(request.data?.chadoClass ?? "");
   if (!ADDABLE_GROUPS.includes(group)) throw new HttpsError("invalid-argument", "この会は追加できません。");
+  requireHonbuEditorFor(request, group);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpsError("invalid-argument", "日付を正しく指定してください。");
   if (group === "茶道教室" && !CHADO_WEEKLY_DEFAULT[chadoClass]) {
     throw new HttpsError("invalid-argument", "クラス（木曜日・日曜日）を選んでください。土曜日クラスは「開催日・予約状況」から追加します。");
@@ -3026,9 +3079,20 @@ export const addLessonDate = onCall<{ group: string; chadoClass?: string; date: 
 
 /** お稽古日を削除する（本部のみ）。カレンダーの予定を消し、すぐ「次回のお稽古」に反映する */
 export const deleteLessonDate = onCall<{ eventId: string }>(async (request) => {
-  requireHonbuEditor(request);
+  requireHonbuAny(request);
   const eventId = String(request.data?.eventId ?? "");
   if (!eventId) throw new HttpsError("invalid-argument", "対象のお稽古を指定してください。");
+  {
+    // どの会のお稽古かを、同期済みの一覧から調べる（お稽古ごとの編集者は担当の会だけ削除できる）
+    const meta = (await db.doc("meta/nextLessonDates").get()).data() as
+      | { upcoming?: Record<string, NextLessonInfo[]> }
+      | undefined;
+    const keys = Object.entries(meta?.upcoming ?? {})
+      .filter(([, list]) => list.some((i) => i.eventId === eventId))
+      .map(([key]) => key);
+    if (keys.length > 0) requireHonbuEditorFor(request, lessonGroupsOfKeys(keys));
+    else requireHonbuEditor(request);
+  }
   try {
     await deleteEvent(eventId);
   } catch (err) {
@@ -3113,6 +3177,7 @@ type HonbuAccountRow = {
   uid: string;
   email: string;
   level: HonbuLevel;
+  groups: string[]; // お稽古ごとの編集者の担当の会
   created: string;
   lastSignIn: string;
   disabled: boolean;
@@ -3130,6 +3195,7 @@ async function listHonbuAccountRows(): Promise<HonbuAccountRow[]> {
         uid: u.uid,
         email: u.email ?? "",
         level,
+        groups: honbuGroupsOf(u.customClaims),
         created: u.metadata.creationTime ?? "",
         lastSignIn: u.metadata.lastSignInTime ?? "",
         disabled: u.disabled,
@@ -3137,7 +3203,7 @@ async function listHonbuAccountRows(): Promise<HonbuAccountRow[]> {
     }
     pageToken = page.pageToken;
   } while (pageToken);
-  const order: Record<HonbuLevel, number> = { admin: 0, editor: 1, viewer: 2 };
+  const order: Record<HonbuLevel, number> = { admin: 0, editor: 1, group: 2, viewer: 3 };
   return rows.sort((a, b) => order[a.level] - order[b.level] || a.email.localeCompare(b.email));
 }
 
@@ -3147,20 +3213,32 @@ export const listHonbuAccounts = onCall(async (request) => {
   return { accounts: await listHonbuAccountRows() };
 });
 
-/** 権限変更をSlack（セキュリティ通知の宛先）に知らせ、操作ログにも残す */
-async function notifyHonbuAccessChange(byEmail: string, byUid: string, targetEmail: string, before: string, after: string) {
+/**
+ * 管理画面からの権限変更を操作ログに残す（Slackには通知しない。2026-10-14 ゆちゃ指示）。
+ * あわせて、毎時の監視〈watchPrivilegedAccounts〉が前回の状態として持っている本部アカウント一覧
+ * （securityState/accounts）にも反映し、正規の変更で「本部権限のアカウントが追加されました」の
+ * アラートが出ないようにする（コンソール等、画面以外での変更は従来どおりアラートになる）。
+ */
+async function recordHonbuAccessChange(
+  byEmail: string,
+  byUid: string,
+  target: { uid: string; email: string },
+  before: string,
+  after: string,
+  isHonbuNow: boolean
+) {
+  const targetEmail = target.email;
   try {
-    const token = slackBotToken.value();
-    const target = slackSecurityReportTarget.value();
-    if (token && target) {
-      await postSlackMessage(
-        token,
-        target,
-        `🔐【本部アカウントの権限変更】\n${targetEmail}：${before} → ${after}\n変更した人：${byEmail}\n（${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false })}）`
-      );
+    const stateRef = db.collection("securityState").doc("accounts");
+    // 監視がまだ一度も記録していない（ドキュメントがない）場合は触らない。
+    // ここで作ってしまうと、次回の監視が既存の本部アカウント全員を「追加された」と誤って通知するため。
+    if ((await stateRef.get()).exists) {
+      await stateRef.update({
+        [`honbu.${target.uid}`]: isHonbuNow ? targetEmail : admin.firestore.FieldValue.delete(),
+      });
     }
   } catch (e) {
-    console.error("権限変更のSlack通知に失敗しました", e);
+    console.error("監視用の本部アカウント一覧の更新に失敗しました", e);
   }
   try {
     await db.collection("operationLogs").add({
@@ -3187,12 +3265,12 @@ async function notifyHonbuAccessChange(byEmail: string, byUid: string, targetEma
 /**
  * 本部アカウントの権限を設定する（アドミンのみ）。
  *   level: "admin" | "editor" | "viewer" … その権限の本部アカウントにする（アカウントがなければ作る）
+ *   level: "group" … お稽古ごとの編集者。groups に担当の会（複数可）を渡す
  *   level: "none" … 本部の権限を外す（アカウント自体は残るが、管理画面には入れなくなる）
  * アカウントを新しく作ったときは、本人がパスワードを決めるためのリンクを返す（画面に一度だけ表示）。
- * 権限を下げた・外したときは、その人のログインを無効にして、すぐに反映させる。
+ * 権限を下げた・外した・担当の会を減らしたときは、その人のログインを無効にして、すぐに反映させる。
  */
-export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none" }>(
-  { secrets: [slackBotToken] },
+export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none"; groups?: string[] }>(
   async (request) => {
     requireHonbuAdmin(request);
     const email = String(request.data?.email ?? "").trim().toLowerCase();
@@ -3200,8 +3278,18 @@ export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none"
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       throw new HttpsError("invalid-argument", "メールアドレスを正しく入力してください。");
     }
-    if (level !== "admin" && level !== "editor" && level !== "viewer" && level !== "none") {
+    if (level !== "admin" && level !== "editor" && level !== "group" && level !== "viewer" && level !== "none") {
       throw new HttpsError("invalid-argument", "権限を選んでください。");
+    }
+    const groups =
+      level === "group"
+        ? [...new Set((Array.isArray(request.data?.groups) ? request.data.groups : []).map((g) => String(g).trim()).filter(Boolean))]
+        : [];
+    if (level === "group") {
+      if (groups.length === 0) throw new HttpsError("invalid-argument", "担当の会を1つ以上選んでください。");
+      if (groups.length > 15 || groups.some((g) => g.length > 40)) {
+        throw new HttpsError("invalid-argument", "担当の会の指定が正しくありません。");
+      }
     }
     const byUid = request.auth!.uid;
     const byEmail = (request.auth?.token?.email as string | undefined) ?? byUid;
@@ -3219,11 +3307,13 @@ export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none"
       throw new HttpsError("not-found", "このメールアドレスのアカウントはありません。");
     }
     const prevLevel = user ? honbuLevelOf(user.customClaims) : null;
+    const prevGroups = user ? honbuGroupsOf(user.customClaims) : [];
     const prevRole = user?.customClaims?.role;
     if (user && prevRole && prevRole !== "honbu") {
       throw new HttpsError("failed-precondition", `このアカウントは本部ではない役割（${String(prevRole)}）で使われているため変更できません。`);
     }
-    if (prevLevel === level) return { ok: true, created: false, unchanged: true };
+    const sameGroups = prevGroups.length === groups.length && groups.every((g) => prevGroups.includes(g));
+    if (prevLevel === level && sameGroups) return { ok: true, created: false, unchanged: true };
 
     // アドミンが1人もいなくなる変更は止める
     if (prevLevel === "admin" && level !== "admin") {
@@ -3237,24 +3327,36 @@ export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none"
       created = true;
     }
     const claims = { ...(user.customClaims ?? {}) } as Record<string, unknown>;
+    delete claims.honbuGroups;
     if (level === "none") {
       delete claims.role;
       delete claims.honbuLevel;
     } else {
       claims.role = "honbu";
       claims.honbuLevel = level;
+      if (level === "group") claims.honbuGroups = groups;
     }
     await admin.auth().setCustomUserClaims(user.uid, claims);
 
-    // 権限を下げた・外したときは、今ログイン中の端末を締め出して、すぐに反映させる
-    const rank = (l: HonbuLevel | "none" | null) => (l === "admin" ? 3 : l === "editor" ? 2 : l === "viewer" ? 1 : 0);
-    if (!created && rank(level) < rank(prevLevel)) await admin.auth().revokeRefreshTokens(user.uid);
+    // 権限を下げた・外した・担当の会を減らしたときは、今ログイン中の端末を締め出して、すぐに反映させる
+    const rank = (l: HonbuLevel | "none" | null) =>
+      l === "admin" ? 4 : l === "editor" ? 3 : l === "group" ? 2 : l === "viewer" ? 1 : 0;
+    const lostGroups = prevLevel === "group" && level === "group" && prevGroups.some((g) => !groups.includes(g));
+    if (!created && (rank(level) < rank(prevLevel) || lostGroups)) await admin.auth().revokeRefreshTokens(user.uid);
 
     let passwordLink: string | null = null;
     if (created) passwordLink = await admin.auth().generatePasswordResetLink(email);
 
-    const label = (l: HonbuLevel | "none" | null) => (l && l !== "none" ? HONBU_LEVEL_LABEL[l] : "権限なし");
-    await notifyHonbuAccessChange(byEmail, byUid, email, created ? "（新規作成）" : label(prevLevel), label(level));
+    const label = (l: HonbuLevel | "none" | null, gs: string[]) =>
+      !l || l === "none" ? "権限なし" : l === "group" ? `${HONBU_LEVEL_LABEL[l]}（${gs.map(groupDisplayNameServer).join("・")}）` : HONBU_LEVEL_LABEL[l];
+    await recordHonbuAccessChange(
+      byEmail,
+      byUid,
+      { uid: user.uid, email },
+      created ? "（新規作成）" : label(prevLevel, prevGroups),
+      label(level, groups),
+      level !== "none"
+    );
     return { ok: true, created, passwordLink };
   }
 );

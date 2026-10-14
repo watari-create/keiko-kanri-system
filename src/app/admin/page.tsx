@@ -28,7 +28,8 @@ import {
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db, auth } from "@/lib/firebase";
-import { useAuth, HONBU_LEVEL_LABEL } from "@/lib/AuthContext";
+import LeaveOperationPanel from "@/components/LeaveOperationPanel";
+import { useAuth, HONBU_LEVEL_LABEL, canEditGroupWith } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import DateAttendanceGrid from "@/components/DateAttendanceGrid";
 import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
@@ -122,7 +123,7 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "会の設定":
     "会ごとの料金（お月謝・都度払い・入会金）と入会の申し込み（受付中／停止・案内文・入力項目）を変更します。新しい会の発足（運用ルールの記入用テンプレートから）・会の削除、各会の登録シート（担当者・運営ルール）の確認もここで行います。",
   "システム管理":
-    "アドミンのみ。本部アカウントの権限（アドミン／編集できる／閲覧のみ）の管理、全データのバックアップ、操作ログ・ログイン履歴の確認を行います。",
+    "アドミンのみ。本部アカウントの権限（アドミン／編集できる／お稽古ごとの編集者／閲覧のみ）の管理、全データのバックアップ、操作ログ・ログイン履歴の確認を行います。",
 };
 
 const LICENSE_STAGES: LicenseStatus[] = [
@@ -187,13 +188,49 @@ interface StaffDraft {
 }
 
 export default function AdminPage() {
-  const { role, loading, honbuLevel, canEdit, isAdmin } = useAuth();
-  const areaList = isAdmin ? ADMIN_AREA_LIST : AREA_LIST;
+  const authState = useAuth();
+  const { role, loading, honbuLevel, canEdit, isAdmin, honbuGroups } = authState;
+  // お稽古ごとの編集者（担当の会だけ編集できる。ほかの会は閲覧のみ）
+  const isGroupEditor = honbuLevel === "group";
   const router = useRouter();
 
   const [area, setArea] = useState<Area>("本部稽古");
   const groupSettingsList = useGroupSettings(); // 会の設定が変わったら再描画する
   const [group, setGroup] = useState(defaultGroupFor("本部稽古") ?? "茶道教室");
+
+  // 経理タブの対象（お稽古ごとの編集者は担当の会の分だけ）
+  const scopedKeiriGroups = (): string[] =>
+    isGroupEditor ? keiriGroups().filter((g) => honbuGroups.includes(g)) : keiriGroups();
+  // 表示するタブ：アドミンは「システム管理」も。お稽古ごとの編集者はスタッフ管理・会の設定を出さず、
+  // 経理は担当の会に経理の対象（本部稽古の会）があるときだけ出す
+  const areaList: Area[] = isAdmin
+    ? ADMIN_AREA_LIST
+    : isGroupEditor
+    ? AREA_LIST.filter(
+        (a) => a !== "スタッフ管理" && a !== "会の設定" && (a !== "経理" || scopedKeiriGroups().length > 0)
+      )
+    : AREA_LIST;
+
+  // お稽古ごとの編集者は、開いたときに担当の会（1つ目）を表示する
+  const [groupEditorInitDone, setGroupEditorInitDone] = useState(false);
+  useEffect(() => {
+    if (groupEditorInitDone || loading || !isGroupEditor || honbuGroups.length === 0) return;
+    if (allGroupSettings().length === 0) return; // 会の設定の読み込みを待つ
+    const first = honbuGroups[0];
+    setArea(areaForGroup(first));
+    setGroup(first);
+    setGroupEditorInitDone(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, isGroupEditor, honbuGroups.join("|"), groupSettingsList, groupEditorInitDone]);
+
+  // 今表示している画面で編集できるか。お稽古ごとの編集者は、担当の会の画面と、
+  // 担当の会の分だけに絞った経理・会員名簿で編集できる
+  const editableHere =
+    canEdit ||
+    (isGroupEditor &&
+      (((area === "宗徧流稽古" || area === "本部稽古" || area === "UCI") && honbuGroups.includes(group)) ||
+        area === "経理" ||
+        area === "会員名簿"));
 
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<LicenseRequest[]>([]);
@@ -398,7 +435,9 @@ export default function AdminPage() {
   function switchArea(a: Area) {
     setArea(a);
     setShowNotifications(false);
-    const g = defaultGroupFor(a);
+    // お稽古ごとの編集者は、そのエリアに担当の会があればそれを最初に表示する
+    const mine = isGroupEditor ? areaGroups(a)?.find((g) => honbuGroups.includes(g)) : undefined;
+    const g = mine ?? defaultGroupFor(a);
     if (g) setGroup(g);
   }
 
@@ -411,13 +450,13 @@ export default function AdminPage() {
     }
     const q =
       area === "経理"
-        ? query(collection(db, "members"), where("group", "in", keiriGroups()))
+        ? query(collection(db, "members"), where("group", "in", scopedKeiriGroups()))
         : query(collection(db, "members"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [area, group, area === "経理" ? keiriGroups().join(",") : ""]);
+  }, [area, group, area === "経理" ? scopedKeiriGroups().join(",") : ""]);
 
   // 許状申請をリアルタイム購読（本部稽古・経理のみ。宗徧流稽古は許状申請の仕組みを使わない）
   useEffect(() => {
@@ -427,13 +466,13 @@ export default function AdminPage() {
     }
     const q =
       area === "経理"
-        ? query(collection(db, "licenseRequests"), where("group", "in", keiriGroups()))
+        ? query(collection(db, "licenseRequests"), where("group", "in", scopedKeiriGroups()))
         : query(collection(db, "licenseRequests"), where("group", "==", group));
     return onSnapshot(q, (snap) => {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LicenseRequest)));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [area, group, area === "経理" ? keiriGroups().join(",") : ""]);
+  }, [area, group, area === "経理" ? scopedKeiriGroups().join(",") : ""]);
 
   // 退会・休会・復会申請をリアルタイム購読（本部稽古のみ）
   useEffect(() => {
@@ -469,13 +508,17 @@ export default function AdminPage() {
     };
   }, []);
 
+  // 新着：お稽古ごとの編集者は担当の会の分だけ
+  const inMyGroups = (g: string) => !isGroupEditor || honbuGroups.includes(g);
   const pendingLicense = useMemo(
-    () => allLicenseRequests.filter((r) => r.status !== "完了" && r.status !== "取消"),
-    [allLicenseRequests]
+    () => allLicenseRequests.filter((r) => r.status !== "完了" && r.status !== "取消" && inMyGroups(r.group)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allLicenseRequests, isGroupEditor, honbuGroups.join("|")]
   );
   const pendingLeave = useMemo(
-    () => allLeaveRequests.filter((r) => r.status === "pending"),
-    [allLeaveRequests]
+    () => allLeaveRequests.filter((r) => r.status === "pending" && inMyGroups(r.group)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allLeaveRequests, isGroupEditor, honbuGroups.join("|")]
   );
   const notificationCount = pendingLicense.length + pendingLeave.length;
 
@@ -1290,6 +1333,7 @@ export default function AdminPage() {
             {areaGroups(area)!.map((g) => (
               <option key={g} value={g}>
                 {groupDisplayName(g)}
+                {isGroupEditor && honbuGroups.includes(g) ? "（担当）" : ""}
               </option>
             ))}
           </select>
@@ -1301,14 +1345,23 @@ export default function AdminPage() {
         </div>
       )}
 
-      {!canEdit && (
+      {!editableHere && (
         <div className="border border-line bg-[#F3EFE2] rounded-md px-4 py-3 mb-6 text-sm text-ink">
-          <span className="font-bold">閲覧のみの権限です。</span>
-          すべての画面を見ることができますが、追加・変更・削除・送信はできません。変更が必要なときはアドミンに依頼してください。
+          {isGroupEditor ? (
+            <>
+              <span className="font-bold">この画面は閲覧のみです。</span>
+              編集できるのは担当の会（{honbuGroups.map(groupDisplayName).join("・")}）だけです。
+            </>
+          ) : (
+            <>
+              <span className="font-bold">閲覧のみの権限です。</span>
+              すべての画面を見ることができますが、追加・変更・削除・送信はできません。変更が必要なときはアドミンに依頼してください。
+            </>
+          )}
         </div>
       )}
 
-      <ReadOnlyGuard enabled={!canEdit}>
+      <ReadOnlyGuard enabled={!editableHere}>
       {/* 名月会・茶道教室（木曜日・日曜日）・G1：お稽古の日程変更・開催場所の変更（新月会は出席簿の開催日編集から） */}
       {area === "本部稽古" && ["名月会", "茶道教室", "Gマダムの茶の湯講座"].includes(group) && (
         <LessonScheduleEditor group={group} />
@@ -2224,7 +2277,7 @@ export default function AdminPage() {
         </>
       )}
 
-      {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} />}
+      {area === "会員名簿" && <MemberRoster onSelect={openMemberDetail} groups={isGroupEditor ? honbuGroups : undefined} />}
 
       {area === "会の設定" && <GroupSettingsPanel />}
 
@@ -2309,6 +2362,16 @@ export default function AdminPage() {
                 閉じる ✕
               </button>
             </div>
+
+            {canEditGroupWith(authState, selectedMember.group) && (
+              <div className="mb-4 -mt-4">
+                <LeaveOperationPanel
+                  member={selectedMember}
+                  operatorName={auth.currentUser?.displayName || auth.currentUser?.email || "本部"}
+                  operatorRole="本部"
+                />
+              </div>
+            )}
 
             <div className="border border-line rounded p-3 mb-4 bg-[#FCFBF8]">
               <h4 className="text-sm font-bold mb-1">ご家族との連携</h4>

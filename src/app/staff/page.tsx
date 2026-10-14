@@ -40,6 +40,7 @@ import { currentMonthKey } from "@/lib/fiscalMonths";
 import { isChadoSaturdayMember } from "@/lib/chadoClasses";
 import { LICENSE_STATUS_EMOJI } from "@/types";
 import MonthSelect from "@/components/MonthSelect";
+import LeaveOperationPanel from "@/components/LeaveOperationPanel";
 import type { StaffAccount, Member, LicenseRequest, ChadoStudentNote, ChadoSaturdaySession, LineMessageLog } from "@/types";
 
 export default function StaffPage() {
@@ -733,6 +734,14 @@ export default function StaffPage() {
                 <dd>{selectedMember.joinDate || "—"}</dd>
               </div>
             </dl>
+
+            {account && (
+              <LeaveOperationPanel
+                member={members.find((m) => m.id === selectedMember.id) ?? selectedMember}
+                operatorName={account.name}
+                operatorRole={account.role === "sewanin" ? "世話人" : "講師"}
+              />
+            )}
 
             {group === "茶道教室" && (
               <div className="mt-4 pt-4 border-t border-line">
