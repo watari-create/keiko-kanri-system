@@ -155,7 +155,10 @@ function compareMemberNo(a: Pick<Member, "id">, b: Pick<Member, "id">): number {
 }
 
 function toDraft(m: Member): MemberDraft {
-  const { id, group, groupCategory, ...rest } = m;
+  // linkedMemberIds も実際に取り除く（型の Omit だけでは実行時に残り、「この内容で保存する」で
+  // 会員詳細を開いた時点の古い連携が書き戻されて、連携解除が元に戻ってしまっていた）
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { id, group, groupCategory, linkedMemberIds, ...rest } = m;
   return rest;
 }
 
@@ -1088,6 +1091,9 @@ export default function AdminPage() {
         await updateDoc(otherRef, { linkedMemberIds: otherLinked });
       }
       setSelectedMember({ ...selectedMember, linkedMemberIds: selfLinked });
+    } catch (e) {
+      console.error("ご家族の連携解除に失敗しました", e);
+      alert(`ご家族の連携を解除できませんでした。\n${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLinkingFamily(false);
     }
