@@ -1121,11 +1121,17 @@ export default function AdminPage() {
     if (!selectedMember || !draft) return;
     setSavingDetail(true);
     try {
-      await updateDoc(doc(db, "members", selectedMember.id), {
-        ...draft,
-        email: draft.email.trim(),
+      // CSVで取り込んだ会員などはメールアドレス等が未登録（undefined）のことがある。
+      // Firestoreは undefined を保存できないので、空にした項目は削除（deleteField）として送る。
+      const payload: Record<string, unknown> = {};
+      Object.entries({ ...draft, email: (draft.email ?? "").trim() }).forEach(([k, v]) => {
+        payload[k] = v === undefined || (typeof v === "number" && Number.isNaN(v)) ? deleteField() : v;
       });
+      await updateDoc(doc(db, "members", selectedMember.id), payload);
       closeMemberDetail();
+    } catch (e) {
+      console.error("会員情報の保存に失敗しました", e);
+      alert(`会員情報を保存できませんでした。\n${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSavingDetail(false);
     }
@@ -2441,7 +2447,7 @@ export default function AdminPage() {
               <Field label="氏名">
                 <input
                   className="input"
-                  value={draft.name}
+                  value={draft.name ?? ""}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
               </Field>
@@ -2613,7 +2619,7 @@ export default function AdminPage() {
                 <input
                   type="date"
                   className="input"
-                  value={draft.joinDate}
+                  value={draft.joinDate ?? ""}
                   onChange={(e) => setDraft({ ...draft, joinDate: e.target.value })}
                 />
               </Field>
@@ -2726,7 +2732,7 @@ export default function AdminPage() {
               <Field label="メールアドレス">
                 <input
                   className="input"
-                  value={draft.email}
+                  value={draft.email ?? ""}
                   onChange={(e) => setDraft({ ...draft, email: e.target.value })}
                 />
               </Field>
