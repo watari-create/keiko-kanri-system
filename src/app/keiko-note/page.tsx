@@ -964,8 +964,9 @@ type FormState =
   | null;
 
 export default function KeikoNotePage() {
-  const { user, role, loading } = useAuth();
-  const canEdit = role === "honbu" || role === "staff";
+  const { user, role, loading, canEdit: honbuCanEdit } = useAuth();
+  // 本部のうち「閲覧のみ」の人は編集できない
+  const canEdit = (role === "honbu" && honbuCanEdit) || role === "staff";
 
   const [teacherMode, setTeacherMode] = useState(false);
   const [entries, setEntries] = useState<KeikoNoteEntry[]>([]);

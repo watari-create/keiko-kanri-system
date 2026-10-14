@@ -229,10 +229,10 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           会員名簿<span className="text-sm text-muted font-normal">　{rows.length}名</span>
         </h2>
         <div className="flex gap-2 print:hidden">
-          <button className="text-xs bg-paper border border-line rounded px-3 py-1.5" onClick={downloadCsv}>
+          <button data-nav className="text-xs bg-paper border border-line rounded px-3 py-1.5" onClick={downloadCsv}>
             CSVで書き出す
           </button>
-          <button className="text-xs bg-paper border border-line rounded px-3 py-1.5" onClick={() => window.print()}>
+          <button data-nav className="text-xs bg-paper border border-line rounded px-3 py-1.5" onClick={() => window.print()}>
             印刷
           </button>
         </div>
@@ -240,19 +240,19 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
 
       {/* 絞り込み */}
       <div className="flex flex-wrap items-center gap-3 mb-3 text-sm print:hidden">
-        <select className="border border-line rounded px-2 py-1.5" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+        <select data-nav className="border border-line rounded px-2 py-1.5" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
           <option value="すべて">すべての会</option>
           {groupOptions.map((g) => (
             <option key={g} value={g}>{groupDisplayName(g)}</option>
           ))}
         </select>
-        <input
+        <input data-nav
           className="border border-line rounded px-2 py-1.5 w-56"
           placeholder="氏名・フリガナ・会員番号で検索"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
-        <select
+        <select data-nav
           className="border border-line rounded px-2 py-1.5 text-xs"
           value={cardFilter}
           onChange={(e) => setCardFilter(e.target.value)}
@@ -263,12 +263,12 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
           <option value="登録済み">カード自動払い：登録済み</option>
           <option value="旧契約の解約待ち">旧契約（決済リンク）の解約待ち</option>
         </select>
-        <label className="flex items-center gap-1 text-xs">
-          <input type="checkbox" checked={familyOnly} onChange={(e) => setFamilyOnly(e.target.checked)} />
+        <label data-nav className="flex items-center gap-1 text-xs">
+          <input data-nav type="checkbox" checked={familyOnly} onChange={(e) => setFamilyOnly(e.target.checked)} />
           ご家族がいる会員のみ
         </label>
-        <label className="flex items-center gap-1 text-xs text-muted">
-          <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} />
+        <label data-nav className="flex items-center gap-1 text-xs text-muted">
+          <input data-nav type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} />
           テスト会員を含める
         </label>
       </div>
@@ -321,7 +321,7 @@ export default function MemberRoster({ onSelect }: { onSelect?: (m: Member) => v
                     <td className="py-2 pr-3 text-muted whitespace-nowrap">{m.id}</td>
                     <td className="py-2 pr-3 whitespace-nowrap">
                       {onSelect ? (
-                        <button
+                        <button data-nav
                           className="text-matcha-deep underline decoration-dotted underline-offset-2 text-left"
                           onClick={() => onSelect(m)}
                         >

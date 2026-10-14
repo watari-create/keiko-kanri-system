@@ -93,7 +93,7 @@ function todayDateKey(): string {
 }
 
 export default function G1ShippingPage() {
-  const { role, staffId, loading } = useAuth();
+  const { role, staffId, loading, canEdit: honbuCanEdit } = useAuth();
   const router = useRouter();
 
   const [account, setAccount] = useState<StaffAccount | null>(null);
@@ -112,7 +112,8 @@ export default function G1ShippingPage() {
   const [savingLog, setSavingLog] = useState(false);
   const [printingLog, setPrintingLog] = useState(false);
 
-  const canEdit = role === "honbu" || (role === "staff" && !!account?.groups.includes(G1_GROUP));
+  // 本部のうち「閲覧のみ」の人は編集できない
+  const canEdit = (role === "honbu" && honbuCanEdit) || (role === "staff" && !!account?.groups.includes(G1_GROUP));
 
   useEffect(() => {
     if (!loading && role !== "honbu" && role !== "staff") router.replace("/login");
@@ -139,9 +140,10 @@ export default function G1ShippingPage() {
   }, []);
 
   // 発送記録（アーカイブ）の一覧。Firestoreルール上、読めるのは
-  // 本部か「Gマダムの茶の湯講座」担当スタッフ（＝canEdit）だけなので、それ以外は購読しない。
+  // 本部（閲覧のみを含む）か「Gマダムの茶の湯講座」担当スタッフ（＝canEdit）だけなので、それ以外は購読しない。
+  const canReadLogs = canEdit || role === "honbu";
   useEffect(() => {
-    if (!canEdit) {
+    if (!canReadLogs) {
       setLogs(null);
       return;
     }
@@ -149,7 +151,7 @@ export default function G1ShippingPage() {
     return onSnapshot(q, (snap) => {
       setLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as G1ShippingLog)));
     });
-  }, [canEdit]);
+  }, [canReadLogs]);
 
   // 印刷ボタンが押されたら、対象（表 or 発送記録）だけを表示した状態で印刷ダイアログを開く。
   // ダイアログが閉じたら（afterprint）通常表示に戻す。

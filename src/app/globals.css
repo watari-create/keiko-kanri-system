@@ -36,3 +36,18 @@
 body {
   font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
 }
+
+/* 「閲覧のみ」の本部アカウント（src/components/ReadOnlyGuard.tsx）：
+   見る・切り替えるだけの操作（data-nav・タブ）以外は押せない見た目にする。
+   入力欄は内容を読めるよう文字は濃いまま、背景だけ生成りにする */
+.ro-zone :is(button, summary):not([data-nav]):not([data-nav] *):not([role="tab"]):not([role="tablist"] *) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ro-zone :is(select, input, textarea):not([data-nav]):not([data-nav] *) {
+  background-color: rgb(var(--c-bg));
+  cursor: not-allowed;
+}
+.ro-zone .cursor-pointer:not([data-nav]):not([data-nav] *) {
+  cursor: not-allowed;
+}

@@ -60,7 +60,7 @@ export default function AttendanceGrid({
     <div>
       <div className="flex items-center gap-2 mb-2 text-xs">
         <label className="text-muted">表示：</label>
-        <select
+        <select data-nav
           className="border border-line rounded px-2 py-1 text-xs"
           value={selectedMonth}
           onChange={(e) => setSelectedMonth(e.target.value)}

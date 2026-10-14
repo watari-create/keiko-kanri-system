@@ -6,7 +6,8 @@
 //   ・カレンダーの予定の日付・場所欄を書き換え（権限がなく書けない場合も、システム上は変更後の内容で表示）
 //   ・元の日付に出欠回答していた会員の回答と、茶道教室の開催日を新しい日付へ付け替え
 //   ・マイページ・講師画面・LINE/Slack通知の「次回のお稽古」をすぐ更新
-// する。新月会は出席簿の「開催日（日付・場所）を追加・変更する」から、土曜日クラスは開催日・予約状況から変更する。
+// する。お稽古日の追加（addLessonDate）・削除（deleteLessonDate）もここから行い、カレンダーの予定を作成・削除する。
+// カレンダー側で直接変えた内容も10分ごとの同期でシステムに反映される（双方向）。新月会は出席簿の「開催日（日付・場所）を追加・変更する」から、土曜日クラスは開催日・予約状況から変更する。
 
 import { useEffect, useMemo, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -24,6 +25,12 @@ export default function LessonScheduleEditor({ group }: { group: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [addDraft, setAddDraft] = useState<{ date: string; place: string; chadoClass: string }>({
+    date: "",
+    place: "",
+    chadoClass: "木曜日",
+  });
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -87,6 +94,43 @@ export default function LessonScheduleEditor({ group }: { group: string }) {
     }
   }
 
+  async function addDate() {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(addDraft.date)) return setMsg({ text: "追加する日付を選んでください。", error: true });
+    setAdding(true);
+    setMsg(null);
+    try {
+      await httpsCallable(getFunctions(), "addLessonDate")({
+        group,
+        date: addDraft.date,
+        place: addDraft.place.trim(),
+        ...(group === "茶道教室" ? { chadoClass: addDraft.chadoClass } : {}),
+      });
+      setMsg({ text: `${formatLessonDate(addDraft.date)}を追加しました。Googleカレンダーにも予定を作りました。` });
+      setAddDraft((p) => ({ ...p, date: "", place: "" }));
+    } catch (err) {
+      console.error(err);
+      setMsg({ text: `追加できませんでした：${err instanceof Error ? err.message : String(err)}`, error: true });
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeDate(info: NextLessonInfo) {
+    if (!info.eventId) return;
+    if (!confirm(`${formatLessonDate(info.date)}のお稽古を削除しますか？\nGoogleカレンダーの予定も削除されます。`)) return;
+    setBusyId(info.eventId);
+    setMsg(null);
+    try {
+      await httpsCallable(getFunctions(), "deleteLessonDate")({ eventId: info.eventId });
+      setMsg({ text: `${formatLessonDate(info.date)}を削除しました（カレンダーからも削除）。` });
+    } catch (err) {
+      console.error(err);
+      setMsg({ text: `削除できませんでした：${err instanceof Error ? err.message : String(err)}`, error: true });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function syncNow() {
     setSyncing(true);
     setMsg(null);
@@ -103,7 +147,7 @@ export default function LessonScheduleEditor({ group }: { group: string }) {
 
   return (
     <div className="mb-6">
-      <button type="button" className="text-xs text-matcha-deep underline" onClick={() => setOpen(!open)}>
+      <button data-nav type="button" className="text-xs text-matcha-deep underline" onClick={() => setOpen(!open)}>
         {open ? "日程・場所の変更を閉じる" : "お稽古の日程変更・開催場所の変更"}
       </button>
       {open && (
@@ -180,7 +224,15 @@ export default function LessonScheduleEditor({ group }: { group: string }) {
                           disabled={!changed || busyId !== null || !info.eventId}
                           onClick={() => save(info)}
                         >
-                          {busyId === info.eventId ? "変更中…" : "変更する"}
+                          {busyId === info.eventId ? "処理中…" : "変更する"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ml-2 text-xs text-hanko underline disabled:opacity-40"
+                          disabled={busyId !== null || !info.eventId}
+                          onClick={() => removeDate(info)}
+                        >
+                          削除
                         </button>
                       </td>
                     </tr>
@@ -189,8 +241,51 @@ export default function LessonScheduleEditor({ group }: { group: string }) {
               </tbody>
             </table>
           )}
+          <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+            <div>
+              <label className="block text-xs text-muted mb-1">お稽古日を追加</label>
+              <input
+                type="date"
+                className="border border-line rounded px-2 py-1 text-sm"
+                value={addDraft.date}
+                onChange={(e) => setAddDraft((p) => ({ ...p, date: e.target.value }))}
+              />
+            </div>
+            {group === "茶道教室" && (
+              <div>
+                <label className="block text-xs text-muted mb-1">クラス</label>
+                <select
+                  className="border border-line rounded px-2 py-1 text-sm"
+                  value={addDraft.chadoClass}
+                  onChange={(e) => setAddDraft((p) => ({ ...p, chadoClass: e.target.value }))}
+                >
+                  <option value="木曜日">木曜日</option>
+                  <option value="日曜日">日曜日（午前・午後）</option>
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs text-muted mb-1">場所</label>
+              <input
+                className="border border-line rounded px-2 py-1 text-sm w-40"
+                value={addDraft.place}
+                placeholder="例：本部茶室"
+                onChange={(e) => setAddDraft((p) => ({ ...p, place: e.target.value }))}
+              />
+            </div>
+            <button
+              type="button"
+              className="border border-matcha-deep text-matcha-deep rounded px-3 py-1 text-sm disabled:opacity-40"
+              disabled={adding || !addDraft.date}
+              onClick={addDate}
+            >
+              {adding ? "追加中…" : "追加"}
+            </button>
+          </div>
           <p className="text-xs text-muted mt-3">
-            新月会は出席簿の「開催日（日付・場所）を追加・変更する」から、茶道教室の土曜日クラスは「開催日・予約状況」から変更してください。
+            Googleカレンダーで直接追加・変更・削除しても、10分以内にここ（とマイページ）に反映されます。
+            新月会は出席簿の「開催日（日付・場所）を追加・変更する」から、茶道教室の土曜日クラスは「開催日・予約状況」から変更してください（どちらもカレンダーと連動します）。
+            茶道教室の担当の先生は、カレンダーの予定タイトルの末尾に「（午前：○○先生／午後：○○先生）」「（担当：○○先生）」の形で入ります。
           </p>
         </section>
       )}

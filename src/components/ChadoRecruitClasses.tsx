@@ -233,7 +233,7 @@ export default function ChadoRecruitClasses({
             >
               {saving ? "保存中…" : editingId === "new" ? "作成する" : "保存する"}
             </button>
-            <button type="button" onClick={() => setEditingId(null)} className="text-sm border border-line rounded px-4 py-2">
+            <button data-nav type="button" onClick={() => setEditingId(null)} className="text-sm border border-line rounded px-4 py-2">
               キャンセル
             </button>
           </div>
@@ -274,7 +274,7 @@ export default function ChadoRecruitClasses({
                       <span className={`w-6 h-6 rounded-full ${c.accepting ? "bg-white" : "bg-line"}`} />
                       {c.accepting ? "受付中" : "受付停止"}
                     </button>
-                    <button type="button" onClick={() => openEdit(c)} className="text-xs border border-line rounded px-3 py-1.5">
+                    <button data-nav type="button" onClick={() => openEdit(c)} className="text-xs border border-line rounded px-3 py-1.5">
                       編集
                     </button>
                     {apps.length === 0 && (
@@ -291,7 +291,7 @@ export default function ChadoRecruitClasses({
                   <ul className="flex flex-wrap gap-1.5 mt-3">
                     {apps.map((m) => (
                       <li key={m.id}>
-                        <button
+                        <button data-nav
                           type="button"
                           onClick={() => onSelect?.(m)}
                           className="text-xs border border-line rounded px-2 py-1 hover:border-matcha-deep"

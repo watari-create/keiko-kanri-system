@@ -16,6 +16,8 @@ import {
   entryFeeFor,
 } from "./squareInvoice";
 import { refreshGroupSettings, groupDisplayNameServer } from "./groupSettings";
+import { requireHonbuEditor, requireHonbuAdmin, requireHonbuAny, honbuLevelOf, HONBU_LEVEL_LABEL, type HonbuLevel } from "./roles";
+import { pullCalendarToSystem, calendarFetch, deleteEvent, addDays as addDaysKey, eventDateKey as eventDateKeyCal, type CalEvent } from "./lessonCalendarSync";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -218,11 +220,12 @@ async function checkLoginAnomaly(entry: LoginLogInput, ip: string): Promise<void
 }
 
 type LoginLogInput = {
-  method: "memberNo" | "line";
+  method: "memberNo" | "line" | "password";
   result: "success" | "fail";
   memberNo?: string;
   role?: string;
   reason?: string;
+  email?: string; // 本部ログイン（メールアドレス＋パスワード）のときのメールアドレス
 };
 async function logLoginAttempt(
   rawRequest: { ip?: string; headers?: Record<string, unknown> } | undefined,
@@ -237,6 +240,7 @@ async function logLoginAttempt(
       type: "login",
       ...entry,
       memberNo: entry.memberNo ? String(entry.memberNo).slice(0, 50) : "",
+      ...(entry.email ? { email: String(entry.email).slice(0, 200) } : {}),
       ip,
       userAgent: ua,
       at: admin.firestore.Timestamp.now(),
@@ -1516,9 +1520,42 @@ async function fetchLessonSchedule(): Promise<LessonSchedule> {
 /** カレンダーを読み直して meta/nextLessonDates を更新する */
 async function refreshNextLessonDates(): Promise<LessonSchedule> {
   const { log, ...schedule } = await fetchLessonSchedule();
+
+  // カレンダーで日付が動いた予定は、元の日付への出欠回答・茶道教室の開催日を新しい日付へ付け替える
+  // （前回の記録 meta/lessonDateLog と、予定IDごとに日付を比べる）
+  try {
+    const prevLog = ((await db.doc("meta/lessonDateLog").get()).data() ?? {}) as Record<
+      string,
+      Record<string, { date?: string }> | string
+    >;
+    const moves = new Map<string, { keys: string[]; from: string; to: string }>();
+    for (const [key, entries] of Object.entries(log)) {
+      const prevEntries = prevLog[key];
+      if (!prevEntries || typeof prevEntries !== "object") continue;
+      for (const [logId, e] of Object.entries(entries)) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(logId)) continue; // 予定IDのないもの
+        const from = prevEntries[logId]?.date;
+        if (!from || from === e.date) continue;
+        const m = moves.get(logId) ?? { keys: [], from, to: e.date };
+        m.keys.push(key);
+        moves.set(logId, m);
+      }
+    }
+    for (const m of moves.values()) await moveLessonAnswers(m.keys, m.from, m.to);
+  } catch (err) {
+    console.error("カレンダーでの日程変更に合わせた出欠回答の付け替えに失敗しました", err);
+  }
+
   await db.doc("meta/nextLessonDates").set({ ...schedule, updatedAt: new Date().toISOString() });
   // 出席簿（日にち表示）用：過ぎたお稽古日も残るようにマージで蓄積する
   await db.doc("meta/lessonDateLog").set({ ...log, updatedAt: new Date().toISOString() }, { merge: true });
+
+  // 新月会・土曜日クラス・木曜／日曜クラスの開催日と先生を、カレンダーと双方向で揃える（lessonCalendarSync.ts）
+  try {
+    await pullCalendarToSystem();
+  } catch (err) {
+    console.error("カレンダーから開催日・先生の取り込みに失敗しました", err);
+  }
   return { ...schedule, log };
 }
 
@@ -1565,12 +1602,12 @@ function chadoClassOfEvent(title: string, date: string): "木曜日" | "日曜�
 }
 
 /**
- * 30分ごとに本部の共有Googleカレンダーを確認し、各会の「次回のお稽古」日を
+ * 10分ごとに本部の共有Googleカレンダーを確認し、各会の「次回のお稽古」日を
  * meta/nextLessonDates に保存する。管理画面・スタッフ画面・マイページはこの
  * ドキュメントをそのまま表示する（onSnapshotで購読するだけでよい）。
  */
 export const syncNextLessonDates = onSchedule(
-  { schedule: "every 30 minutes", timeZone: "Asia/Tokyo" },
+  { schedule: "every 10 minutes", timeZone: "Asia/Tokyo" },
   async () => {
     await refreshNextLessonDates();
   }
@@ -1581,9 +1618,7 @@ export const syncNextLessonDates = onSchedule(
  * カレンダー共有設定後の動作確認や、カレンダーを直接直したあとの即時反映に使う。
  */
 export const syncNextLessonDatesNow = onCall(async (request) => {
-  if (request.auth?.token?.role !== "honbu") {
-    throw new HttpsError("permission-denied", "本部のみ実行できます。");
-  }
+  requireHonbuEditor(request);
   const { dates } = await refreshNextLessonDates();
   return { dates };
 });
@@ -1597,9 +1632,7 @@ export const syncNextLessonDatesNow = onCall(async (request) => {
  * 3. meta/nextLessonDates をすぐに更新する（マイページ・講師画面・LINE/Slack通知に反映）
  */
 export const changeLessonSchedule = onCall<{ eventId: string; date: string; place?: string }>(async (request) => {
-  if (request.auth?.token?.role !== "honbu") {
-    throw new HttpsError("permission-denied", "本部のみ実行できます。");
-  }
+  requireHonbuEditor(request);
   const { eventId } = request.data ?? ({} as { eventId: string; date: string });
   const newDate = String(request.data?.date ?? "");
   const place = String(request.data?.place ?? "").trim().slice(0, 100);
@@ -1818,6 +1851,8 @@ export const sendStaffLineBroadcast = onCall<{ memberIds: string[]; message: str
     if (role !== "staff" && role !== "honbu") {
       throw new HttpsError("permission-denied", "スタッフとしてログインしてください。");
     }
+    // 本部のうち「閲覧のみ」の人は送信できない
+    if (role === "honbu") requireHonbuEditor(request);
 
     const { memberIds, message } = request.data ?? ({} as { memberIds?: string[]; message?: string });
     if (!Array.isArray(memberIds) || memberIds.length === 0 || typeof message !== "string" || !message.trim()) {
@@ -2792,9 +2827,7 @@ export const weeklySecurityReport = onSchedule(
 
 /** 上と同じ処理を今すぐ実行する（本部のみ）。動作確認用。 */
 export const runSecurityReportNow = onCall(async (request) => {
-  if (request.auth?.token?.role !== "honbu") {
-    throw new HttpsError("permission-denied", "本部のみ実行できます。");
-  }
+  requireHonbuAdmin(request);
   const { text } = await runSecurityReport();
   return { text };
 });
@@ -2914,3 +2947,329 @@ export {
 
 // 新月会の開催日をGoogleカレンダーへ書き込む。詳細は shingetsuCalendar.ts を参照
 export { syncShingetsuSessionToCalendar } from "./shingetsuCalendar";
+// 茶道教室（土曜日クラス・木曜／日曜クラス）の開催日・担当の先生をGoogleカレンダーへ書き込む。詳細は lessonCalendarSync.ts
+export { syncChadoSaturdaySessionToCalendar, syncChadoClassSessionToCalendar } from "./lessonCalendarSync";
+
+// ---- 管理画面「お稽古の日程変更・開催場所の変更」からのお稽古日の追加・削除（名月会・茶道教室 木曜／日曜・G1） ----
+
+const ADDABLE_GROUPS = ["名月会", "茶道教室", "Gマダムの茶の湯講座"];
+const CHADO_WEEKLY_DEFAULT: Record<string, { time: [string, string]; am: string; pm?: string }> = {
+  "木曜日": { time: ["15:00", "17:00"], am: "阿部宗亜先生" },
+  "日曜日": { time: ["10:00", "15:00"], am: "郷田家元教授", pm: "郷田家元教授" },
+};
+
+/**
+ * お稽古日を追加する（本部のみ）。カレンダーに予定を作り、すぐ「次回のお稽古」に反映する。
+ * 時刻は同じ会の直近の予定にそろえる（なければ終日。茶道教室はクラスの時間）。
+ * 茶道教室は担当の先生つきの開催日（chadoClassSessions）も作る（タイトルへの先生の書き込みはトリガーが行う）。
+ */
+export const addLessonDate = onCall<{ group: string; chadoClass?: string; date: string; place?: string }>(async (request) => {
+  requireHonbuEditor(request);
+  const group = String(request.data?.group ?? "");
+  const date = String(request.data?.date ?? "");
+  const place = String(request.data?.place ?? "").trim().slice(0, 100);
+  const chadoClass = String(request.data?.chadoClass ?? "");
+  if (!ADDABLE_GROUPS.includes(group)) throw new HttpsError("invalid-argument", "この会は追加できません。");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpsError("invalid-argument", "日付を正しく指定してください。");
+  if (group === "茶道教室" && !CHADO_WEEKLY_DEFAULT[chadoClass]) {
+    throw new HttpsError("invalid-argument", "クラス（木曜日・日曜日）を選んでください。土曜日クラスは「開催日・予約状況」から追加します。");
+  }
+
+  let body: Record<string, unknown>;
+  if (group === "茶道教室") {
+    const [s, e] = CHADO_WEEKLY_DEFAULT[chadoClass].time;
+    body = {
+      summary: `茶道教室 ${chadoClass}`,
+      start: { dateTime: `${date}T${s}:00+09:00`, timeZone: "Asia/Tokyo" },
+      end: { dateTime: `${date}T${e}:00+09:00`, timeZone: "Asia/Tokyo" },
+    };
+  } else {
+    // 同じ会の直近の予定を手本にする（タイトル・時刻・長さ）
+    const meta = (await db.doc("meta/nextLessonDates").get()).data() as { upcoming?: Record<string, NextLessonInfo[]> } | undefined;
+    const sample = meta?.upcoming?.[group]?.[0];
+    let tmpl: CalEvent | null = null;
+    if (sample?.eventId) {
+      const res = await calendarFetch(`/${encodeURIComponent(sample.eventId)}`);
+      if (res.ok) tmpl = (await res.json()) as CalEvent;
+    }
+    const tmplDate = tmpl ? eventDateKeyCal(tmpl) : null;
+    if (tmpl?.start?.dateTime && tmpl.end?.dateTime && tmplDate) {
+      const days = Math.round((Date.parse(`${tmpl.end.dateTime.slice(0, 10)}T00:00:00Z`) - Date.parse(`${tmplDate}T00:00:00Z`)) / 86400000);
+      body = {
+        summary: tmpl.summary ?? group,
+        start: { dateTime: date + tmpl.start.dateTime.slice(10), ...(tmpl.start.timeZone ? { timeZone: tmpl.start.timeZone } : {}) },
+        end: { dateTime: addDaysKey(date, days) + tmpl.end.dateTime.slice(10), ...(tmpl.end.timeZone ? { timeZone: tmpl.end.timeZone } : {}) },
+      };
+    } else {
+      body = { summary: tmpl?.summary ?? group, start: { date }, end: { date: addDaysKey(date, 1) } };
+    }
+  }
+  body.location = place;
+  body.description = "稽古管理システムの管理画面から追加したお稽古日です。日付・場所はこのカレンダーで直してもシステムに反映されます。";
+
+  const res = await calendarFetch("", { method: "POST", body });
+  if (!res.ok) {
+    throw new HttpsError("failed-precondition", `カレンダーに予定を作れませんでした（${res.status}）。サービスアカウントの「予定の変更」権限を確認してください。`);
+  }
+  const eventId = ((await res.json()) as { id: string }).id;
+
+  if (group === "茶道教室") {
+    const ref = db.doc(`chadoClassSessions/${date}_${chadoClass}`);
+    if (!(await ref.get()).exists) {
+      const def = CHADO_WEEKLY_DEFAULT[chadoClass];
+      await ref.set({ date, chadoClass, amTeacher: def.am, ...(def.pm ? { pmTeacher: def.pm } : {}), attendance: {}, calendarEventId: eventId });
+    }
+  }
+  await refreshNextLessonDates();
+  return { eventId };
+});
+
+/** お稽古日を削除する（本部のみ）。カレンダーの予定を消し、すぐ「次回のお稽古」に反映する */
+export const deleteLessonDate = onCall<{ eventId: string }>(async (request) => {
+  requireHonbuEditor(request);
+  const eventId = String(request.data?.eventId ?? "");
+  if (!eventId) throw new HttpsError("invalid-argument", "対象のお稽古を指定してください。");
+  try {
+    await deleteEvent(eventId);
+  } catch (err) {
+    throw new HttpsError("failed-precondition", `カレンダーの予定を削除できませんでした。${err instanceof Error ? err.message : ""}`);
+  }
+  await db.doc(`lessonChanges/${eventId}`).delete();
+  // 茶道教室の開催日（出欠の記録がなければ削除。あれば紐付けだけ外す）
+  const sessions = await db.collection("chadoClassSessions").where("calendarEventId", "==", eventId).get();
+  for (const d of sessions.docs) {
+    const att = (d.data().attendance ?? {}) as Record<string, unknown>;
+    if (Object.keys(att).length === 0) await d.ref.delete();
+    else await d.ref.update({ calendarEventId: admin.firestore.FieldValue.delete(), calendarDeletedAt: new Date().toISOString() });
+  }
+  await refreshNextLessonDates();
+  return { ok: true };
+});
+
+// ============================================================================
+// 本部アカウントの権限管理・ログイン履歴（2026-10-14〜、アドミンのみ）
+// 権限レベルの説明は roles.ts を参照。バックアップ・操作ログは adminTools.ts。
+// ============================================================================
+
+export { dailyFullBackup, createBackupNow, recordOperationLog, recordOperationLogSub } from "./adminTools";
+
+/** 本部ログイン（/login、メールアドレス＋パスワード）の成功を記録する。ログイン直後に画面から呼ぶ。 */
+export const recordHonbuLogin = onCall(async (request) => {
+  requireHonbuAny(request);
+  await logLoginAttempt(request.rawRequest, {
+    method: "password",
+    result: "success",
+    role: "honbu",
+    email: (request.auth?.token?.email as string | undefined) ?? "",
+  });
+  return { ok: true };
+});
+
+/** 本部ログインの失敗を記録する（同じIPからの連続失敗は即時アラートの対象） */
+export const recordHonbuLoginFailure = onCall<{ email?: string }>({ secrets: [slackBotToken] }, async (request) => {
+  const email = typeof request.data?.email === "string" ? request.data.email.trim().toLowerCase().slice(0, 200) : "";
+  await logLoginAttempt(request.rawRequest, { method: "password", result: "fail", role: "honbu", email, reason: "password" });
+  return { ok: true };
+});
+
+/** ログイン履歴（securityLogs）を新しい順に返す。最大90日・1000件（アドミンのみ） */
+export const getLoginHistory = onCall<{ days?: number }>(async (request) => {
+  requireHonbuAdmin(request);
+  const days = Math.min(90, Math.max(1, Number(request.data?.days ?? 30) || 30));
+  const from = admin.firestore.Timestamp.fromMillis(Date.now() - days * 24 * 60 * 60 * 1000);
+  const snap = await db.collection("securityLogs").where("at", ">=", from).orderBy("at", "desc").limit(1000).get();
+  const rows = snap.docs
+    .map((d) => d.data())
+    .filter((d) => d.type === "login")
+    .map((d) => ({
+      at: (d.at as admin.firestore.Timestamp).toDate().toISOString(),
+      method: String(d.method ?? ""),
+      result: String(d.result ?? ""),
+      memberNo: String(d.memberNo ?? ""),
+      role: String(d.role ?? ""),
+      reason: String(d.reason ?? ""),
+      email: String(d.email ?? ""),
+      ip: String(d.ip ?? ""),
+      userAgent: String(d.userAgent ?? ""),
+      name: "",
+    }));
+  // 会員番号から氏名を引く（会員・スタッフ）
+  const nos = [...new Set(rows.map((r) => r.memberNo).filter((n) => n && !n.includes("/")))].slice(0, 300);
+  const names: Record<string, string> = {};
+  if (nos.length > 0) {
+    const memberSnaps = await db.getAll(...nos.map((n) => db.collection("members").doc(n)));
+    memberSnaps.forEach((s) => s.exists && (names[s.id] = String(s.data()?.name ?? "")));
+    const rest = nos.filter((n) => !names[n]);
+    if (rest.length > 0) {
+      const staffSnaps = await db.getAll(...rest.map((n) => db.collection("staff").doc(n)));
+      staffSnaps.forEach((s) => s.exists && (names[s.id] = String(s.data()?.name ?? "")));
+    }
+  }
+  rows.forEach((r) => (r.name = names[r.memberNo] ?? ""));
+  return { rows, days };
+});
+
+type HonbuAccountRow = {
+  uid: string;
+  email: string;
+  level: HonbuLevel;
+  created: string;
+  lastSignIn: string;
+  disabled: boolean;
+};
+
+async function listHonbuAccountRows(): Promise<HonbuAccountRow[]> {
+  const rows: HonbuAccountRow[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    for (const u of page.users) {
+      const level = honbuLevelOf(u.customClaims);
+      if (!level) continue;
+      rows.push({
+        uid: u.uid,
+        email: u.email ?? "",
+        level,
+        created: u.metadata.creationTime ?? "",
+        lastSignIn: u.metadata.lastSignInTime ?? "",
+        disabled: u.disabled,
+      });
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+  const order: Record<HonbuLevel, number> = { admin: 0, editor: 1, viewer: 2 };
+  return rows.sort((a, b) => order[a.level] - order[b.level] || a.email.localeCompare(b.email));
+}
+
+/** 本部アカウントの一覧（アドミンのみ） */
+export const listHonbuAccounts = onCall(async (request) => {
+  requireHonbuAdmin(request);
+  return { accounts: await listHonbuAccountRows() };
+});
+
+/** 権限変更をSlack（セキュリティ通知の宛先）に知らせ、操作ログにも残す */
+async function notifyHonbuAccessChange(byEmail: string, byUid: string, targetEmail: string, before: string, after: string) {
+  try {
+    const token = slackBotToken.value();
+    const target = slackSecurityReportTarget.value();
+    if (token && target) {
+      await postSlackMessage(
+        token,
+        target,
+        `🔐【本部アカウントの権限変更】\n${targetEmail}：${before} → ${after}\n変更した人：${byEmail}\n（${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false })}）`
+      );
+    }
+  } catch (e) {
+    console.error("権限変更のSlack通知に失敗しました", e);
+  }
+  try {
+    await db.collection("operationLogs").add({
+      at: admin.firestore.Timestamp.now(),
+      op: "update",
+      collection: "authAccounts",
+      collectionLabel: "本部アカウントの権限",
+      path: `authAccounts/${targetEmail}`,
+      docId: targetEmail,
+      targetLabel: targetEmail,
+      actorType: "app_user",
+      actorUid: byUid,
+      actorLabel: `${byEmail}（本部・アドミン）`,
+      actorRole: "honbu",
+      changes: [{ field: "権限", before, after }],
+      changeCount: 1,
+      snapshot: null,
+    });
+  } catch (e) {
+    console.error("権限変更の操作ログ記録に失敗しました", e);
+  }
+}
+
+/**
+ * 本部アカウントの権限を設定する（アドミンのみ）。
+ *   level: "admin" | "editor" | "viewer" … その権限の本部アカウントにする（アカウントがなければ作る）
+ *   level: "none" … 本部の権限を外す（アカウント自体は残るが、管理画面には入れなくなる）
+ * アカウントを新しく作ったときは、本人がパスワードを決めるためのリンクを返す（画面に一度だけ表示）。
+ * 権限を下げた・外したときは、その人のログインを無効にして、すぐに反映させる。
+ */
+export const setHonbuAccess = onCall<{ email: string; level: HonbuLevel | "none" }>(
+  { secrets: [slackBotToken] },
+  async (request) => {
+    requireHonbuAdmin(request);
+    const email = String(request.data?.email ?? "").trim().toLowerCase();
+    const level = request.data?.level;
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new HttpsError("invalid-argument", "メールアドレスを正しく入力してください。");
+    }
+    if (level !== "admin" && level !== "editor" && level !== "viewer" && level !== "none") {
+      throw new HttpsError("invalid-argument", "権限を選んでください。");
+    }
+    const byUid = request.auth!.uid;
+    const byEmail = (request.auth?.token?.email as string | undefined) ?? byUid;
+
+    let user: admin.auth.UserRecord | null = null;
+    try {
+      user = await admin.auth().getUserByEmail(email);
+    } catch (e) {
+      if ((e as { code?: string }).code !== "auth/user-not-found") throw e;
+    }
+    if (user && user.uid === byUid) {
+      throw new HttpsError("failed-precondition", "自分自身の権限は変更できません。ほかのアドミンに依頼してください。");
+    }
+    if (!user && level === "none") {
+      throw new HttpsError("not-found", "このメールアドレスのアカウントはありません。");
+    }
+    const prevLevel = user ? honbuLevelOf(user.customClaims) : null;
+    const prevRole = user?.customClaims?.role;
+    if (user && prevRole && prevRole !== "honbu") {
+      throw new HttpsError("failed-precondition", `このアカウントは本部ではない役割（${String(prevRole)}）で使われているため変更できません。`);
+    }
+    if (prevLevel === level) return { ok: true, created: false, unchanged: true };
+
+    // アドミンが1人もいなくなる変更は止める
+    if (prevLevel === "admin" && level !== "admin") {
+      const admins = (await listHonbuAccountRows()).filter((a) => a.level === "admin" && !a.disabled && a.uid !== user!.uid);
+      if (admins.length === 0) throw new HttpsError("failed-precondition", "アドミンが1人もいなくなるため変更できません。");
+    }
+
+    let created = false;
+    if (!user) {
+      user = await admin.auth().createUser({ email, password: crypto.randomBytes(24).toString("base64url") });
+      created = true;
+    }
+    const claims = { ...(user.customClaims ?? {}) } as Record<string, unknown>;
+    if (level === "none") {
+      delete claims.role;
+      delete claims.honbuLevel;
+    } else {
+      claims.role = "honbu";
+      claims.honbuLevel = level;
+    }
+    await admin.auth().setCustomUserClaims(user.uid, claims);
+
+    // 権限を下げた・外したときは、今ログイン中の端末を締め出して、すぐに反映させる
+    const rank = (l: HonbuLevel | "none" | null) => (l === "admin" ? 3 : l === "editor" ? 2 : l === "viewer" ? 1 : 0);
+    if (!created && rank(level) < rank(prevLevel)) await admin.auth().revokeRefreshTokens(user.uid);
+
+    let passwordLink: string | null = null;
+    if (created) passwordLink = await admin.auth().generatePasswordResetLink(email);
+
+    const label = (l: HonbuLevel | "none" | null) => (l && l !== "none" ? HONBU_LEVEL_LABEL[l] : "権限なし");
+    await notifyHonbuAccessChange(byEmail, byUid, email, created ? "（新規作成）" : label(prevLevel), label(level));
+    return { ok: true, created, passwordLink };
+  }
+);
+
+/** 本部アカウントのパスワード設定リンクを発行する（パスワードを忘れた人・初回設定用。アドミンのみ） */
+export const issueHonbuPasswordLink = onCall<{ email: string }>(async (request) => {
+  requireHonbuAdmin(request);
+  const email = String(request.data?.email ?? "").trim().toLowerCase();
+  let user: admin.auth.UserRecord;
+  try {
+    user = await admin.auth().getUserByEmail(email);
+  } catch {
+    throw new HttpsError("not-found", "このメールアドレスのアカウントはありません。");
+  }
+  if (!honbuLevelOf(user.customClaims)) throw new HttpsError("failed-precondition", "本部アカウントではありません。");
+  const passwordLink = await admin.auth().generatePasswordResetLink(email);
+  return { passwordLink };
+});

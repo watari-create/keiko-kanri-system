@@ -52,3 +52,19 @@ setup_firebase.sh
 
 # iCloud Drive同期対象外にするための実体フォルダ（node_modulesはここへのシンボリックリンク）
 *.nosync
+
+# ローカル作業用（コミットしない）
+Claude outputs/
+_to_delete/
+/main
+*.bak
+*.bak2
+scripts/_tmp*
+
+# ローカル作業用（コミットしない）
+Claude outputs/
+_to_delete/
+/main
+*.bak
+*.bak2
+scripts/_tmp*

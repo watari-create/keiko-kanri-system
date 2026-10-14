@@ -1,3 +1,4 @@
+import { requireHonbuEditor } from "./roles";
 /**
  * Squareの請求書（Invoices API）の自動発行
  *
@@ -420,9 +421,7 @@ export const sendSquareInvoiceManually = onCall<{ kind: InvoiceKind; id: string 
   { secrets: [squareAccessToken, slackBotToken] },
   async (request) => {
     await refreshGroupSettings(); // 会の設定（料金など）を最新にする
-    if (request.auth?.token?.role !== "honbu") {
-      throw new HttpsError("permission-denied", "本部アカウントでログインしてください。");
-    }
+    requireHonbuEditor(request);
     const { kind, id } = request.data ?? ({} as { kind: InvoiceKind; id: string });
     if ((kind !== "license" && kind !== "entryFee") || !id) throw new HttpsError("invalid-argument", "対象が指定されていません。");
 

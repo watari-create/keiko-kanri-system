@@ -52,7 +52,7 @@ export default function MakeupTicketList({
                   <td className="py-1 pr-3 text-muted">{m.id}</td>
                   <td className="py-1 pr-3">
                     {onSelect ? (
-                      <button
+                      <button data-nav
                         className="text-matcha-deep underline decoration-dotted underline-offset-2"
                         onClick={() => onSelect(m)}
                       >

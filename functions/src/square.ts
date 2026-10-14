@@ -1,3 +1,4 @@
+import { requireHonbuAny, requireHonbuEditor } from "./roles";
 /**
  * Square決済（お月謝のカード自動払い＝サブスクリプション）
  *
@@ -908,11 +909,6 @@ export const squareWebhook = onRequest(
 //   例）12月分から切り替え → 旧契約の11月分の引き落としが済んだ時点で解約（12月以降は旧契約で引き落とされない）
 // ============================================================================
 
-function requireHonbu(request: { auth?: { token?: Record<string, unknown> } }) {
-  if (request.auth?.token?.role !== "honbu") {
-    throw new HttpsError("permission-denied", "本部アカウントでログインしてください。");
-  }
-}
 
 interface LegacySub {
   id: string;
@@ -1028,7 +1024,7 @@ export const listLegacySquareMembers = onCall(
   { secrets: [squareAccessToken], timeoutSeconds: 300 },
   async (request) => {
     await refreshGroupSettings(); // 会の設定（料金など）を最新にする
-    requireHonbu(request);
+    requireHonbuAny(request);
     const [membersSnap, subsSnap] = await Promise.all([
       db().collection("members").where("status", "==", "在籍").get(),
       db().collection("memberSubscriptions").get(),
@@ -1135,7 +1131,7 @@ export const migrateLegacySquareMember = onCall<{ memberId: string; cardId: stri
   { secrets: [squareAccessToken, slackBotTokenForSquare] },
   async (request) => {
     await refreshGroupSettings(); // 会の設定（料金など）を最新にする
-    requireHonbu(request);
+    requireHonbuEditor(request);
     const { memberId, cardId } = request.data ?? ({} as any);
     const legacyIds: string[] = Array.isArray(request.data?.legacySubscriptionIds) ? request.data.legacySubscriptionIds : [];
     if (typeof memberId !== "string" || typeof cardId !== "string") throw new HttpsError("invalid-argument", "パラメータが不正です。");

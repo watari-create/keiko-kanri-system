@@ -6,6 +6,8 @@
 // 各枠は、マイページからの出欠回答を「出席者／欠席者／未回答」に分けて表示する
 // （次回のお稽古日はrsvp、それ以外の日はその月の出欠＝members.attendance）。出欠の修正は出席簿で行う。
 // データ：chadoClassSessions コレクション（doc id = "YYYY-MM-DD_木曜日" など）
+// 開催日の追加・削除と担当講師は本部のGoogleカレンダーと双方向に連動（functions/src/lessonCalendarSync.ts。
+// 先生は予定タイトル末尾の「（担当：○○）」「（午前：○○／午後：○○）」）。
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -229,7 +231,7 @@ export default function ChadoWeeklySessions({
                             <ul className="flex flex-wrap gap-1.5 mt-1">
                               {list.map((m) => (
                                 <li key={m.id}>
-                                  <button
+                                  <button data-nav
                                     type="button"
                                     onClick={() => onSelect?.(m)}
                                     className="text-xs border border-line rounded px-2 py-1 bg-white hover:border-matcha-deep"

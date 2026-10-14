@@ -637,10 +637,10 @@ export function TemplateCopy() {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <button className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5" onClick={copyTemplate}>
+        <button data-nav className="text-xs bg-matcha-deep text-white rounded px-3 py-1.5" onClick={copyTemplate}>
           {copied ? "コピーしました" : "テンプレートをコピー"}
         </button>
-        <button className="text-xs text-muted underline" onClick={() => setShow(!show)}>
+        <button data-nav className="text-xs text-muted underline" onClick={() => setShow(!show)}>
           {show ? "項目を閉じる" : "記入する項目を見る"}
         </button>
       </div>

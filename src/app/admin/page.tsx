@@ -28,7 +28,7 @@ import {
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "@/lib/firebase";
-import { useAuth } from "@/lib/AuthContext";
+import { useAuth, HONBU_LEVEL_LABEL } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import DateAttendanceGrid from "@/components/DateAttendanceGrid";
 import ShingetsuAttendanceGrid from "@/components/ShingetsuAttendanceGrid";
@@ -43,6 +43,8 @@ import { groupDisplayName, groupHasGuardianField } from "@/lib/areas";
 import { activeGroupsIn, allGroupSettings, cardAutoPayGroups, useGroupSettings } from "@/lib/groupSettings";
 import GroupSettingsPanel from "@/components/GroupSettingsPanel";
 import CsvImportModal from "@/components/CsvImportModal";
+import ReadOnlyGuard from "@/components/ReadOnlyGuard";
+import SystemAdminPanel from "@/components/SystemAdminPanel";
 import MemberRoster from "@/components/MemberRoster";
 import AdminSubscriptionStatus from "@/components/AdminSubscriptionStatus";
 import SquareInvoiceInfo from "@/components/SquareInvoiceInfo";
@@ -68,10 +70,12 @@ import type {
   ChadoRecruitClass,
 } from "@/types";
 
-type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "会の設定";
+type Area = "宗徧流稽古" | "本部稽古" | "UCI" | "経理" | "会員名簿" | "スタッフ管理" | "会の設定" | "システム管理";
 const AREA_LIST: Area[] = ["宗徧流稽古", "本部稽古", "UCI", "経理", "会員名簿", "スタッフ管理", "会の設定"];
+// アドミンだけに表示するタブ（権限管理・バックアップ・操作ログ・ログイン履歴）
+const ADMIN_AREA_LIST: Area[] = [...AREA_LIST, "システム管理"];
 // 会員・申請の購読をしないタブ
-const NO_MEMBER_AREAS: Area[] = ["スタッフ管理", "会員名簿", "会の設定"];
+const NO_MEMBER_AREAS: Area[] = ["スタッフ管理", "会員名簿", "会の設定", "システム管理"];
 
 // 経理タブの対象グループ（本部稽古の会。削除済みの会も入金の確認のため含める）。入会金の金額は「会の設定」
 function keiriGroups(): string[] {
@@ -117,6 +121,8 @@ const AREA_DESCRIPTION: Record<Area, string> = {
   "スタッフ管理": "世話人・講師のアカウントを登録・編集します。",
   "会の設定":
     "会ごとの料金（お月謝・都度払い・入会金）と入会の申し込み（受付中／停止・案内文・入力項目）を変更します。新しい会の発足（運用ルールの記入用テンプレートから）・会の削除、各会の登録シート（担当者・運営ルール）の確認もここで行います。",
+  "システム管理":
+    "アドミンのみ。本部アカウントの権限（アドミン／編集できる／閲覧のみ）の管理、全データのバックアップ、操作ログ・ログイン履歴の確認を行います。",
 };
 
 const LICENSE_STAGES: LicenseStatus[] = [
@@ -181,7 +187,8 @@ interface StaffDraft {
 }
 
 export default function AdminPage() {
-  const { role, loading } = useAuth();
+  const { role, loading, honbuLevel, canEdit, isAdmin } = useAuth();
+  const areaList = isAdmin ? ADMIN_AREA_LIST : AREA_LIST;
   const router = useRouter();
 
   const [area, setArea] = useState<Area>("本部稽古");
@@ -1153,7 +1160,7 @@ export default function AdminPage() {
 
         <div className="flex items-center gap-2">
           <span className="text-xs bg-matcha-deep text-white rounded-full px-3 py-1.5">
-            本部として見る
+            本部（{honbuLevel ? HONBU_LEVEL_LABEL[honbuLevel] : ""}）
           </span>
 
           {/* 新着通知 */}
@@ -1245,7 +1252,7 @@ export default function AdminPage() {
 
       {/* エリアタブ */}
       <div className="flex gap-2 mb-4">
-        {AREA_LIST.map((a) => (
+        {areaList.map((a) => (
           <button
             key={a}
             className={`text-sm rounded-md px-4 py-2 border ${
@@ -1282,6 +1289,14 @@ export default function AdminPage() {
         </div>
       )}
 
+      {!canEdit && (
+        <div className="border border-line bg-[#F3EFE2] rounded-md px-4 py-3 mb-6 text-sm text-ink">
+          <span className="font-bold">閲覧のみの権限です。</span>
+          すべての画面を見ることができますが、追加・変更・削除・送信はできません。変更が必要なときはアドミンに依頼してください。
+        </div>
+      )}
+
+      <ReadOnlyGuard enabled={!canEdit}>
       {/* 名月会・茶道教室（木曜日・日曜日）・G1：お稽古の日程変更・開催場所の変更（新月会は出席簿の開催日編集から） */}
       {area === "本部稽古" && ["名月会", "茶道教室", "Gマダムの茶の湯講座"].includes(group) && (
         <LessonScheduleEditor group={group} />
@@ -1510,12 +1525,12 @@ export default function AdminPage() {
         </>
       )}
 
-      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "会の設定" && (
+      {area !== "スタッフ管理" && area !== "経理" && area !== "会員名簿" && area !== "会の設定" && area !== "システム管理" && (
         <section className="bg-paper border border-line rounded-md p-5 mb-6 overflow-x-auto">
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-bold">会員名簿</h2>
             <div className="flex gap-2">
-              <button
+              <button data-nav
                 className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1.5 disabled:opacity-50"
                 onClick={findFamilyCandidates}
                 disabled={loadingFamilyCandidates}
@@ -1600,7 +1615,7 @@ export default function AdminPage() {
                   {showAffiliation && <td className="pr-3">{groupDisplayName(m.group)}</td>}
                   {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
                   <td className="pr-3">
-                    <button
+                    <button data-nav
                       className="font-semibold text-matcha-deep underline decoration-dotted underline-offset-2"
                       onClick={() => openMemberDetail(m)}
                     >
@@ -1875,6 +1890,8 @@ export default function AdminPage() {
               <p className="text-xs text-muted mb-3">
                 開催日ごとに午前・午後の枠を管理します（各枠デフォルト定員3名）。予約は会員本人がマイページから行います。
                 開催後に出欠を記録し、「欠席」にすると振替チケットが1枚自動で付与されます。
+                開催日と担当講師は本部のGoogleカレンダーと連動しています（予定タイトル末尾の「（午前：○○／午後：○○）」）。
+                カレンダーで追加・変更・削除しても10分以内にここへ反映されます（予約のある開催日はカレンダーで消してもここには残ります）。
               </p>
               <MakeupTicketList members={members} onSelect={openMemberDetail} />
               <div className="flex items-center gap-2 mb-4">
@@ -2003,7 +2020,7 @@ export default function AdminPage() {
                 許状申請（
                 {requests.filter((r) => r.status !== "完了" && r.status !== "取消").length}件 対応中）
               </h2>
-              <button
+              <button data-nav
                 className="text-xs border border-line text-ink rounded px-3 py-1.5"
                 onClick={printLicenseRequests}
               >
@@ -2199,6 +2216,8 @@ export default function AdminPage() {
 
       {area === "会の設定" && <GroupSettingsPanel />}
 
+      {area === "システム管理" && isAdmin && <SystemAdminPanel />}
+
       {area === "スタッフ管理" && (
         <section className="bg-paper border border-line rounded-md p-5">
           <div className="flex items-center justify-between mb-3">
@@ -2230,7 +2249,7 @@ export default function AdminPage() {
                   <td className="pr-3">{s.groups.join("、") || "—"}</td>
                   <td className="pr-3">{s.email}</td>
                   <td className="flex items-center gap-2 py-2">
-                    <button
+                    <button data-nav
                       className="text-xs border border-line text-matcha-deep rounded px-2 py-1"
                       onClick={() => openEditStaff(s)}
                     >
@@ -2274,7 +2293,7 @@ export default function AdminPage() {
                   会員番号：{selectedMember.id}　所属：{groupDisplayName(selectedMember.group)}
                 </p>
               </div>
-              <button className="text-muted text-sm" onClick={closeMemberDetail}>
+              <button data-nav className="text-muted text-sm" onClick={closeMemberDetail}>
                 閉じる ✕
               </button>
             </div>
@@ -2780,7 +2799,7 @@ export default function AdminPage() {
             )}
 
             <div className="flex justify-end gap-3 mt-6">
-              <button
+              <button data-nav
                 className="text-sm border border-line text-muted rounded px-4 py-2"
                 onClick={closeMemberDetail}
               >
@@ -2812,7 +2831,7 @@ export default function AdminPage() {
               <h3 className="text-lg font-bold text-matcha-deep">
                 {staffDraft.mode === "new" ? "新規スタッフを追加" : "スタッフ情報を編集"}
               </h3>
-              <button className="text-muted text-sm" onClick={closeStaffModal}>
+              <button data-nav className="text-muted text-sm" onClick={closeStaffModal}>
                 閉じる ✕
               </button>
             </div>
@@ -2863,7 +2882,7 @@ export default function AdminPage() {
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button
+              <button data-nav
                 className="text-sm border border-line text-muted rounded px-4 py-2"
                 onClick={closeStaffModal}
               >
@@ -2898,7 +2917,7 @@ export default function AdminPage() {
                   内容を確認のうえ「このグループを連携する」を押してください（誤って表示された場合は連携しなくてかまいません）。
                 </p>
               </div>
-              <button
+              <button data-nav
                 className="text-muted text-sm"
                 onClick={() => setShowFamilyCandidates(false)}
               >
@@ -2950,6 +2969,7 @@ export default function AdminPage() {
         groupCategory={area === "UCI" ? "UCI" : "宗徧流稽古"}
         existingMembers={members}
       />
+      </ReadOnlyGuard>
 
       <style jsx global>{`
         .input {

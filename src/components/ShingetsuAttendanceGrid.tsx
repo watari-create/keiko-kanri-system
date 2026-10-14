@@ -6,6 +6,7 @@
 // マイページの回答と同じフィールド（members.shingetsuChoice）を読み書きするため、双方に即時反映される。
 // canEditSessions のときは、開催日（日付・場所）の追加・変更・削除もできる（管理画面・講師画面）。
 // 開催日の変更は Cloud Functions（syncShingetsuSessionToCalendar）が本部のGoogleカレンダーへ自動で書き込む。
+// カレンダー側の変更も10分ごとに取り込む（双方向。functions/src/lessonCalendarSync.ts）。
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, deleteDoc, deleteField, doc, onSnapshot, setDoc, updateDoc, writeBatch } from "firebase/firestore";
@@ -81,7 +82,7 @@ export default function ShingetsuAttendanceGrid({
     <div>
       <div className="flex items-center gap-2 mb-2 text-xs">
         <label className="text-muted">表示：</label>
-        <select className="border border-line rounded px-2 py-1 text-xs" value={selected} onChange={(e) => setSelected(e.target.value)}>
+        <select data-nav className="border border-line rounded px-2 py-1 text-xs" value={selected} onChange={(e) => setSelected(e.target.value)}>
           <option value="upcoming">今月以降</option>
           <option value="all">全期間</option>
           {months.map((m) => (
@@ -237,7 +238,7 @@ function SessionEditor({ sessions, members }: { sessions: ShingetsuSession[]; me
 
   return (
     <div className="mt-5 border-t border-line pt-4">
-      <button type="button" className="text-xs text-matcha-deep underline" onClick={() => setOpen(!open)}>
+      <button data-nav type="button" className="text-xs text-matcha-deep underline" onClick={() => setOpen(!open)}>
         {open ? "開催日の編集を閉じる" : "開催日（日付・場所）を追加・変更する"}
       </button>
       {open && (
@@ -296,7 +297,7 @@ function SessionEditor({ sessions, members }: { sessions: ShingetsuSession[]; me
           </table>
           <p className="text-xs text-muted">
             日付・場所は入力欄から離れると保存されます。日付を変えると、その日に出席予定だった会員の回答も新しい日付に付け替わります。
-            変更は本部のGoogleカレンダーにも自動で反映されます（カレンダー側で直接変更しても、システムには反映されません）。
+            変更は本部のGoogleカレンダーにも自動で反映されます。カレンダー側で直接追加・変更・削除した場合も、10分以内にここへ反映されます。
           </p>
         </div>
       )}

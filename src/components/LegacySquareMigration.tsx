@@ -118,7 +118,7 @@ export default function LegacySquareMigration() {
 
   return (
     <div className="bg-bg border border-line rounded-md p-4 mb-4 print:hidden">
-      <button className="text-sm font-bold text-matcha-deep" onClick={() => setOpen(!open)}>
+      <button data-nav className="text-sm font-bold text-matcha-deep" onClick={() => setOpen(!open)}>
         {open ? "▼" : "▶"} 決済リンクからカード自動払いへの切り替え（本部操作）
       </button>
       {open && (
@@ -129,7 +129,7 @@ export default function LegacySquareMigration() {
             <li>旧契約は、切り替え前月分の引き落としが済んだ時点で自動解約します（毎朝6時に確認）。</li>
             <li>新しい金額と旧契約の金額が違う会員は赤字で表示します。家族割引などは先に会員詳細の「お月謝（個別設定）」を入力してください。</li>
           </ul>
-          <button
+          <button data-nav
             className="border border-matcha-deep text-matcha-deep rounded px-3 py-1.5 text-xs disabled:opacity-50"
             onClick={load}
             disabled={loading || running}

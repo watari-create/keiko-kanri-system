@@ -70,7 +70,7 @@ export default function LineMessageLogList({ logs, initialCount }: { logs: LineM
       {shown.map((g) => (
         <li key={g.key}>
           <details className="group">
-            <summary className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-sm cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-black/5">
+            <summary data-nav className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-sm cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-black/5">
               <span className="text-xs text-muted shrink-0">
                 {new Date(g.sentAt).toLocaleString("ja-JP", {
                   month: "numeric",
@@ -97,7 +97,7 @@ export default function LineMessageLogList({ logs, initialCount }: { logs: LineM
       ))}
     </ul>
     {hiddenCount > 0 && (
-      <button
+      <button data-nav
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full mt-1 py-1.5 text-xs text-muted hover:bg-black/5 rounded flex items-center justify-center gap-1"

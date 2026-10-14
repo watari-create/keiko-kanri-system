@@ -165,8 +165,8 @@ export default function GroupSettingsPanel() {
             ＋ 新しい会を発足する
           </button>
           {deletedCount > 0 && (
-            <label className="text-xs text-muted flex items-center gap-1 ml-auto">
-              <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />
+            <label data-nav className="text-xs text-muted flex items-center gap-1 ml-auto">
+              <input data-nav type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />
               削除済みの会も表示（{deletedCount}）
             </label>
           )}
@@ -182,7 +182,7 @@ export default function GroupSettingsPanel() {
           <div className="border border-matcha-deep rounded p-4 mb-4 bg-matcha-pale space-y-5">
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-bold">新しい会を発足する</h3>
-              <button className="text-xs text-muted underline" onClick={() => setShowLaunch(false)}>
+              <button data-nav className="text-xs text-muted underline" onClick={() => setShowLaunch(false)}>
                 閉じる
               </button>
             </div>
@@ -315,7 +315,7 @@ export default function GroupSettingsPanel() {
                   </td>
                   <td className="text-right whitespace-nowrap">
                     {sheet && (
-                      <button
+                      <button data-nav
                         className={`text-xs border rounded px-3 py-1 mr-2 ${
                           sheetOpen ? "bg-matcha-deep text-white border-matcha-deep" : "bg-white border-line"
                         }`}
@@ -325,7 +325,7 @@ export default function GroupSettingsPanel() {
                       </button>
                     )}
                     {s.active ? (
-                      <button className="text-xs border border-line rounded px-3 py-1 bg-white" onClick={() => setEditing(s)}>
+                      <button data-nav className="text-xs border border-line rounded px-3 py-1 bg-white" onClick={() => setEditing(s)}>
                         編集
                       </button>
                     ) : (
@@ -520,7 +520,7 @@ function GroupEditor({
     <section className="bg-paper border-2 border-matcha-deep rounded-md p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="font-bold">{initial.displayName} の設定</h2>
-        <button className="ml-auto text-sm text-muted underline" onClick={onClose}>
+        <button data-nav className="ml-auto text-sm text-muted underline" onClick={onClose}>
           閉じる（保存しない）
         </button>
       </div>
@@ -612,7 +612,7 @@ function GroupEditor({
           {enrollUrl && (
             <span className="block text-[11px] text-muted mt-1 break-all">
               {enrollUrl}{" "}
-              <button
+              <button data-nav
                 type="button"
                 className="underline"
                 onClick={() => navigator.clipboard?.writeText(enrollUrl)}
@@ -754,7 +754,7 @@ function GroupEditor({
         >
           {saving ? "保存中…" : "この内容で保存する"}
         </button>
-        <button className="text-sm border border-line rounded px-4 py-2 bg-white" onClick={onClose}>
+        <button data-nav className="text-sm border border-line rounded px-4 py-2 bg-white" onClick={onClose}>
           やめる
         </button>
         <button

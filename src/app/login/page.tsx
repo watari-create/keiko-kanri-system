@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { auth } from "@/lib/firebase";
 
 export default function LoginPage() {
@@ -23,8 +24,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // ログイン履歴に残す（管理画面「システム管理 → ログイン履歴」）。失敗してもログインは続ける
+      httpsCallable(getFunctions(), "recordHonbuLogin")().catch(() => {});
       router.push("/admin");
     } catch {
+      httpsCallable(getFunctions(), "recordHonbuLoginFailure")({ email }).catch(() => {});
       setError("メールアドレスまたはパスワードが正しくありません。");
     } finally {
       setLoading(false);
