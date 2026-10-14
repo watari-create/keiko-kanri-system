@@ -781,6 +781,7 @@ export default function AdminPage() {
         const m = memberById.get(r.memberId);
         const age = m?.age != null ? m.age : calculateAge(m?.birthDate);
         return `<tr>
+          <td>${r.memberId}</td>
           <td>${r.memberName}</td>
           <td>${m?.gender ?? ""}</td>
           <td>${age ?? ""}</td>
@@ -813,6 +814,7 @@ export default function AdminPage() {
   <table>
     <thead>
       <tr>
+        <th>会員番号</th>
         <th>氏名</th>
         <th>性別</th>
         <th>年齢</th>
