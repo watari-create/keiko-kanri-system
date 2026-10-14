@@ -149,6 +149,11 @@ const STAFF_ROLE_LABEL: Record<StaffRole, string> = {
 // 他の項目とまとめて「この内容で保存する」を押したときに古い値で上書きしないよう除外している。
 type MemberDraft = Omit<Member, "id" | "group" | "groupCategory" | "linkedMemberIds">;
 
+// 会員番号の比較（"2" < "10" となるよう数値として並べる。英字まじりの番号も自然順）
+function compareMemberNo(a: Pick<Member, "id">, b: Pick<Member, "id">): number {
+  return a.id.localeCompare(b.id, "ja", { numeric: true });
+}
+
 function toDraft(m: Member): MemberDraft {
   const { id, group, groupCategory, ...rest } = m;
   return rest;
@@ -554,7 +559,7 @@ export default function AdminPage() {
     );
   }, [showChadoClass]);
   const colCount =
-    5 +
+    6 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
     (showBilling ? 2 : 0) +
@@ -564,6 +569,8 @@ export default function AdminPage() {
   // 雪月花のみ、組（雪組・月組・花組）ごとに名簿を区切って表示する
   // 茶道教室は、クラス（期）ごとに期の古い順で区切って表示する（募集クラスは開始日順で後ろに、曜日クラス未設定は最後）
   const memberSections = useMemo(() => {
+    // 会員番号順（数値として比較。桁数が違っても 2 → 10 → 100 の順になる）
+    const sorted = [...members].sort(compareMemberNo);
     if (group === "茶道教室") {
       const keyed: { key: string; order: string; label: string; members: Member[] }[] = [
         ...CHADO_CLASSES.map((c) => ({
@@ -580,7 +587,7 @@ export default function AdminPage() {
         })),
       ];
       const unassigned: Member[] = [];
-      members.forEach((m) => {
+      sorted.forEach((m) => {
         const k = m.chadoCohortId ? `cohort:${m.chadoCohortId}` : m.chadoClass ? `class:${m.chadoClass}` : "";
         const sec = keyed.find((x) => x.key === k);
         if (sec) sec.members.push(m);
@@ -593,11 +600,11 @@ export default function AdminPage() {
       if (unassigned.length > 0) sections.push({ label: "クラス未設定", members: unassigned });
       return sections;
     }
-    if (group !== "雪月花") return [{ label: null as string | null, members }];
+    if (group !== "雪月花") return [{ label: null as string | null, members: sorted }];
     const bySub = new Map<string, Member[]>();
     SOHEN_SUBGROUPS.forEach((s) => bySub.set(s, []));
     const others: Member[] = [];
-    members.forEach((m) => {
+    sorted.forEach((m) => {
       const list = m.subGroup ? bySub.get(m.subGroup) : undefined;
       if (list) list.push(m);
       else others.push(m);
@@ -1612,7 +1619,7 @@ export default function AdminPage() {
               )}
             </div>
           </div>
-          <p className="text-xs text-muted mb-3">氏名をクリックすると詳細の閲覧・編集ができます</p>
+          <p className="text-xs text-muted mb-3">会員番号順に表示しています。氏名または「編集」をクリックすると、会員情報の閲覧・編集ができます</p>
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-muted border-b border-line">
@@ -1645,7 +1652,8 @@ export default function AdminPage() {
                     <th className="pr-3">支払い方法</th>
                   </>
                 )}
-                <th>ステータス</th>
+                <th className="pr-3">ステータス</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -1761,6 +1769,14 @@ export default function AdminPage() {
                         削除
                       </button>
                     )}
+                  </td>
+                  <td className="pl-3">
+                    <button data-nav
+                      className="text-xs bg-paper border border-line text-matcha-deep rounded px-3 py-1"
+                      onClick={() => openMemberDetail(m)}
+                    >
+                      編集
+                    </button>
                   </td>
                 </tr>
                   ))}

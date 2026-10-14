@@ -10,7 +10,7 @@ import { CHADO_CLASS_LABEL } from "@/lib/chadoClasses";
 import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { groupDisplayName } from "@/lib/areas";
+import { groupDisplayName, isUciGroup } from "@/lib/areas";
 import { allGroupSettings, cardAutoPayGroups, useGroupSettings } from "@/lib/groupSettings";
 import { memberFee, entryFeeFor, formatYen } from "@/lib/memberFees";
 import type { Member } from "@/types";
@@ -170,9 +170,12 @@ export default function MemberRoster({ onSelect, groups }: { onSelect?: (m: Memb
         (a, b) =>
           groupRank(a.group) - groupRank(b.group) ||
           a.group.localeCompare(b.group, "ja") ||
-          classRank(a) - classRank(b) ||
-          (a.joinDate ?? "").localeCompare(b.joinDate ?? "") ||
-          a.id.localeCompare(b.id)
+          // UCIの会は会員番号順（クラス・入会日では並べない）
+          (isUciGroup(a.group)
+            ? a.id.localeCompare(b.id, "ja", { numeric: true })
+            : classRank(a) - classRank(b) ||
+              (a.joinDate ?? "").localeCompare(b.joinDate ?? "") ||
+              a.id.localeCompare(b.id, "ja", { numeric: true }))
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, byId, groupFilter, keyword, familyOnly, includeTest, cardFilter, subs, groupSettings]);
