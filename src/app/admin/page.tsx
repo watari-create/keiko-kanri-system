@@ -27,7 +27,7 @@ import {
   runTransaction,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { useAuth, HONBU_LEVEL_LABEL } from "@/lib/AuthContext";
 import AttendanceGrid from "@/components/AttendanceGrid";
 import DateAttendanceGrid from "@/components/DateAttendanceGrid";
@@ -1148,6 +1148,12 @@ export default function AdminPage() {
     await deleteDoc(doc(db, "members", m.id));
   }
 
+  async function handleLogout() {
+    if (!confirm("ログアウトしますか？")) return;
+    await auth.signOut();
+    router.replace("/login");
+  }
+
   if (loading || role !== "honbu") return <div className="p-8 text-muted">確認中…</div>;
 
   return (
@@ -1247,6 +1253,12 @@ export default function AdminPage() {
               お稽古ノート
             </Link>
           )}
+          <button
+            className="text-xs bg-paper border border-line rounded-full px-3 py-1.5 text-ink hover:bg-matcha-pale/40"
+            onClick={handleLogout}
+          >
+            ログアウト
+          </button>
         </div>
       </div>
 
