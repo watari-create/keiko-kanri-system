@@ -559,7 +559,7 @@ export default function AdminPage() {
     );
   }, [showChadoClass]);
   const colCount =
-    6 +
+    5 +
     (showGuardian ? 1 : 0) +
     (showAffiliation ? 1 : 0) +
     (showBilling ? 2 : 0) +
@@ -1625,7 +1625,7 @@ export default function AdminPage() {
               )}
             </div>
           </div>
-          <p className="text-xs text-muted mb-3">会員番号順に表示しています。氏名または「編集」をクリックすると、会員情報の閲覧・編集ができます</p>
+          <p className="text-xs text-muted mb-3">会員番号順に表示しています。氏名をクリックすると、会員情報の閲覧・編集ができます</p>
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-muted border-b border-line">
@@ -1642,7 +1642,6 @@ export default function AdminPage() {
                   </th>
                 )}
                 <th className="py-2 pr-3">会員番号</th>
-                <th className="pr-3">編集</th>
                 {showAffiliation && <th className="pr-3">所属</th>}
                 {showSohenDetails && <th className="pr-3">支部</th>}
                 <th className="pr-3">氏名</th>
@@ -1691,14 +1690,6 @@ export default function AdminPage() {
                     </td>
                   )}
                   <td className="py-2 pr-3 text-muted">{m.id}</td>
-                  <td className="pr-3">
-                    <button data-nav
-                      className="text-xs bg-matcha-deep text-white rounded px-3 py-1"
-                      onClick={() => openMemberDetail(m)}
-                    >
-                      編集
-                    </button>
-                  </td>
                   {showAffiliation && <td className="pr-3">{groupDisplayName(m.group)}</td>}
                   {showSohenDetails && <td className="pr-3">{m.branch ?? "—"}</td>}
                   <td className="pr-3">
