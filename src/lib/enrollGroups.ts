@@ -107,7 +107,7 @@ export const ENROLL_GROUPS: Record<string, EnrollGroupConfig> = {
     key: "gmadam",
     title: "Gマダムの茶の湯講座",
     label: "G1マダムの茶の湯講座",
-    amounts: { subscription: "¥20,000", onetime: "¥20,000" },
+    amounts: { subscription: "¥17,000", onetime: "¥17,000" },
     links: {
       subscription: "https://square.link/u/PdnF0sNj",
       onetime: "https://square.link/u/PdnF0sNj",
