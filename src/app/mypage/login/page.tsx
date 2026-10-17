@@ -27,6 +27,9 @@ export default function MemberLoginPage() {
     const params = new URLSearchParams(window.location.search);
     const next = params.get("next");
     if (next && /^\/mypage(\/[a-z-]+)?$/.test(next)) setNextPath(next);
+    // 入会完了画面から来たときは、発行された会員番号を入れておく（数字のみ）
+    const no = params.get("no");
+    if (no && /^\d{1,12}$/.test(no)) setMemberNo(no);
     if (params.get("lineNotLinked") === "1") {
       setLineNotice(true);
       window.history.replaceState({}, "", window.location.pathname);

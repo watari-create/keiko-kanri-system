@@ -71,6 +71,8 @@ export default function EnrollPage() {
   const [entryFeeWithFirstPayment, setEntryFeeWithFirstPayment] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [enrolledEmail, setEnrolledEmail] = useState("");
 
   // ご家族との連携（任意）：すでに登録済みのご家族の会員番号・登録メールアドレスが
   // 一致すれば、新規会員と相互に連携する（マイページで家族を切り替えられるようになる）。
@@ -258,6 +260,7 @@ export default function EnrollPage() {
       });
 
       setIssuedNo(issued);
+      setEnrolledEmail((values.email ?? "").trim());
 
       if (showFamilyLink && familyMemberNo.trim()) {
         try {
@@ -514,9 +517,50 @@ export default function EnrollPage() {
               <div className="text-sm text-muted">お申し込みを受け付けました</div>
             </div>
 
-            <div className="border border-line rounded p-4 mt-4 bg-matcha-pale">
-              <div className="text-xs text-muted mb-1">発行された会員番号</div>
-              <div className="text-lg font-bold text-matcha-deep">{issuedNo}</div>
+            <div className="border-2 border-matcha rounded p-4 mt-4 bg-matcha-pale text-center">
+              <div className="text-xs text-muted mb-1">あなたの会員番号</div>
+              <div className="text-3xl font-bold text-matcha-deep tracking-widest select-all">{issuedNo}</div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(issuedNo ?? "");
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    /* コピーできない環境では長押し選択で */
+                  }
+                }}
+                className="mt-2 text-xs border border-matcha-deep text-matcha-deep rounded-full px-3 py-1 bg-white"
+              >
+                {copied ? "コピーしました" : "会員番号をコピー"}
+              </button>
+              <p className="text-[11px] text-muted mt-2 leading-relaxed">
+                マイページへのログインに必要です。スクリーンショットやメモで控えておいてください。
+              </p>
+            </div>
+
+            <div className="border border-line rounded p-4 mt-3 bg-white">
+              <div className="text-sm font-bold text-ink mb-2 pl-2 border-l-4 border-matcha">マイページのご案内</div>
+              <p className="text-xs text-muted leading-relaxed mb-3">
+                ログインは<span className="font-bold text-ink">会員番号</span>と
+                <span className="font-bold text-ink">ご登録のメールアドレス</span>
+                {enrolledEmail && <>（{enrolledEmail}）</>}
+                の2つだけです。パスワードはありません。
+              </p>
+              {!payInfo?.cardBilling && (
+                <a
+                  href={`/mypage/login?no=${encodeURIComponent(issuedNo ?? "")}`}
+                  className="block text-center bg-btn text-btn-ink rounded py-3 text-sm font-semibold"
+                >
+                  マイページにログインする
+                </a>
+              )}
+              <p className="text-[11px] text-muted mt-2 leading-relaxed">
+                マイページのアドレス：<span className="select-all">{typeof window !== "undefined" ? window.location.origin : ""}/mypage/login</span>
+                <br />
+                ブックマーク（ホーム画面に追加）しておくと便利です。
+              </p>
             </div>
 
             {payInfo && (
@@ -536,7 +580,7 @@ export default function EnrollPage() {
                       上の会員番号とご登録のメールアドレスでマイページにログインし、カード情報をご登録ください。
                     </p>
                     <a
-                      href="/mypage/login?next=/mypage/payment"
+                      href={`/mypage/login?next=/mypage/payment&no=${encodeURIComponent(issuedNo ?? "")}`}
                       className="block text-center bg-btn text-btn-ink rounded py-3 text-sm font-semibold"
                     >
                       ログインしてカードを登録する
@@ -582,9 +626,6 @@ export default function EnrollPage() {
               </p>
             )}
 
-            <p className="text-[11px] text-muted text-center mt-4">
-              会員番号は今後のログインに必要です。控えておいてください。
-            </p>
           </div>
         )}
       </div>
